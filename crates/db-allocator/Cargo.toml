@@ -2,5 +2,9 @@
 name = "db-allocator"
 version = "0.1.0"
 authors = ["Liu Jiang <gerry@linux.alibaba.com>"]
-license = "Apache-2.0 OR BSD-3-Clause"
+license = "Apache-2.0"
 edition = "2018"
+homepage = "https://github.com/openanolis/dragonball-sandbox"
+repository = "https://github.com/openanolis/dragonball-sandbox"
+keywords = ["dragonball"]
+readme = "README.md"
