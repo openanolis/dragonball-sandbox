@@ -9,7 +9,7 @@ mod interval_tree;
 pub use interval_tree::{IntervalTree, NodeState, Range};
 
 /// Policy for resource allocation.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum AllocPolicy {
     /// Default allocation policy.
     Default,
@@ -48,35 +48,85 @@ impl Constraint {
     }
 
     /// Set the min constraint.
-    pub fn min<T>(mut self, min: T) -> Self
+    pub fn min<T>(&mut self, min: T)
     where
         u64: From<T>,
     {
-        self.min = u64::from(min);
-        self
+        let min = u64::from(min);
+        if min > self.size {
+            panic!("Constraint: Constraint min is invalid because it is larger than size");
+        }
+        self.min = min;
     }
 
     /// Set the max constraint.
-    pub fn max<T>(mut self, max: T) -> Self
+    pub fn max<T>(&mut self, max: T)
     where
         u64: From<T>,
     {
-        self.max = u64::from(max);
-        self
+        let max = u64::from(max);
+        if max < self.size {
+            panic!("Constraint: Constraint max is invalid because it is smaller than size");
+        }
+        self.max = max;
     }
 
     /// Set the alignment constraint.
-    pub fn align<T>(mut self, align: T) -> Self
+    pub fn align<T>(&mut self, align: T)
     where
         u64: From<T>,
     {
         self.align = u64::from(align);
-        self
     }
 
     /// Set the allocation policy.
-    pub fn policy(mut self, policy: AllocPolicy) -> Self {
+    pub fn policy(&mut self, policy: AllocPolicy) {
         self.policy = policy;
-        self
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_min() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.min(1_u64);
+        assert_eq!(constraint.min, 1_u64);
+    }
+
+    #[test]
+    fn test_set_max() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.max(100_u64);
+        assert_eq!(constraint.max, 100_u64);
+    }
+
+    #[test]
+    fn test_set_align() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.align(8_u64);
+        assert_eq!(constraint.align, 8_u64);
+    }
+
+    #[test]
+    fn test_set_policy() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.policy(AllocPolicy::FirstMatch);
+        assert_eq!(constraint.policy, AllocPolicy::FirstMatch);
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_set_invalid_min() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.min(3_u64);
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_set_invalid_max() {
+        let mut constraint = Constraint::new(2_u64);
+        constraint.max(1_u64);
     }
 }
