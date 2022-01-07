@@ -32,8 +32,7 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
-            target
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-build-${{ env.cache-name }}
       - name: Generate test result and coverage report
         run: |
           cargo install cargo2junit grcov;
