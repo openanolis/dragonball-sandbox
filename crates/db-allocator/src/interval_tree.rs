@@ -361,7 +361,7 @@ impl<T> Node<T> {
 
     /// Update an existing entry and return the old value.
     fn update(&mut self, key: &Range, data: NodeState<T>) -> Option<T> {
-        match self.0.key.cmp(&key) {
+        match self.0.key.cmp(key) {
             Ordering::Equal => {
                 match (self.0.data.as_ref(), data.as_ref()) {
                     (NodeState::<&T>::Free, NodeState::<&T>::Free)
@@ -392,7 +392,7 @@ impl<T> Node<T> {
     /// Note: it doesn't return whether the key exists in the subtree, so caller need to ensure the
     /// logic.
     fn delete(mut self, key: &Range) -> (Option<T>, Option<Self>) {
-        match self.0.key.cmp(&key) {
+        match self.0.key.cmp(key) {
             Ordering::Equal => {
                 let data = self.0.data.take();
                 return (data.into(), self.delete_root());
