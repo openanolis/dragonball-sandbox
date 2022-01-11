@@ -242,19 +242,19 @@ impl<T> From<NodeState<T>> for Option<T> {
 
 /// Internal tree node to implement interval tree.
 #[derive(Debug, PartialEq)]
-pub(crate) struct InnerNode<T> {
+struct InnerNode<T> {
     /// Interval handled by this node.
-    pub(crate) key: Range,
+    key: Range,
     /// Optional contained data, None if the node is free.
-    pub(crate) data: NodeState<T>,
+    data: NodeState<T>,
     /// Optional left child of current node.
-    pub(crate) left: Option<Node<T>>,
+    left: Option<Node<T>>,
     /// Optional right child of current node.
-    pub(crate) right: Option<Node<T>>,
+    right: Option<Node<T>>,
     /// Cached height of the node.
-    pub(crate) height: u32,
+    height: u32,
     /// Cached maximum valued covered by this node.
-    pub(crate) max_key: u64,
+    max_key: u64,
 }
 
 impl<T> InnerNode<T> {
@@ -272,10 +272,10 @@ impl<T> InnerNode<T> {
 
 /// Newtype for interval tree nodes.
 #[derive(Debug, PartialEq)]
-pub(crate) struct Node<T>(pub(crate) Box<InnerNode<T>>);
+struct Node<T>(Box<InnerNode<T>>);
 
 impl<T> Node<T> {
-    pub(crate) fn new(key: Range, data: Option<T>) -> Self {
+    fn new(key: Range, data: Option<T>) -> Self {
         let value = if let Some(t) = data {
             NodeState::Valued(t)
         } else {
@@ -576,7 +576,7 @@ fn max_key<T>(node: &Option<Node<T>>) -> u64 {
 /// An interval tree implementation specialized for VMM resource management.
 #[derive(Debug, Default, PartialEq)]
 pub struct IntervalTree<T> {
-    pub(crate) root: Option<Node<T>>,
+    root: Option<Node<T>>,
 }
 
 impl<T> IntervalTree<T> {
