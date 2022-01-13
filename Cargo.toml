@@ -2,4 +2,5 @@
 
 members = [
     "crates/db-allocator",
+    "crates/db-cpuid",
 ]
