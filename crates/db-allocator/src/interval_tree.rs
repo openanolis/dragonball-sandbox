@@ -923,76 +923,76 @@ mod tests {
 
     #[test]
     fn test_range_intersect() {
-        let a = Range::new(1u8, 4u8);
-        let b = Range::new(4u16, 6u16);
-        let c = Range::new(2u32, 3u32);
-        let d = Range::new(4u64, 4u64);
-        let e = Range::new(5u32, 6u32);
+        let range_a = Range::new(1u8, 4u8);
+        let range_b = Range::new(4u16, 6u16);
+        let range_c = Range::new(2u32, 3u32);
+        let range_d = Range::new(4u64, 4u64);
+        let range_e = Range::new(5u32, 6u32);
 
-        assert!(a.intersect(&b));
-        assert!(b.intersect(&a));
-        assert!(a.intersect(&c));
-        assert!(c.intersect(&a));
-        assert!(a.intersect(&d));
-        assert!(d.intersect(&a));
-        assert!(!a.intersect(&e));
-        assert!(!e.intersect(&a));
+        assert!(range_a.intersect(&range_b));
+        assert!(range_b.intersect(&range_a));
+        assert!(range_a.intersect(&range_c));
+        assert!(range_c.intersect(&range_a));
+        assert!(range_a.intersect(&range_d));
+        assert!(range_d.intersect(&range_a));
+        assert!(!range_a.intersect(&range_e));
+        assert!(!range_e.intersect(&range_a));
 
-        assert_eq!(a.len(), 4);
-        assert_eq!(d.len(), 1);
+        assert_eq!(range_a.len(), 4);
+        assert_eq!(range_d.len(), 1);
     }
 
     #[test]
     fn test_range_contain() {
-        let a = Range::new(2u8, 6u8);
-        assert!(a.contain(&Range::new(2u8, 3u8)));
-        assert!(a.contain(&Range::new(3u8, 4u8)));
-        assert!(a.contain(&Range::new(5u8, 5u8)));
-        assert!(a.contain(&Range::new(5u8, 6u8)));
-        assert!(a.contain(&Range::new(6u8, 6u8)));
-        assert!(!a.contain(&Range::new(1u8, 1u8)));
-        assert!(!a.contain(&Range::new(1u8, 2u8)));
-        assert!(!a.contain(&Range::new(1u8, 3u8)));
-        assert!(!a.contain(&Range::new(1u8, 7u8)));
-        assert!(!a.contain(&Range::new(7u8, 8u8)));
-        assert!(!a.contain(&Range::new(6u8, 7u8)));
-        assert!(!a.contain(&Range::new(7u8, 8u8)));
+        let range_a = Range::new(2u8, 6u8);
+        assert!(range_a.contain(&Range::new(2u8, 3u8)));
+        assert!(range_a.contain(&Range::new(3u8, 4u8)));
+        assert!(range_a.contain(&Range::new(5u8, 5u8)));
+        assert!(range_a.contain(&Range::new(5u8, 6u8)));
+        assert!(range_a.contain(&Range::new(6u8, 6u8)));
+        assert!(!range_a.contain(&Range::new(1u8, 1u8)));
+        assert!(!range_a.contain(&Range::new(1u8, 2u8)));
+        assert!(!range_a.contain(&Range::new(1u8, 3u8)));
+        assert!(!range_a.contain(&Range::new(1u8, 7u8)));
+        assert!(!range_a.contain(&Range::new(7u8, 8u8)));
+        assert!(!range_a.contain(&Range::new(6u8, 7u8)));
+        assert!(!range_a.contain(&Range::new(7u8, 8u8)));
     }
 
     #[test]
     fn test_range_align_to() {
-        let a = Range::new(2u32, 6);
-        assert_eq!(a.align_to(0), Some(Range::new(2u64, 6u64)));
-        assert_eq!(a.align_to(1), Some(Range::new(2u8, 6u8)));
-        assert_eq!(a.align_to(2), Some(Range::new(2u16, 6u16)));
-        assert_eq!(a.align_to(4), Some(Range::new(4u32, 6u32)));
-        assert_eq!(a.align_to(8), None);
-        assert_eq!(a.align_to(3), None);
+        let range_a = Range::new(2u32, 6);
+        assert_eq!(range_a.align_to(0), Some(Range::new(2u64, 6u64)));
+        assert_eq!(range_a.align_to(1), Some(Range::new(2u8, 6u8)));
+        assert_eq!(range_a.align_to(2), Some(Range::new(2u16, 6u16)));
+        assert_eq!(range_a.align_to(4), Some(Range::new(4u32, 6u32)));
+        assert_eq!(range_a.align_to(8), None);
+        assert_eq!(range_a.align_to(3), None);
 
-        let a = Range::new(0xFFFF_FFFF_FFFF_FFFDu64, 0xFFFF_FFFF_FFFF_FFFFu64);
+        let range_b = Range::new(0xFFFF_FFFF_FFFF_FFFDu64, 0xFFFF_FFFF_FFFF_FFFFu64);
         assert_eq!(
-            a.align_to(2),
+            range_b.align_to(2),
             Some(Range::new(0xFFFF_FFFF_FFFF_FFFEu64, 0xFFFF_FFFF_FFFF_FFFF))
         );
-        assert_eq!(a.align_to(4), None);
+        assert_eq!(range_b.align_to(4), None);
     }
 
     #[test]
     fn test_range_ord() {
-        let a = Range::new(1u32, 4u32);
-        let b = Range::new(1u32, 4u32);
-        let c = Range::new(1u32, 3u32);
-        let d = Range::new(1u32, 5u32);
-        let e = Range::new(2u32, 2u32);
+        let range_a = Range::new(1u32, 4u32);
+        let range_b = Range::new(1u32, 4u32);
+        let range_c = Range::new(1u32, 3u32);
+        let range_d = Range::new(1u32, 5u32);
+        let range_e = Range::new(2u32, 2u32);
 
-        assert_eq!(a, b);
-        assert_eq!(b, a);
-        assert!(a > c);
-        assert!(c < a);
-        assert!(a < d);
-        assert!(d > a);
-        assert!(a < e);
-        assert!(e > a);
+        assert_eq!(range_a, range_b);
+        assert_eq!(range_b, range_a);
+        assert!(range_a > range_c);
+        assert!(range_c < range_a);
+        assert!(range_a < range_d);
+        assert!(range_d > range_a);
+        assert!(range_a < range_e);
+        assert!(range_e > range_a);
     }
 
     #[should_panic]
