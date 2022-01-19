@@ -6,6 +6,7 @@ This repository contains the following crates:
 | --- | --- | --- |
 | [db-allocator](crates/db-allocator) | allocator for vmm resource | TBD |
 | [db-arch](crates/db-arch) | collections of CPU architecture related modules | TBD |
+| [db-device](crates/db-device) | virtual machine's device model | TBD |
 
 (Dragonball is a virtual machine monitor developed by Alibaba and db is the abbreviation for Dragonball.)
 
