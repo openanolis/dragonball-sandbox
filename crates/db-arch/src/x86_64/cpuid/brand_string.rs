@@ -28,7 +28,7 @@ const BRAND_STRING_AMD: &[u8] = b"AMD EPYC";
 ///
 /// This is achieved by bypassing the `O(n)` indexing, heap allocation, and the unicode checks
 /// done by `std::string::String`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BrandString {
     /// Flattened buffer, holding an array of 32-bit register values.
     ///
@@ -64,10 +64,7 @@ impl BrandString {
 
     /// Creates an empty brand string (0-initialized)
     fn new() -> Self {
-        Self {
-            reg_buf: [0; Self::REG_BUF_SIZE],
-            len: 0,
-        }
+        Default::default()
     }
 
     /// Generates the emulated brand string.
