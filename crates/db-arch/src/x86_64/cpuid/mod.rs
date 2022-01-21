@@ -10,21 +10,19 @@
 
 use kvm_bindings::CpuId;
 
-mod common;
-use common::*;
+use transformer::*;
+pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
 
 /// Contains helper methods for bit operations.
 pub mod bit_helper;
 
+mod common;
+use common::*;
+
 mod cpu_leaf;
 
-mod transformer;
-use transformer::*;
-pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
-
 mod brand_string;
-
-pub mod x86_regs;
+mod transformer;
 
 /// Setup CPUID entries for the given vCPU.
 ///
@@ -60,5 +58,18 @@ pub fn process_cpuid(kvm_cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Erro
             transformer.process_cpuid(kvm_cpuid, vm_spec)
         }
         _ => Err(Error::CpuNotSupported),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_cpuid() {
+        let mut cpuid = CpuId::new(0).unwrap();
+        let vm_spec = VmSpec::new(0, 2, 1, 1, 1, VpmuFeatureLevel::Disabled).unwrap();
+
+        process_cpuid(&mut cpuid, &vm_spec).unwrap();
     }
 }

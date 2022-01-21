@@ -3,3 +3,6 @@
 
 //! CPU architecture specific constants and utilities for the `x86_64` architecture.
 pub mod cpuid;
+
+// Definitions for x86 Model Specific Registers(MSR).
+pub mod msr;
