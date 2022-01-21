@@ -49,17 +49,16 @@ pub mod x86_regs;
 /// // Get expected `kvm_cpuid` entries.
 /// let entries = kvm_cpuid.as_mut_slice();
 /// ```
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn process_cpuid(kvm_cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
-    let maybe_cpuid_transformer: Option<&dyn CpuidTransformer> = match vm_spec.cpu_vendor_id() {
-        VENDOR_ID_INTEL => Some(&intel::IntelCpuidTransformer {}),
-        VENDOR_ID_AMD => Some(&amd::AmdCpuidTransformer {}),
-        _ => return Err(Error::CpuNotSupported),
-    };
-
-    if let Some(cpuid_transformer) = maybe_cpuid_transformer {
-        cpuid_transformer.process_cpuid(kvm_cpuid, vm_spec)?;
+    match vm_spec.cpu_vendor_id() {
+        VENDOR_ID_INTEL => {
+            let transformer = intel::IntelCpuidTransformer {};
+            transformer.process_cpuid(kvm_cpuid, vm_spec)
+        }
+        VENDOR_ID_AMD => {
+            let transformer = amd::AmdCpuidTransformer {};
+            transformer.process_cpuid(kvm_cpuid, vm_spec)
+        }
+        _ => Err(Error::CpuNotSupported),
     }
-
-    Ok(())
 }
