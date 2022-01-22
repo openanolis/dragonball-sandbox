@@ -83,22 +83,23 @@ impl BrandString {
     ///
     /// This is safe because we know BRAND_STRING_INTEL and BRAND_STRING_AMD to hold valid data
     /// (allowed length and holding only valid ASCII chars).
-    pub fn from_vendor_id(vendor_id: &[u8; 12]) -> BrandString {
-        match vendor_id {
+    pub fn from_vendor_id(vendor_id: &[u8; 12]) -> Result<BrandString, Error> {
+        let brand = match vendor_id {
             VENDOR_ID_INTEL => {
                 let mut this = BrandString::from_bytes_unchecked(BRAND_STRING_INTEL);
                 if let Ok(host_bstr) = BrandString::from_host_cpuid() {
                     if let Some(freq) = host_bstr.find_freq() {
-                        this.push_bytes(b" @ ").unwrap();
-                        this.push_bytes(freq)
-                            .expect("Unexpected frequency information in host CPUID");
+                        this.push_bytes(b" @ ")?;
+                        this.push_bytes(freq)?;
                     }
                 }
                 this
             }
             VENDOR_ID_AMD => BrandString::from_bytes_unchecked(BRAND_STRING_AMD),
             _ => BrandString::from_bytes_unchecked(b""),
-        }
+        };
+
+        Ok(brand)
     }
 
     /// Creates a brand string, initialized from the CPUID leaves 0x80000002 through 0x80000004
@@ -406,11 +407,11 @@ mod tests {
         }
 
         // Test BrandString::from_vendor_id()
-        let bstr = BrandString::from_vendor_id(VENDOR_ID_INTEL);
+        let bstr = BrandString::from_vendor_id(VENDOR_ID_INTEL).unwrap();
         assert!(bstr.as_bytes().starts_with(BRAND_STRING_INTEL));
-        let bstr = BrandString::from_vendor_id(VENDOR_ID_AMD);
+        let bstr = BrandString::from_vendor_id(VENDOR_ID_AMD).unwrap();
         assert!(bstr.as_bytes().starts_with(BRAND_STRING_AMD));
-        let bstr = BrandString::from_vendor_id(b"............");
+        let bstr = BrandString::from_vendor_id(b"............").unwrap();
         assert!(bstr.as_bytes() == vec![b'\0'; 48].as_slice());
     }
 
