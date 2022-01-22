@@ -6,22 +6,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-//! Utility for configuring the CPUID (CPU identification) for the guest microVM.
+//! Utilities for configuring the CPUID (CPU identification) for the guest microVM.
 
 use kvm_bindings::CpuId;
 
-use transformer::*;
-pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
-
-/// Contains helper methods for bit operations.
 pub mod bit_helper;
+pub mod cpu_leaf;
 
-mod common;
-use common::*;
-
-mod cpu_leaf;
+pub use transformer::{CpuidTransformer, Error, VmSpec, VpmuFeatureLevel};
 
 mod brand_string;
+mod common;
 mod transformer;
 
 /// Setup CPUID entries for the given vCPU.
@@ -32,7 +27,7 @@ mod transformer;
 /// * `vm_spec` - The specifications of the VM.
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use db_arch::cpuid::{process_cpuid, VmSpec, VpmuFeatureLevel};
 /// use kvm_bindings::{CpuId, KVM_MAX_CPUID_ENTRIES};
 /// use kvm_ioctls::Kvm;
@@ -49,12 +44,12 @@ mod transformer;
 /// ```
 pub fn process_cpuid(kvm_cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
     match vm_spec.cpu_vendor_id() {
-        VENDOR_ID_INTEL => {
-            let transformer = intel::IntelCpuidTransformer {};
+        self::common::VENDOR_ID_INTEL => {
+            let transformer = self::transformer::intel::IntelCpuidTransformer {};
             transformer.process_cpuid(kvm_cpuid, vm_spec)
         }
-        VENDOR_ID_AMD => {
-            let transformer = amd::AmdCpuidTransformer {};
+        self::common::VENDOR_ID_AMD => {
+            let transformer = self::transformer::amd::AmdCpuidTransformer {};
             transformer.process_cpuid(kvm_cpuid, vm_spec)
         }
         _ => Err(Error::CpuNotSupported),

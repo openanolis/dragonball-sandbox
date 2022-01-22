@@ -1,6 +1,8 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+//! Helper to manipulate CPUID register content.
+
 #![macro_use]
 
 /// Structure representing a range of bits in a number.
