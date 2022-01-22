@@ -2,10 +2,26 @@
 
 ## Design
 
-db-arch crate is designed as the collection for cpu architecture, i.e. x86_64 (AMD64) and ARM64, related submodules. We define CPU architecture specified behaviour for VMM to use in this crate.
+The `db-arch` crate is a collection of CPU architecture specific constants and utilities to hide CPU architecture details
+away from the Dragonball Sandbox or other VMMs.
+
+## Supported Architectures
+
+- AMD64 (x86_64)
+- ARM64 (aarch64)
 
 ## Submodule List
+
 This repository contains the following submodules:
-| Name | Description |
-| --- | --- |
-| [cpuid](/crates/db-arch/src/x86/cpuid) | cpuid processor for vmm |
+| Name | Arch| Description |
+| --- | --- | --- |
+| [cpuid](src/x86_64/cpuid/) | x86_64 |Facilities to process CPUID information. |
+| [msr](src/x86_64/msr.rs) | x86_64 | Constant definitions for Model Specific Registers |
+
+## Acknowledgement
+
+Part of the code is derived from the [Firecracker](https://github.com/firecracker-microvm/firecracker) project.
+
+## License
+
+This project is licensed under [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0.
