@@ -2,28 +2,27 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+
+use super::super::bit_helper::BitHelper;
+use super::super::cpu_leaf;
 use super::*;
 
-use kvm_bindings::{CpuId, KVM_CPUID_FLAG_SIGNIFCANT_INDEX};
-
-use crate::cpuid::bit_helper::BitHelper;
-use crate::cpuid::cpu_leaf::*;
-use crate::cpuid::transformer::common::use_host_cpuid_function;
-
-// Largest extended function. It has to be larger then 0x8000001d (Extended Cache Topology).
+// Largest extended function. It has to be larger than 0x8000001d (Extended Cache Topology).
 const LARGEST_EXTENDED_FN: u32 = 0x8000_001f;
-// This value allows at most 256 logical threads within a package. But we currently only support less than or equal to 254vcpus.
+// This value allows at most 256 logical threads within a package. But we currently only support
+// less than or equal to 254vcpus.
 // See also the documentation for leaf_0x80000008::ecx::THREAD_ID_SIZE_BITRANGE
 const THREAD_ID_MAX_SIZE: u32 = 8;
 // This value means there is 1 node per processor.
 // See also the documentation for leaf_0x8000001e::ecx::NODES_PER_PROCESSOR_BITRANGE.
 const NODES_PER_PROCESSOR: u32 = 0;
 
-pub fn update_structured_extended_entry(
-    entry: &mut kvm_cpuid_entry2,
+fn update_structured_extended_entry(
+    entry: &mut CpuIdEntry,
     _vm_spec: &VmSpec,
 ) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x7::index0::*;
+    use cpu_leaf::leaf_0x7::index0::*;
 
     // according to the EPYC PPR, only the leaf 0x7 with index 0 contains the
     // structured extended feature identifiers
@@ -35,11 +34,11 @@ pub fn update_structured_extended_entry(
     Ok(())
 }
 
-pub fn update_largest_extended_fn_entry(
-    entry: &mut kvm_cpuid_entry2,
+fn update_largest_extended_fn_entry(
+    entry: &mut CpuIdEntry,
     _vm_spec: &VmSpec,
 ) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x80000000::*;
+    use cpu_leaf::leaf_0x80000000::*;
 
     // KVM sets the largest extended function to 0x80000000. Change it to 0x8000001f
     // Since we also use the leaf 0x8000001d (Extended Cache Topology).
@@ -50,8 +49,8 @@ pub fn update_largest_extended_fn_entry(
     Ok(())
 }
 
-pub fn update_extended_feature_info_entry(
-    entry: &mut kvm_cpuid_entry2,
+fn update_extended_feature_info_entry(
+    entry: &mut CpuIdEntry,
     _vm_spec: &VmSpec,
 ) -> Result<(), Error> {
     use crate::cpuid::cpu_leaf::leaf_0x80000001::*;
@@ -62,11 +61,8 @@ pub fn update_extended_feature_info_entry(
     Ok(())
 }
 
-pub fn update_amd_features_entry(
-    entry: &mut kvm_cpuid_entry2,
-    vm_spec: &VmSpec,
-) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x80000008::*;
+fn update_amd_features_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
+    use cpu_leaf::leaf_0x80000008::*;
 
     // We don't support more then 254 threads right now.
     entry
@@ -77,8 +73,8 @@ pub fn update_amd_features_entry(
     Ok(())
 }
 
-pub fn update_extended_cache_topology_entry(
-    entry: &mut kvm_cpuid_entry2,
+fn update_extended_cache_topology_entry(
+    entry: &mut CpuIdEntry,
     vm_spec: &VmSpec,
 ) -> Result<(), Error> {
     entry.flags |= KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
@@ -86,10 +82,7 @@ pub fn update_extended_cache_topology_entry(
     common::update_cache_parameters_entry(entry, vm_spec)
 }
 
-pub fn update_extended_apic_id_entry(
-    entry: &mut kvm_cpuid_entry2,
-    vm_spec: &VmSpec,
-) -> Result<(), Error> {
+fn update_extended_apic_id_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
     use crate::cpuid::cpu_leaf::leaf_0x8000001e::*;
 
     let mut core_id = u32::from(vm_spec.cpu_id);
@@ -126,27 +119,38 @@ pub fn update_extended_apic_id_entry(
     Ok(())
 }
 
+#[derive(Default)]
 pub struct AmdCpuidTransformer {}
+
+impl AmdCpuidTransformer {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
 
 impl CpuidTransformer for AmdCpuidTransformer {
     fn process_cpuid(&self, cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
-        use_host_cpuid_function(cpuid, leaf_0x0::LEAF_NUM, false)?;
-        use_host_cpuid_function(cpuid, leaf_0x8000001d::LEAF_NUM, false)?;
-        use_host_cpuid_function(cpuid, leaf_0x8000001d::LEAF_NUM, true)?;
+        use cpu_leaf::*;
+
+        common::use_host_cpuid_function(cpuid, leaf_0x0::LEAF_NUM, false)?;
+        common::use_host_cpuid_function(cpuid, leaf_0x8000001d::LEAF_NUM, false)?;
+        common::use_host_cpuid_function(cpuid, leaf_0x8000001d::LEAF_NUM, true)?;
         self.process_entries(cpuid, vm_spec)
     }
 
-    fn entry_transformer_fn(&self, entry: &mut kvm_cpuid_entry2) -> Option<EntryTransformerFn> {
+    fn entry_transformer_fn(&self, entry: &mut CpuIdEntry) -> Option<EntryTransformerFn> {
+        use cpu_leaf::*;
+
         match entry.function {
             leaf_0x1::LEAF_NUM => Some(common::update_feature_info_entry),
-            leaf_0x7::LEAF_NUM => Some(amd::update_structured_extended_entry),
+            leaf_0x7::LEAF_NUM => Some(update_structured_extended_entry),
             leaf_0xb::LEAF_NUM => Some(common::update_extended_topology_entry),
             leaf_0x1f::LEAF_NUM => Some(common::update_extended_topology_v2_entry),
-            leaf_0x80000000::LEAF_NUM => Some(amd::update_largest_extended_fn_entry),
-            leaf_0x80000001::LEAF_NUM => Some(amd::update_extended_feature_info_entry),
-            leaf_0x80000008::LEAF_NUM => Some(amd::update_amd_features_entry),
-            leaf_0x8000001d::LEAF_NUM => Some(amd::update_extended_cache_topology_entry),
-            leaf_0x8000001e::LEAF_NUM => Some(amd::update_extended_apic_id_entry),
+            leaf_0x80000000::LEAF_NUM => Some(update_largest_extended_fn_entry),
+            leaf_0x80000001::LEAF_NUM => Some(update_extended_feature_info_entry),
+            leaf_0x80000008::LEAF_NUM => Some(update_amd_features_entry),
+            leaf_0x8000001d::LEAF_NUM => Some(update_extended_cache_topology_entry),
+            leaf_0x8000001e::LEAF_NUM => Some(update_extended_apic_id_entry),
             0x8000_0002..=0x8000_0004 => Some(common::update_brand_string_entry),
             _ => None,
         }
@@ -158,14 +162,37 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_transformer_construct() {
+        use cpu_leaf::leaf_0x7::index0::*;
+
+        let transformer = AmdCpuidTransformer::new();
+
+        let vm_spec =
+            VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
+        let mut cpuid = CpuId::from_entries(&[CpuIdEntry {
+            function: cpu_leaf::leaf_0x7::LEAF_NUM,
+            index: 0,
+            flags: 0,
+            eax: 0,
+            ebx: 0,
+            ecx: 0,
+            edx: *(0_u32).write_bit(edx::ARCH_CAPABILITIES_BITINDEX, true),
+            padding: [0, 0, 0],
+        }])
+        .unwrap();
+
+        transformer.process_cpuid(&mut cpuid, &vm_spec).unwrap();
+    }
+
+    #[test]
     fn test_update_structured_extended_entry() {
-        use crate::cpuid::cpu_leaf::leaf_0x7::index0::*;
+        use cpu_leaf::leaf_0x7::index0::*;
 
         // Check that if index == 0 the entry is processed
         let vm_spec =
             VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
-        let mut entry = &mut kvm_cpuid_entry2 {
-            function: leaf_0x7::LEAF_NUM,
+        let mut entry = &mut CpuIdEntry {
+            function: cpu_leaf::leaf_0x7::LEAF_NUM,
             index: 0,
             flags: 0,
             eax: 0,
@@ -190,7 +217,7 @@ mod test {
 
         let vm_spec =
             VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
-        let entry = &mut kvm_cpuid_entry2 {
+        let entry = &mut CpuIdEntry {
             function: LEAF_NUM,
             index: 0,
             flags: 0,
@@ -217,7 +244,7 @@ mod test {
 
         let vm_spec =
             VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
-        let entry = &mut kvm_cpuid_entry2 {
+        let entry = &mut CpuIdEntry {
             function: LEAF_NUM,
             index: 0,
             flags: 0,
@@ -250,7 +277,7 @@ mod test {
             VpmuFeatureLevel::Disabled,
         )
         .expect("Error creating vm_spec");
-        let entry = &mut kvm_cpuid_entry2 {
+        let entry = &mut CpuIdEntry {
             function: LEAF_NUM,
             index: 0,
             flags: 0,
@@ -293,7 +320,7 @@ mod test {
             VpmuFeatureLevel::Disabled,
         )
         .expect("Error creating vm_spec");
-        let entry = &mut kvm_cpuid_entry2 {
+        let entry = &mut CpuIdEntry {
             function: LEAF_NUM,
             index: 0,
             flags: 0,
@@ -337,8 +364,8 @@ mod test {
     fn test_update_extended_cache_topology_entry() {
         let vm_spec =
             VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
-        let entry = &mut kvm_cpuid_entry2 {
-            function: leaf_0x8000001d::LEAF_NUM,
+        let entry = &mut CpuIdEntry {
+            function: cpu_leaf::leaf_0x8000001d::LEAF_NUM,
             index: 0,
             flags: 0,
             eax: 0,

@@ -2,17 +2,15 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::brand_string::{BrandString, Reg as BsReg};
+use super::common::get_vendor_id;
+use super::{CpuId, CpuIdEntry};
+
 pub mod amd;
 pub mod common;
 pub mod intel;
 
-pub use kvm_bindings::{kvm_cpuid_entry2, CpuId};
-
-use crate::cpuid::brand_string::BrandString;
-use crate::cpuid::brand_string::Reg as BsReg;
-use crate::cpuid::common::get_vendor_id;
-
-/// enum indicating vpmu feature level
+/// Enum indicating vpmu feature level
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum VpmuFeatureLevel {
     /// Disabled means vpmu feature is off (by default)
@@ -93,18 +91,16 @@ pub enum Error {
     VcpuCountOverflow,
 }
 
-pub type EntryTransformerFn =
-    fn(entry: &mut kvm_cpuid_entry2, vm_spec: &VmSpec) -> Result<(), Error>;
+pub type EntryTransformerFn = fn(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error>;
 
 /// Generic trait that provides methods for transforming the cpuid
 pub trait CpuidTransformer {
-    /// Trait main function. It processes the cpuid and makes the desired transformations.
-    /// The default logic can be overwritten if needed. For example see `AmdCpuidTransformer`.
+    /// Process the cpuid array and make the desired transformations.
     fn process_cpuid(&self, cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
         self.process_entries(cpuid, vm_spec)
     }
 
-    /// Iterates through all the cpuid entries and calls the associated transformer for each one.
+    /// Iterate through all the cpuid entries and calls the associated transformer for each one.
     fn process_entries(&self, cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
         for entry in cpuid.as_mut_slice().iter_mut() {
             let maybe_transformer_fn = self.entry_transformer_fn(entry);
@@ -117,8 +113,8 @@ pub trait CpuidTransformer {
         Ok(())
     }
 
-    /// Gets the associated transformer for a cpuid entry
-    fn entry_transformer_fn(&self, _entry: &mut kvm_cpuid_entry2) -> Option<EntryTransformerFn> {
+    /// Get the associated transformer for a cpuid entry
+    fn entry_transformer_fn(&self, _entry: &mut CpuIdEntry) -> Option<EntryTransformerFn> {
         None
     }
 }

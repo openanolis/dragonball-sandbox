@@ -2,21 +2,18 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::super::bit_helper::BitHelper;
+use super::super::cpu_leaf;
 use super::*;
-use crate::cpuid::bit_helper::BitHelper;
-use crate::cpuid::cpu_leaf::*;
-use crate::cpuid::transformer::common::use_host_cpuid_function;
 
-fn update_deterministic_cache_entry(
-    entry: &mut kvm_cpuid_entry2,
-    vm_spec: &VmSpec,
-) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x4::*;
+fn update_deterministic_cache_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
+    use cpu_leaf::leaf_0x4::*;
 
     common::update_cache_parameters_entry(entry, vm_spec)?;
 
-    //If leaf_0xB or leaf_0x1F is enabled, leaf0x4 won't be used to generate topology information.
-    //In most cases, we could have leaf_0xB in our host cpu. But we keep the leaf_0x4 eax[26,31] to prevent rare cases.
+    // If leaf_0xB or leaf_0x1F is enabled, leaf0x4 won't be used to generate topology information.
+    // In most cases, we could have leaf_0xB in our host cpu. But we keep the leaf_0x4 eax[26,31]
+    // to prevent rare cases.
     if vm_spec.cpu_count <= 64 {
         entry.eax.write_bits_in_range(
             &eax::MAX_CORES_PER_PACKAGE_BITRANGE,
@@ -27,10 +24,7 @@ fn update_deterministic_cache_entry(
     Ok(())
 }
 
-fn update_power_management_entry(
-    entry: &mut kvm_cpuid_entry2,
-    _vm_spec: &VmSpec,
-) -> Result<(), Error> {
+fn update_power_management_entry(entry: &mut CpuIdEntry, _vm_spec: &VmSpec) -> Result<(), Error> {
     // disable pstate feature
     entry.eax = 0;
     entry.ebx = 0;
@@ -40,8 +34,9 @@ fn update_power_management_entry(
     Ok(())
 }
 
-fn update_perf_mon_entry(entry: &mut kvm_cpuid_entry2, vm_spec: &VmSpec) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0xa::*;
+fn update_perf_mon_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
+    use cpu_leaf::leaf_0xa::*;
+
     // Architectural Performance Monitor Leaf
     match vm_spec.vpmu_feature {
         VpmuFeatureLevel::Disabled => {
@@ -83,15 +78,24 @@ fn update_perf_mon_entry(entry: &mut kvm_cpuid_entry2, vm_spec: &VmSpec) -> Resu
     Ok(())
 }
 
+#[derive(Default)]
 pub struct IntelCpuidTransformer {}
+
+impl IntelCpuidTransformer {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
 
 impl CpuidTransformer for IntelCpuidTransformer {
     fn process_cpuid(&self, cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
-        use_host_cpuid_function(cpuid, leaf_0x0::LEAF_NUM, false)?;
+        common::use_host_cpuid_function(cpuid, cpu_leaf::leaf_0x0::LEAF_NUM, false)?;
         self.process_entries(cpuid, vm_spec)
     }
 
-    fn entry_transformer_fn(&self, entry: &mut kvm_cpuid_entry2) -> Option<EntryTransformerFn> {
+    fn entry_transformer_fn(&self, entry: &mut CpuIdEntry) -> Option<EntryTransformerFn> {
+        use cpu_leaf::*;
+
         match entry.function {
             leaf_0x1::LEAF_NUM => Some(common::update_feature_info_entry),
             leaf_0x4::LEAF_NUM => Some(intel::update_deterministic_cache_entry),
