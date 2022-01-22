@@ -150,10 +150,14 @@ impl BrandString {
     /// `leaf` must be between 0x80000002 and 0x80000004.
     #[inline]
     pub fn get_reg_for_leaf(&self, leaf: u32, reg: Reg) -> u32 {
-        // It's ok not to validate parameters here, leaf and reg should
-        // both be compile-time constants. If there's something wrong with them,
-        // that's a programming error and we should panic anyway.
-        self.reg_buf[(leaf - 0x8000_0002) as usize * 4 + reg as usize]
+        if (0x80000002u32..=0x80000004).contains(&leaf) {
+            // It's ok not to validate parameters here, leaf and reg should
+            // both be compile-time constants. If there's something wrong with them,
+            // that's a programming error and we should panic anyway.
+            self.reg_buf[(leaf - 0x8000_0002) as usize * 4 + reg as usize]
+        } else {
+            0
+        }
     }
 
     /// Sets the value for the given leaf/register pair.
@@ -349,6 +353,8 @@ mod tests {
                 );
             }
         }
+
+        assert_eq!(bstr.get_reg_for_leaf(0x8000_0005, Reg::Eax), 0);
 
         // Test find_freq() failure path
         //
