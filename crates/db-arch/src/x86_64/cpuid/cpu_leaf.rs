@@ -2,7 +2,10 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Basic CPUID Information
+#![allow(missing_docs)]
+
+//! CPUID leaf registers constant values.
+
 #![allow(unused)]
 pub mod leaf_0x0 {
     pub const LEAF_NUM: u32 = 0x0;

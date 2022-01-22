@@ -103,7 +103,7 @@ impl BrandString {
 
     /// Creates a brand string, initialized from the CPUID leaves 0x80000002 through 0x80000004
     /// of the host CPU.
-    pub fn from_host_cpuid() -> Result<Self, Error> {
+    fn from_host_cpuid() -> Result<Self, Error> {
         let mut this = Self::new();
         let mut cpuid_regs = unsafe { host_cpuid(0x8000_0000) };
 
@@ -137,7 +137,7 @@ impl BrandString {
     /// No checks are performed on the length of `src` or its contents (`src` should be an
     /// ASCII-encoded string).
     #[inline]
-    pub fn from_bytes_unchecked(src: &[u8]) -> Self {
+    fn from_bytes_unchecked(src: &[u8]) -> Self {
         let mut this = Self::new();
         this.len = src.len();
         this.as_bytes_mut()[..src.len()].copy_from_slice(src);
@@ -189,7 +189,7 @@ impl BrandString {
     }
 
     /// Appends `src` to the brand string if there is enough room to append it.
-    pub fn push_bytes(&mut self, src: &[u8]) -> Result<(), Error> {
+    fn push_bytes(&mut self, src: &[u8]) -> Result<(), Error> {
         if !self.check_push(src) {
             // No room to push all of src.
             return Err(Error::Overflow(
@@ -207,7 +207,7 @@ impl BrandString {
     /// and, if found, returns it as an `u8` slice.
     ///
     /// Basically, we're implementing a search for this regex: "([0-9]+\.[0-9]+[MGT]Hz)".
-    pub fn find_freq(&self) -> Option<&[u8]> {
+    fn find_freq(&self) -> Option<&[u8]> {
         // The algorithm for matching the regular expression above is based
         // on a Moore machine, and 'stage' represents the current state of
         // the machine.

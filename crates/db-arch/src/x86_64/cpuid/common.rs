@@ -1,15 +1,12 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#[cfg(target_arch = "x86")]
-use std::arch::x86::{CpuidResult, __cpuid_count, __get_cpuid_max};
-#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::{CpuidResult, __cpuid_count, __get_cpuid_max};
 
-use crate::cpuid::cpu_leaf::*;
+use super::cpu_leaf::*;
 
-pub const VENDOR_ID_INTEL: &[u8; 12] = b"GenuineIntel";
-pub const VENDOR_ID_AMD: &[u8; 12] = b"AuthenticAMD";
+pub(crate) const VENDOR_ID_INTEL: &[u8; 12] = b"GenuineIntel";
+pub(crate) const VENDOR_ID_AMD: &[u8; 12] = b"AuthenticAMD";
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -17,23 +14,15 @@ pub enum Error {
     NotSupported,
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+/// Get CPUID value for (`function`, `count`).
 pub fn get_cpuid(function: u32, count: u32) -> Result<CpuidResult, Error> {
-    // TODO: replace with validation based on `has_cpuid()` when it becomes stable:
-    //  https://doc.rust-lang.org/core/arch/x86/fn.has_cpuid.html
     #[cfg(target_env = "sgx")]
     {
         return Err(Error::NotSupported);
     }
-    // For x86 the host supports the `cpuid` instruction if SSE is enabled. Otherwise it's hard to check.
-    #[cfg(target_arch = "x86")]
-    {
-        #[cfg(not(target_feature = "sse"))]
-        {
-            return Err(Error::NotSupported);
-        }
-    }
 
+    // TODO: replace with validation based on `has_cpuid()` when it becomes stable:
+    //  https://doc.rust-lang.org/core/arch/x86/fn.has_cpuid.html
     // this is safe because the host supports the `cpuid` instruction
     let max_function = unsafe { __get_cpuid_max(function & leaf_0x80000000::LEAF_NUM).0 };
     if function > max_function {
@@ -56,24 +45,18 @@ pub fn get_cpuid(function: u32, count: u32) -> Result<CpuidResult, Error> {
 }
 
 /// Extracts the CPU vendor id from leaf 0x0.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn get_vendor_id() -> Result<[u8; 12], Error> {
-    match get_cpuid(0, 0) {
-        Ok(vendor_entry) => {
-            let bytes: [u8; 12] = unsafe {
-                std::mem::transmute([vendor_entry.ebx, vendor_entry.edx, vendor_entry.ecx])
-            };
-            Ok(bytes)
-        }
-        Err(e) => Err(e),
-    }
+    let vendor_entry = get_cpuid(0, 0)?;
+    let bytes: [u8; 12] =
+        unsafe { std::mem::transmute([vendor_entry.ebx, vendor_entry.edx, vendor_entry.ecx]) };
+
+    Ok(bytes)
 }
 
 #[cfg(test)]
 pub mod tests {
-    use crate::cpuid::common::*;
+    use super::*;
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     pub fn get_topoext_fn() -> u32 {
         let vendor_id = get_vendor_id();
         assert!(vendor_id.is_ok());
@@ -88,7 +71,6 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn test_get_cpu_id() {
         // get_cpu_id should work correctly here
         let topoext_fn = get_topoext_fn();
@@ -119,13 +101,8 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn test_get_vendor_id() {
-        let vendor_id = get_vendor_id();
-        assert!(vendor_id.is_ok());
-        assert!(matches!(
-            &vendor_id.ok().unwrap(),
-            VENDOR_ID_INTEL | VENDOR_ID_AMD
-        ));
+        let vendor_id = get_vendor_id().unwrap();
+        assert!(matches!(&vendor_id, VENDOR_ID_INTEL | VENDOR_ID_AMD));
     }
 }
