@@ -57,12 +57,14 @@ impl VmSpec {
         vpmu_feature: VpmuFeatureLevel,
     ) -> Result<VmSpec, Error> {
         let cpu_vendor_id = get_vendor_id().map_err(Error::InternalError)?;
+        let brand_string =
+            BrandString::from_vendor_id(&cpu_vendor_id).map_err(Error::BrandString)?;
 
         Ok(VmSpec {
             cpu_vendor_id,
             cpu_id,
             cpu_count,
-            brand_string: BrandString::from_vendor_id(&cpu_vendor_id),
+            brand_string,
             threads_per_core,
             cores_per_die,
             dies_per_socket,
@@ -79,14 +81,16 @@ impl VmSpec {
 /// Errors associated with processing the CPUID leaves.
 #[derive(Debug, Clone)]
 pub enum Error {
+    /// Failed to parse CPU brand string
+    BrandString(super::brand_string::Error),
+    /// The CPU architecture is not supported
+    CpuNotSupported,
     /// A FamStructWrapper operation has failed
     FamError(vmm_sys_util::fam::Error),
     /// A call to an internal helper method failed
     InternalError(super::common::Error),
     /// The maximum number of addressable logical CPUs cannot be stored in an `u8`.
     VcpuCountOverflow,
-    /// The CPU architecture is not supported
-    CpuNotSupported,
 }
 
 pub type EntryTransformerFn =
