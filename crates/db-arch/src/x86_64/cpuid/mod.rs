@@ -8,16 +8,17 @@
 
 //! Utilities for configuring the CPUID (CPU identification) for the guest microVM.
 
-use kvm_bindings::CpuId;
-
 pub mod bit_helper;
 pub mod cpu_leaf;
-
-pub use transformer::{CpuidTransformer, Error, VmSpec, VpmuFeatureLevel};
 
 mod brand_string;
 mod common;
 mod transformer;
+
+pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
+
+type CpuId = kvm_bindings::CpuId;
+type CpuIdEntry = kvm_bindings::kvm_cpuid_entry2;
 
 /// Setup CPUID entries for the given vCPU.
 ///
@@ -43,14 +44,14 @@ mod transformer;
 /// let entries = kvm_cpuid.as_mut_slice();
 /// ```
 pub fn process_cpuid(kvm_cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Error> {
+    use transformer::CpuidTransformer;
+
     match vm_spec.cpu_vendor_id() {
         self::common::VENDOR_ID_INTEL => {
-            let transformer = self::transformer::intel::IntelCpuidTransformer {};
-            transformer.process_cpuid(kvm_cpuid, vm_spec)
+            self::transformer::intel::IntelCpuidTransformer::new().process_cpuid(kvm_cpuid, vm_spec)
         }
         self::common::VENDOR_ID_AMD => {
-            let transformer = self::transformer::amd::AmdCpuidTransformer {};
-            transformer.process_cpuid(kvm_cpuid, vm_spec)
+            self::transformer::amd::AmdCpuidTransformer::new().process_cpuid(kvm_cpuid, vm_spec)
         }
         _ => Err(Error::CpuNotSupported),
     }

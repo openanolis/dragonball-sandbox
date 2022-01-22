@@ -2,29 +2,30 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use kvm_bindings::{kvm_cpuid_entry2, CpuId};
-
+use super::super::bit_helper::BitHelper;
+use super::super::common::get_cpuid;
+use super::super::cpu_leaf;
 use super::*;
-use crate::cpuid::bit_helper::BitHelper;
-use crate::cpuid::common::get_cpuid;
-use crate::cpuid::transformer::Error::FamError;
 
 // constants for setting the fields of kvm_cpuid2 structures
 // CPUID bits in ebx, ecx, and edx.
 const EBX_CLFLUSH_CACHELINE: u32 = 8; // Flush a cache line size.
 
-pub fn update_feature_info_entry(
-    entry: &mut kvm_cpuid_entry2,
-    vm_spec: &VmSpec,
-) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x1::*;
+/// Prepare content for CPUID standard level 0000_0001h: get processor type/family/model/stepping
+/// and feature flags
+pub fn update_feature_info_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
+    use cpu_leaf::leaf_0x1::*;
 
-    // X86 hypervisor feature
+    // ECX bit 31 (HV): hypervisor present (and intercepting this bit, to advertise its presence)
+    // ECX bit 24 (TSCD): local APIC supports one-shot operation using TSC deadline value
     entry
         .ecx
         .write_bit(ecx::TSC_DEADLINE_TIMER_BITINDEX, true)
         .write_bit(ecx::HYPERVISOR_BITINDEX, true);
 
+    // EBX bit 8-15: The CLFLUSH (8-byte) chunk count
+    // EBX bit 16-23: The logical processor count
+    // EBX bit 24-31: The (fixed) default APIC ID
     entry
         .ebx
         .write_bits_in_range(&ebx::APICID_BITRANGE, u32::from(vm_spec.cpu_id))
@@ -34,9 +35,9 @@ pub fn update_feature_info_entry(
             u32::from(vm_spec.threads_per_core * vm_spec.cores_per_die * vm_spec.dies_per_socket),
         );
 
-    // A value of 1 for HTT indicates the value in CPUID.1.Ebx[23:16]
-    // (the Maximum number of addressable IDs for logical processors in this package)
-    // is valid for the package
+    // EDX bit 28: Hyper-Threading Technology, PAUSE. A value of 1 for HTT indicates the value in
+    // CPUID.1.Ebx[23:16] (the Maximum number of addressable IDs for logical processors in this
+    // package) is valid for the package
     entry
         .edx
         .write_bit(edx::HTT_BITINDEX, vm_spec.cpu_count > 1);
@@ -44,21 +45,26 @@ pub fn update_feature_info_entry(
     Ok(())
 }
 
+/// Prepare content for CPUID standard level 0000_000Bh: get topology enumeration information.
 pub fn update_extended_topology_entry(
-    entry: &mut kvm_cpuid_entry2,
+    entry: &mut CpuIdEntry,
     vm_spec: &VmSpec,
 ) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0xb::*;
+    use cpu_leaf::leaf_0xb::*;
     let thread_width = 8 - (vm_spec.threads_per_core - 1).leading_zeros();
     let core_width = (8 - (vm_spec.cores_per_die - 1).leading_zeros()) + thread_width;
 
-    //reset eax, ebx, ecx
+    // EAX bit 0-4: number of bits to shift x2APIC ID right to get unique topology ID of
+    //   next level type all logical processors with same next level ID share current level
+    // EBX bit 0-15: number of enabled logical processors at this level
+    // ECX bit 0-8: level number (same as input)
+    // ECX bit 8-15: level type (00h=invalid, 01h=SMT, 02h=core, 03h...FFh=reserved)
+    // EDX bits 0-31 contain x2APIC ID of current logical processor
     entry.eax = 0_u32;
     entry.ebx = 0_u32;
     entry.ecx = 0_u32;
-    // EDX bits 31..0 contain x2APIC ID of current logical processor
-    // x2APIC increases the size of the APIC ID from 8 bits to 32 bits
     entry.edx = u32::from(vm_spec.cpu_id);
+
     match entry.index {
         // Thread Level Topology; index = 0
         0 => {
@@ -73,23 +79,23 @@ pub fn update_extended_topology_entry(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 vm_spec.threads_per_core as u32,
             );
-
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_THREAD);
         }
+
         // Core Level Processor Topology; index = 1
         1 => {
             entry
                 .eax
                 .write_bits_in_range(&eax::APICID_BITRANGE, core_width as u32);
-            entry
-                .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(vm_spec.threads_per_core * vm_spec.cores_per_die),
             );
+            entry
+                .ecx
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_CORE);
@@ -106,24 +112,35 @@ pub fn update_extended_topology_entry(
     Ok(())
 }
 
-/// leaf_0x1f is a superset of leaf_0xb. It gives extra information like die_per_socket.
-/// If leaf_0x1f is not implemented in cpu used in host, we'll turn to leaf_0xb to determine the cpu topology.
+/// Prepare content for Intel V2 Extended Topology Enumeration Leaf.
+///
+/// Leaf_0x1f is a superset of leaf_0xb. It gives extra information like die_per_socket.
+/// When CPUID executes with EAX set to 1FH, the processor returns information about extended
+/// topology enumeration data. Software must detect the presence of CPUID leaf 1FH by verifying
+/// - the highest leaf index supported by CPUID is >= 1FH
+/// - CPUID.1FH:EBX[15:0] reports a non-zero value
+/// If leaf_0x1f is not implemented in cpu used in host, guest OS should turn to leaf_0xb to
+/// determine the cpu topology.
 pub fn update_extended_topology_v2_entry(
-    entry: &mut kvm_cpuid_entry2,
+    entry: &mut CpuIdEntry,
     vm_spec: &VmSpec,
 ) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_0x1f::*;
+    use cpu_leaf::leaf_0x1f::*;
     let thread_width = 8 - (vm_spec.threads_per_core - 1).leading_zeros();
     let core_width = (8 - (vm_spec.cores_per_die - 1).leading_zeros()) + thread_width;
     let die_width = (8 - (vm_spec.dies_per_socket - 1).leading_zeros()) + core_width;
 
-    //reset eax, ebx, ecx
+    // EAX bit 0-4: number of bits to shift x2APIC ID right to get unique topology ID of
+    //   next level type all logical processors with same next level ID share current level
+    // EBX bit 0-15: number of enabled logical processors at this level
+    // ECX bit 0-8: level number (same as input)
+    // ECX bit 8-15: level type (00h=invalid, 01h=SMT, 02h=core, 05h=die, otherwise=reserved)
+    // EDX bits 0-31 contain x2APIC ID of current logical processor
     entry.eax = 0_u32;
     entry.ebx = 0_u32;
     entry.ecx = 0_u32;
-    // EDX bits 31..0 contain x2APIC ID of current logical processor
-    // x2APIC increases the size of the APIC ID from 8 bits to 32 bits
     entry.edx = u32::from(vm_spec.cpu_id);
+
     match entry.index {
         // Thread Level Topology; index = 0
         0 => {
@@ -138,7 +155,6 @@ pub fn update_extended_topology_v2_entry(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 vm_spec.threads_per_core as u32,
             );
-
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_THREAD);
@@ -148,13 +164,13 @@ pub fn update_extended_topology_v2_entry(
             entry
                 .eax
                 .write_bits_in_range(&eax::APICID_BITRANGE, core_width as u32);
-            entry
-                .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(vm_spec.threads_per_core * vm_spec.cores_per_die),
             );
+            entry
+                .ecx
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_CORE);
@@ -164,15 +180,15 @@ pub fn update_extended_topology_v2_entry(
             entry
                 .eax
                 .write_bits_in_range(&eax::APICID_BITRANGE, die_width as u32);
-            entry
-                .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(
                     vm_spec.threads_per_core * vm_spec.cores_per_die * vm_spec.dies_per_socket,
                 ),
             );
+            entry
+                .ecx
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_DIE);
@@ -185,10 +201,8 @@ pub fn update_extended_topology_v2_entry(
     Ok(())
 }
 
-pub fn update_brand_string_entry(
-    entry: &mut kvm_cpuid_entry2,
-    vm_spec: &VmSpec,
-) -> Result<(), Error> {
+/// Prepare content for CPUID standard level 8000_0002/3/4h: get processor name string.
+pub fn update_brand_string_entry(entry: &mut CpuIdEntry, vm_spec: &VmSpec) -> Result<(), Error> {
     let brand_string = &vm_spec.brand_string;
     entry.eax = brand_string.get_reg_for_leaf(entry.function, BsReg::Eax);
     entry.ebx = brand_string.get_reg_for_leaf(entry.function, BsReg::Ebx);
@@ -198,11 +212,14 @@ pub fn update_brand_string_entry(
     Ok(())
 }
 
+/// Prepare content for CPUID extended level 8000_001Dh: get cache configuration descriptors.
 pub fn update_cache_parameters_entry(
-    entry: &mut kvm_cpuid_entry2,
+    entry: &mut CpuIdEntry,
     vm_spec: &VmSpec,
 ) -> Result<(), Error> {
-    use crate::cpuid::cpu_leaf::leaf_cache_parameters::*;
+    use cpu_leaf::leaf_cache_parameters::*;
+
+    // EAX bit 14-25: cores per cache - 1
 
     match entry.eax.read_bits_in_range(&eax::CACHE_LEVEL_BITRANGE) {
         // L1 & L2 Cache
@@ -244,7 +261,7 @@ pub fn use_host_cpuid_function(
         }
 
         cpuid
-            .push(kvm_cpuid_entry2 {
+            .push(CpuIdEntry {
                 function,
                 index: count,
                 flags: 0,
@@ -254,7 +271,7 @@ pub fn use_host_cpuid_function(
                 edx: entry.edx,
                 padding: [0, 0, 0],
             })
-            .map_err(FamError)?;
+            .map_err(Error::FamError)?;
 
         count += 1;
     }
