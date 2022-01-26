@@ -3,5 +3,6 @@
 members = [
     "crates/db-allocator",
     "crates/db-arch",
+    "crates/db-boot",
     "crates/db-device",
 ]
