@@ -4,7 +4,180 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![allow(missing_docs)]
+#![allow(dead_code)]
 #![allow(non_upper_case_globals)]
+
+/// Model Specific Registers (MSRs) related functionality.
+
+#[derive(Debug)]
+/// MSR related errors.
+pub enum Error {
+    /// Getting supported MSRs failed.
+    GetSupportedModelSpecificRegisters(kvm_ioctls::Error),
+    /// Setting up MSRs failed.
+    SetModelSpecificRegisters(kvm_ioctls::Error),
+    /// Failed to set all MSRs.
+    SetModelSpecificRegistersCount,
+    /// Msr error
+    Msr(vmm_sys_util::fam::Error),
+}
+
+/// MSR range
+struct MsrRange {
+    /// Base MSR address
+    base: u32,
+    /// Number of MSRs
+    nmsrs: u32,
+}
+
+impl MsrRange {
+    /// Returns whether `msr` is contained in this MSR range.
+    fn contains(&self, msr: u32) -> bool {
+        self.base <= msr && msr < self.base + self.nmsrs
+    }
+}
+
+// Creates a MsrRange of one msr given as argument.
+macro_rules! SINGLE_MSR {
+    ($msr:expr) => {
+        MsrRange {
+            base: $msr,
+            nmsrs: 1,
+        }
+    };
+}
+
+// Creates a MsrRange of with msr base and count given as arguments.
+macro_rules! MSR_RANGE {
+    ($first:expr, $count:expr) => {
+        MsrRange {
+            base: $first,
+            nmsrs: $count,
+        }
+    };
+}
+
+// List of MSRs that can be serialized. List is sorted in ascending order of MSRs addresses.
+static WHITELISTED_MSR_RANGES: &[MsrRange] = &[
+    SINGLE_MSR!(MSR_IA32_P5_MC_ADDR),
+    SINGLE_MSR!(MSR_IA32_P5_MC_TYPE),
+    SINGLE_MSR!(MSR_IA32_TSC),
+    SINGLE_MSR!(MSR_IA32_PLATFORM_ID),
+    SINGLE_MSR!(MSR_IA32_APICBASE),
+    SINGLE_MSR!(MSR_IA32_EBL_CR_POWERON),
+    SINGLE_MSR!(MSR_EBC_FREQUENCY_ID),
+    SINGLE_MSR!(MSR_SMI_COUNT),
+    SINGLE_MSR!(MSR_IA32_FEATURE_CONTROL),
+    SINGLE_MSR!(MSR_IA32_TSC_ADJUST),
+    SINGLE_MSR!(MSR_IA32_SPEC_CTRL),
+    SINGLE_MSR!(MSR_IA32_PRED_CMD),
+    SINGLE_MSR!(MSR_IA32_UCODE_WRITE),
+    SINGLE_MSR!(MSR_IA32_UCODE_REV),
+    SINGLE_MSR!(MSR_IA32_SMBASE),
+    SINGLE_MSR!(MSR_FSB_FREQ),
+    SINGLE_MSR!(MSR_PLATFORM_INFO),
+    SINGLE_MSR!(MSR_PKG_CST_CONFIG_CONTROL),
+    SINGLE_MSR!(MSR_IA32_MPERF),
+    SINGLE_MSR!(MSR_IA32_APERF),
+    SINGLE_MSR!(MSR_MTRRcap),
+    SINGLE_MSR!(MSR_IA32_BBL_CR_CTL3),
+    SINGLE_MSR!(MSR_IA32_SYSENTER_CS),
+    SINGLE_MSR!(MSR_IA32_SYSENTER_ESP),
+    SINGLE_MSR!(MSR_IA32_SYSENTER_EIP),
+    SINGLE_MSR!(MSR_IA32_MCG_CAP),
+    SINGLE_MSR!(MSR_IA32_MCG_STATUS),
+    SINGLE_MSR!(MSR_IA32_MCG_CTL),
+    SINGLE_MSR!(MSR_IA32_PERF_STATUS),
+    SINGLE_MSR!(MSR_IA32_MISC_ENABLE),
+    SINGLE_MSR!(MSR_MISC_FEATURE_CONTROL),
+    SINGLE_MSR!(MSR_MISC_PWR_MGMT),
+    SINGLE_MSR!(MSR_TURBO_RATIO_LIMIT),
+    SINGLE_MSR!(MSR_TURBO_RATIO_LIMIT1),
+    SINGLE_MSR!(MSR_IA32_DEBUGCTLMSR),
+    SINGLE_MSR!(MSR_IA32_LASTBRANCHFROMIP),
+    SINGLE_MSR!(MSR_IA32_LASTBRANCHTOIP),
+    SINGLE_MSR!(MSR_IA32_LASTINTFROMIP),
+    SINGLE_MSR!(MSR_IA32_LASTINTTOIP),
+    SINGLE_MSR!(MSR_IA32_POWER_CTL),
+    MSR_RANGE!(
+        // IA32_MTRR_PHYSBASE0
+        0x200, 0x100
+    ),
+    MSR_RANGE!(
+        // MSR_CORE_C3_RESIDENCY
+        // MSR_CORE_C6_RESIDENCY
+        // MSR_CORE_C7_RESIDENCY
+        MSR_CORE_C3_RESIDENCY,
+        3
+    ),
+    MSR_RANGE!(MSR_IA32_MC0_CTL, 0x80),
+    SINGLE_MSR!(MSR_RAPL_POWER_UNIT),
+    MSR_RANGE!(
+        // MSR_PKGC3_IRTL
+        // MSR_PKGC6_IRTL
+        // MSR_PKGC7_IRTL
+        MSR_PKGC3_IRTL,
+        3
+    ),
+    SINGLE_MSR!(MSR_PKG_POWER_LIMIT),
+    SINGLE_MSR!(MSR_PKG_ENERGY_STATUS),
+    SINGLE_MSR!(MSR_PKG_PERF_STATUS),
+    SINGLE_MSR!(MSR_PKG_POWER_INFO),
+    SINGLE_MSR!(MSR_DRAM_POWER_LIMIT),
+    SINGLE_MSR!(MSR_DRAM_ENERGY_STATUS),
+    SINGLE_MSR!(MSR_DRAM_PERF_STATUS),
+    SINGLE_MSR!(MSR_DRAM_POWER_INFO),
+    SINGLE_MSR!(MSR_CONFIG_TDP_NOMINAL),
+    SINGLE_MSR!(MSR_CONFIG_TDP_LEVEL_1),
+    SINGLE_MSR!(MSR_CONFIG_TDP_LEVEL_2),
+    SINGLE_MSR!(MSR_CONFIG_TDP_CONTROL),
+    SINGLE_MSR!(MSR_TURBO_ACTIVATION_RATIO),
+    SINGLE_MSR!(MSR_IA32_TSCDEADLINE),
+    MSR_RANGE!(APIC_BASE_MSR, APIC_MSR_INDEXES),
+    SINGLE_MSR!(MSR_IA32_BNDCFGS),
+    SINGLE_MSR!(MSR_KVM_WALL_CLOCK_NEW),
+    SINGLE_MSR!(MSR_KVM_SYSTEM_TIME_NEW),
+    SINGLE_MSR!(MSR_KVM_ASYNC_PF_EN),
+    SINGLE_MSR!(MSR_KVM_STEAL_TIME),
+    SINGLE_MSR!(MSR_KVM_PV_EOI_EN),
+    SINGLE_MSR!(MSR_EFER),
+    SINGLE_MSR!(MSR_STAR),
+    SINGLE_MSR!(MSR_LSTAR),
+    SINGLE_MSR!(MSR_CSTAR),
+    SINGLE_MSR!(MSR_SYSCALL_MASK),
+    SINGLE_MSR!(MSR_FS_BASE),
+    SINGLE_MSR!(MSR_GS_BASE),
+    SINGLE_MSR!(MSR_KERNEL_GS_BASE),
+    SINGLE_MSR!(MSR_TSC_AUX),
+];
+
+/// Specifies whether a particular MSR should be included in vcpu serialization.
+///
+/// # Arguments
+///
+/// * `index` - The index of the MSR that is checked whether it's needed for serialization.
+pub fn msr_should_serialize(index: u32) -> bool {
+    // Blacklisted MSRs not exported by Linux: IA32_FEATURE_CONTROL and IA32_MCG_CTL
+    if index == MSR_IA32_FEATURE_CONTROL || index == MSR_IA32_MCG_CTL {
+        return false;
+    };
+    WHITELISTED_MSR_RANGES
+        .iter()
+        .any(|range| range.contains(index))
+}
+
+/// Base MSR for APIC
+pub const APIC_BASE_MSR: u32 = 0x800;
+
+/// Number of APIC MSR indexes
+pub const APIC_MSR_INDEXES: u32 = 0x400;
+
+/// Custom MSRs fall in the range 0x4b564d00-0x4b564dff
+pub const MSR_KVM_WALL_CLOCK_NEW: u32 = 0x4b56_4d00;
+pub const MSR_KVM_SYSTEM_TIME_NEW: u32 = 0x4b56_4d01;
+pub const MSR_KVM_ASYNC_PF_EN: u32 = 0x4b56_4d02;
+pub const MSR_KVM_STEAL_TIME: u32 = 0x4b56_4d03;
+pub const MSR_KVM_PV_EOI_EN: u32 = 0x4b56_4d04;
 
 pub const MSR_EFER: u32 = 3221225600;
 pub const MSR_STAR: u32 = 3221225601;
@@ -54,6 +227,7 @@ pub const ARCH_CAP_SKIP_VMENTRY_L1DFLUSH: u32 = 8;
 pub const ARCH_CAP_SSB_NO: u32 = 16;
 pub const MSR_IA32_FLUSH_CMD: u32 = 267;
 pub const L1D_FLUSH: u32 = 1;
+pub const MSR_PKG_CST_CONFIG_CONTROL: u32 = 226;
 pub const MSR_IA32_BBL_CR_CTL: u32 = 281;
 pub const MSR_IA32_BBL_CR_CTL3: u32 = 286;
 pub const MSR_IA32_SYSENTER_CS: u32 = 372;
@@ -342,6 +516,7 @@ pub const MSR_THERM2_CTL: u32 = 413;
 pub const MSR_THERM2_CTL_TM_SELECT: u32 = 65536;
 pub const MSR_IA32_MISC_ENABLE: u32 = 416;
 pub const MSR_IA32_TEMPERATURE_TARGET: u32 = 418;
+pub const MSR_MISC_FEATURE_CONTROL: u32 = 420;
 pub const MSR_MISC_PWR_MGMT: u32 = 426;
 pub const MSR_IA32_ENERGY_PERF_BIAS: u32 = 432;
 pub const ENERGY_PERF_BIAS_PERFORMANCE: u32 = 0;
@@ -549,3 +724,29 @@ pub const MSR_IA32_VMX_MISC_PREEMPTION_TIMER_SCALE: u32 = 31;
 pub const MSR_VM_CR: u32 = 3221291284;
 pub const MSR_VM_IGNNE: u32 = 3221291285;
 pub const MSR_VM_HSAVE_PA: u32 = 3221291287;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_msr_whitelist() {
+        for range in WHITELISTED_MSR_RANGES.iter() {
+            for msr in range.base..(range.base + range.nmsrs) {
+                let should = !matches!(msr, MSR_IA32_FEATURE_CONTROL | MSR_IA32_MCG_CTL);
+                assert_eq!(msr_should_serialize(msr), should);
+            }
+        }
+    }
+
+    #[test]
+    fn test_msr_contains() {
+        let msr_range_a = MSR_RANGE!(0xEA, 9);
+        let msr_a = 0x8888;
+        assert!(!msr_range_a.contains(msr_a));
+
+        let msr_range_b = MSR_RANGE!(0xCCCC, 5);
+        let msr_b = 0xCCCD;
+        assert!(msr_range_b.contains(msr_b));
+    }
+}
