@@ -7,24 +7,15 @@
 
 mod interval_tree;
 pub use interval_tree::{IntervalTree, NodeState, Range};
-use std::fmt::{Display, Formatter};
 use std::result;
+use thiserror::Error;
 
 /// Error conditions that may appear during `Allocator` related operations.
-#[derive(Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq)]
 pub enum Error {
     /// Invalid Constraint Max and Min
+    #[error("invalid constraint max ({0}) and min ({1})")]
     InvalidBoundary(u64, u64),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::InvalidBoundary(max, min) => {
-                write!(f, "invalid constraint max ({}) and min ({})", max, min)
-            }
-        }
-    }
 }
 
 /// Policy for resource allocation.
