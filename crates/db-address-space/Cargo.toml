@@ -1,0 +1,23 @@
+[package]
+name = "db-address-space"
+version = "0.1.0"
+authors = ["Alibaba Dragonball Team"]
+license = "Apache-2.0"
+edition = "2018"
+homepage = "https://github.com/openanolis/dragonball-sandbox"
+repository = "https://github.com/openanolis/dragonball-sandbox"
+keywords = ["dragonball", "address"]
+readme = "README.md"
+
+[dependencies]
+arc-swap = "~0.4"
+libc = ">=0.2.39"
+nix = ">=0.15.0"
+thiserror = "1"
+vmm-sys-util = ">=0.8.0"
+vm-memory = { version = "0.7.0", features = ["backend-mmap"] }
+
+[features]
+default = []
+memory-hotplug = ["atomic-guest-memory"]
+atomic-guest-memory = ["vm-memory/backend-atomic"]

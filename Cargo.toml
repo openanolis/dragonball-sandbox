@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "crates/db-address-space",
     "crates/db-allocator",
     "crates/db-arch",
     "crates/db-boot",
