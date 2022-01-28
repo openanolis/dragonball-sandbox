@@ -742,30 +742,12 @@ mod tests {
         let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
         let address_space = AddressSpace::from_regions(address_space_region, boundary);
 
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size)),
-            false
-        );
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size * 2)),
-            false
-        );
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size * 3)),
-            true
-        );
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size * 3 + 1)),
-            true
-        );
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size)),
-            false
-        );
-        assert_eq!(
-            address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size - 1)),
-            true
-        );
+        assert!(!address_space.is_reserved_region(GuestAddress(page_size)));
+        assert!(!address_space.is_reserved_region(GuestAddress(page_size * 2)));
+        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3)));
+        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3 + 1)));
+        assert!(!address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size)));
+        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size - 1)));
     }
 
     #[test]
@@ -790,7 +772,7 @@ mod tests {
         assert!(reg1.is_valid());
         assert_eq!(reg1.start_addr(), GuestAddress(0xFFFFFFFFFFFFE000));
         assert_eq!(reg1.len(), 0x1000);
-        assert_eq!(reg1.has_file(), false);
+        assert!(!reg1.has_file());
         assert!(reg1.file_offset().is_none());
         assert_eq!(reg1.perm_flags(), libc::MAP_SHARED);
         assert_eq!(reg1.region_type(), AddressSpaceRegionType::DeviceMemory);
@@ -812,7 +794,7 @@ mod tests {
         assert!(reg2.is_valid());
         assert_eq!(reg2.start_addr(), GuestAddress(0x1000));
         assert_eq!(reg2.len(), 0x1000);
-        assert_eq!(reg2.has_file(), true);
+        assert!(reg2.has_file());
         assert!(reg2.file_offset().is_some());
         assert_eq!(reg2.perm_flags(), 0x5a);
     }
@@ -926,7 +908,7 @@ mod tests {
         let reg = Arc::new(
             AddressSpaceRegion::create_device_region(GuestAddress(0x10_0000), 0x1000).unwrap(),
         );
-        let regions = vec![reg.clone(), reg.clone()];
+        let regions = vec![reg.clone(), reg];
         let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
         let _ = AddressSpaceInternal::from_regions(regions, boundary);
     }

@@ -10,7 +10,7 @@ keywords = ["dragonball", "address"]
 readme = "README.md"
 
 [dependencies]
-arc-swap = "~0.4"
+arc-swap = ">=0.4.8"
 libc = ">=0.2.39"
 nix = ">=0.15.0"
 thiserror = "1"
