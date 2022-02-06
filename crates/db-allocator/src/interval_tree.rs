@@ -9,7 +9,7 @@
 //! # Examples
 //! ```rust
 //! extern crate db_allocator;
-//! use db_allocator::{IntervalTree, Range, Constraint, NodeState};
+//! use db_allocator::{Constraint, IntervalTree, NodeState, Range};
 //!
 //! // Create an interval tree and add available resources.
 //! let mut tree = IntervalTree::<u64>::new();
@@ -40,7 +40,6 @@
 //! // Free allocated resource.
 //! let old = tree.free(key.as_ref().unwrap());
 //! assert_eq!(old, Some(3));
-//!
 //! ```
 
 use std::cmp::{max, min, Ordering};
@@ -602,7 +601,7 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = db_allocator::IntervalTree::<u64>::new();
     /// assert!(tree.is_empty());
@@ -610,8 +609,14 @@ impl<T> IntervalTree<T> {
     /// tree.insert(Range::new(0x100u64, 0x100u64), Some(1));
     /// tree.insert(Range::new(0x200u64, 0x2ffu64), None);
     /// assert!(!tree.is_empty());
-    /// assert_eq!(tree.get(&Range::new(0x100u64, 0x100u64)), Some(NodeState::Valued(&1)));
-    /// assert_eq!(tree.get(&Range::new(0x200u64, 0x2ffu64)), Some(NodeState::Free));
+    /// assert_eq!(
+    ///     tree.get(&Range::new(0x100u64, 0x100u64)),
+    ///     Some(NodeState::Valued(&1))
+    /// );
+    /// assert_eq!(
+    ///     tree.get(&Range::new(0x200u64, 0x2ffu64)),
+    ///     Some(NodeState::Free)
+    /// );
     /// assert_eq!(tree.get(&Range::new(0x101u64, 0x101u64)), None);
     /// assert_eq!(tree.get(&Range::new(0x100u64, 0x101u64)), None);
     /// ```
@@ -627,17 +632,23 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
     /// tree.insert(Range::new(0x200u32, 0x2ffu32), None);
-    /// assert_eq!(tree.get_superset(&Range::new(0x100u32, 0x100u32)),
-    ///            Some((&Range::new(0x100u32, 0x100u32), NodeState::Valued(&1))));
-    /// assert_eq!(tree.get_superset(&Range::new(0x210u32, 0x210u32)),
-    ///            Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free)));
-    /// assert_eq!(tree.get_superset(&Range::new(0x2ffu32, 0x2ffu32)),
-    ///            Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free)));
+    /// assert_eq!(
+    ///     tree.get_superset(&Range::new(0x100u32, 0x100u32)),
+    ///     Some((&Range::new(0x100u32, 0x100u32), NodeState::Valued(&1)))
+    /// );
+    /// assert_eq!(
+    ///     tree.get_superset(&Range::new(0x210u32, 0x210u32)),
+    ///     Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free))
+    /// );
+    /// assert_eq!(
+    ///     tree.get_superset(&Range::new(0x2ffu32, 0x2ffu32)),
+    ///     Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free))
+    /// );
     /// ```
     pub fn get_superset(&self, key: &Range) -> Option<(&Range, NodeState<&T>)> {
         match self.root {
@@ -653,17 +664,23 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
     /// tree.insert(Range::new(0x200u32, 0x2ffu32), None);
-    /// assert_eq!(tree.get_superset_mut(&Range::new(0x100u32, 0x100u32)),
-    ///            Some((&Range::new(0x100u32, 0x100u32), NodeState::Valued(&mut 1))));
-    /// assert_eq!(tree.get_superset_mut(&Range::new(0x210u32, 0x210u32)),
-    ///            Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free)));
-    /// assert_eq!(tree.get_superset_mut(&Range::new(0x2ffu32, 0x2ffu32)),
-    ///            Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free)));
+    /// assert_eq!(
+    ///     tree.get_superset_mut(&Range::new(0x100u32, 0x100u32)),
+    ///     Some((&Range::new(0x100u32, 0x100u32), NodeState::Valued(&mut 1)))
+    /// );
+    /// assert_eq!(
+    ///     tree.get_superset_mut(&Range::new(0x210u32, 0x210u32)),
+    ///     Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free))
+    /// );
+    /// assert_eq!(
+    ///     tree.get_superset_mut(&Range::new(0x2ffu32, 0x2ffu32)),
+    ///     Some((&Range::new(0x200u32, 0x2ffu32), NodeState::Free))
+    /// );
     /// ```
     pub fn get_superset_mut(&mut self, key: &Range) -> Option<(&Range, NodeState<&mut T>)> {
         match self.root {
@@ -679,7 +696,7 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u32>::new();
     /// tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
@@ -709,7 +726,7 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u32>::new();
     /// tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
@@ -739,13 +756,19 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, NodeState};
+    /// use db_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
     /// tree.insert(Range::new(0x200u32, 0x2ffu32), None);
-    /// assert_eq!(tree.get(&Range::new(0x100u64, 0x100u64)), Some(NodeState::Valued(&1)));
-    /// assert_eq!(tree.get(&Range::new(0x200u64, 0x2ffu64)), Some(NodeState::Free));
+    /// assert_eq!(
+    ///     tree.get(&Range::new(0x100u64, 0x100u64)),
+    ///     Some(NodeState::Valued(&1))
+    /// );
+    /// assert_eq!(
+    ///     tree.get(&Range::new(0x200u64, 0x2ffu64)),
+    ///     Some(NodeState::Free)
+    /// );
     /// ```
     pub fn insert(&mut self, key: Range, data: Option<T>) {
         match self.root.take() {
@@ -759,7 +782,7 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, Constraint};
+    /// use db_allocator::{Constraint, IntervalTree, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u64, 0x100u64), None);
@@ -811,7 +834,7 @@ impl<T> IntervalTree<T> {
     /// # Examples
     /// ```rust
     /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range, Constraint};
+    /// use db_allocator::{Constraint, IntervalTree, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u64, 0x100u64), None);
