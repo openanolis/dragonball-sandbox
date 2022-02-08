@@ -64,3 +64,22 @@ impl NumaNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_numa_node() {
+        let mut numa_node = NumaNode::new();
+        let info = NumaNodeInfo {
+            base: GuestAddress(0),
+            size: 1024,
+        };
+        numa_node.add_info(&info);
+        assert_eq!(*numa_node.region_infos(), vec![info]);
+        let vcpu_ids = vec![0, 1, 2, 3];
+        numa_node.add_vcpu_ids(&vcpu_ids);
+        assert_eq!(*numa_node.vcpu_ids(), vcpu_ids);
+    }
+}
