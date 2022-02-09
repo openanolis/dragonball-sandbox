@@ -20,9 +20,10 @@ use vm_memory::{
 #[cfg(not(feature = "atomic-guest-memory"))]
 pub type AddressSpace = AddressSpaceInternal;
 
-/// Internal types for Address space in hotplug scenario.
+/// Internal types for Address space in atomic scenario.
+/// This is a fundamental feature for memory hotplug
 #[cfg(feature = "atomic-guest-memory")]
-pub type AddressSpace = self::hotplug::AddressSpaceHotplug;
+pub type AddressSpace = self::atomic::AddressSpaceAtomic;
 
 /// Errors associated with virtual machine address space management.
 #[derive(Debug, thiserror::Error)]
@@ -632,19 +633,19 @@ impl AddressSpaceInternal {
 }
 
 #[cfg(feature = "atomic-guest-memory")]
-mod hotplug {
+mod atomic {
     use super::*;
     use arc_swap::ArcSwap;
     use std::sync::Arc;
     use vm_memory::atomic::GuestMemoryAtomic;
 
-    /// Wrapper over `AddressSpaceInternal` to support address space region hotplug.
+    /// Wrapper over `AddressSpaceInternal` to support atomic address space region.
     #[derive(Clone)]
-    pub struct AddressSpaceHotplug {
+    pub struct AddressSpaceAtomic {
         state: Arc<ArcSwap<AddressSpaceInternal>>,
     }
 
-    impl AddressSpaceHotplug {
+    impl AddressSpaceAtomic {
         /// Find the region to which the guest_addr belongs, and determine
         /// whether the type of the region is DAXMemory
         ///
@@ -661,7 +662,7 @@ mod hotplug {
         ) -> Self {
             let internal = AddressSpaceInternal::from_regions(regions, boundary);
 
-            AddressSpaceHotplug {
+            AddressSpaceAtomic {
                 state: Arc::new(ArcSwap::new(Arc::new(internal))),
             }
         }
