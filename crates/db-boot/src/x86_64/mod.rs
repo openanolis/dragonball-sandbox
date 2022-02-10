@@ -5,3 +5,6 @@
 
 /// Magic addresses externally used to lay out x86_64 VMs.
 pub mod layout;
+
+/// Structure definitions for SMP machines following the Intel Multiprocessing Specification 1.1 and 1.4.
+pub mod mpspec;
