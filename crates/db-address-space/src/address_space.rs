@@ -157,7 +157,7 @@ impl AddressSpaceRegion {
         }
     }
 
-    /// Create an address space region to map memory from memfd/hugetlbfs/vmem into the virtual machine.
+    /// Create an address space region to map memory from memfd/hugetlbfs into the virtual machine.
     ///
     /// # Arguments
     /// * `base` - Base address in VM to map content
@@ -187,7 +187,7 @@ impl AddressSpaceRegion {
         )
     }
 
-    /// Create an address space region to map memory from memfd/hugetlbfs/vmem into the virtual machine.
+    /// Create an address space region to map memory from memfd/hugetlbfs into the virtual machine.
     ///
     /// # Arguments
     /// * `base` - Base address in VM to map content
@@ -879,7 +879,7 @@ mod tests {
         assert_eq!(reg.len(), 0x100000);
         assert!(reg.file_offset().is_some());
 
-        // TODO: test hugetlbfs and vmem
+        // TODO: test hugetlbfs
     }
 
     #[test]
