@@ -8,3 +8,6 @@ pub mod layout;
 
 /// Structure definitions for SMP machines following the Intel Multiprocessing Specification 1.1 and 1.4.
 pub mod mpspec;
+
+/// MP Table configurations used for defining VM boot status.
+pub mod mptable;
