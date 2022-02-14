@@ -10,3 +10,6 @@ keywords = ["dragonball", "boot", "VMM"]
 readme = "README.md"
 
 [dependencies]
+thiserror = "1"
+vm-memory = { version = "0.7.0", features = ["backend-mmap"] }
+libc = "0.2.39"
