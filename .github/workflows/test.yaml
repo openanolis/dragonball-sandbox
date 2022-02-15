@@ -1,44 +1,51 @@
+name: UT
+
 on:
   pull_request:
   push:
     branches:
       - main
 
-name: UT
-
 jobs:
-  test:
-    name: Test
-    env:
-      CARGO_INCREMENTAL: 0
-      RUSTFLAGS: -Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort
-      RUSTDOCFLAGS: -Cpanic=abort
-    runs-on: ubuntu-latest
+  vagrant:
+    runs-on: macos-10.15
+
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+
+      - name: Cache Vagrant boxes
+        uses: actions/cache@v2
         with:
-          profile: minimal
-          toolchain: nightly
-          override: true
+          path: ~/.vagrant.d/boxes
+          key: ${{ runner.os }}-vagrant-${{ hashFiles('.github/Vagrantfile') }}
+
+      - name: Show Vagrant version
+        run: vagrant --version
+
       - name: Cache dependencies
         uses: actions/cache@v2
         env:
-          cache-name: cache-dependencies
+          cache-name: cache-cargo-dependencies
         with:
           path: |
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
+            ~/.cargo/registry
+            ~/.cargo/git
             ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
           key: ${{ runner.os }}-build-${{ env.cache-name }}
-      - name: Generate test result and coverage report
-        run: |
-          cargo install grcov;
-          cargo test $CARGO_OPTIONS -- -Z unstable-options;
-          zip -0 ccov.zip `find ./target \( -name "*.gc*" \) -print`;
-          grcov ccov.zip -s . -t lcov --llvm --ignore-not-existing --ignore "/*" --ignore "tests/*" -o lcov.info;
+
+      - name: Run vagrant up
+        working-directory: .github
+        run: vagrant up
+
+      - name: Run test
+        working-directory: .github
+        run: vagrant ssh -c 'export CARGO_INCREMENTAL=0; export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"; export RUSTDOCFLAGS=-Cpanic=abort; cd /vagrant; cargo clean; sudo -E cargo test $CARGO_OPTIONS -- -Z unstable-options'
+
+      - name: Coverage
+        uses: actions-rs/grcov@v0.1
+        with:
+          config: .github/grcov.yml
+
       - name: Upload to CodeCov
         uses: codecov/codecov-action@v2
         with:

@@ -1,0 +1,32 @@
+Vagrant.configure("2") do |config|
+    config.vm.box = "bento/ubuntu-20.04"
+
+    config.vm.define 'ubuntu'
+
+    config.vm.provider :virtualbox do |v|
+        v.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+        v.memory = 10240
+        v.cpus = 4
+    end
+
+    config.vm.synced_folder ".", "/vagrant", disabled: true
+    config.vm.synced_folder "../", "/vagrant/"
+    config.vm.synced_folder "~/.cargo/registry", "/home/vagrant/.cargo/registry"
+
+    config.vm.provision "install-rust", type: "shell", run: "once" do |sh|
+        sh.privileged = false
+        sh.inline = <<~SHELL
+            set -euxo pipefail
+
+            # Install gcc
+            sudo apt-get update
+            sudo apt-get install -y build-essential
+            sudo chown -R vagrant:vagrant ./.cargo
+
+            # Install rust
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly --profile minimal
+            echo 'export PATH=/home/vagrant/.cargo/bin:$PATH' | sudo tee -a /etc/profile
+            source $HOME/.cargo/env
+        SHELL
+    end
+end
