@@ -1,0 +1,56 @@
+Vagrant.configure("2") do |config|
+    # config.vm.box = "generic/ubuntu1804"
+    config.vm.box = "bento/ubuntu-20.04"
+
+    config.vm.define 'ubuntu'
+
+    config.vm.provider :virtualbox do |v|
+        v.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+        v.memory = 14000
+        v.cpus = 4
+    end
+
+    config.vm.synced_folder ".", "/vagrant", disabled: true
+    config.vm.synced_folder "~/.cargo/registry", "/home/vagrant/.cargo/registry"
+    #config.vm.synced_folder "~/.cargo/git", "/home/vagrant/.cargo/git"
+    config.vm.synced_folder "../", "/vagrant/"
+
+    config.vm.provision "install-rust", type: "shell", run: "once" do |sh|
+        sh.privileged = false
+        sh.inline = <<~SHELL
+            set -euxo pipefail
+            sudo apt-get update
+            sudo apt-get install -y build-essential
+            sudu chown -R vagrant:vagrant ./.cargo
+            ls -al /home/vagrant/.cargo
+            ls -al /home/vagrant/.cargo/bin
+            #rm -rf /home/vagrant/.cargo/bin
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly --profile minimal
+            echo 'export PATH=$HOME/.cargo/bin:$PATH' | sudo tee -a /etc/profile
+            echo "aaaaa"
+            ls -al $HOME/.cargo
+            ls -al $HOME/.cargo/bin
+            echo $HOME
+            source $HOME/.cargo/env
+            rustup default nightly
+        SHELL
+    end
+
+    #config.ssh.username = 'root'
+    #config.ssh.insert_key = 'true'
+
+    #config.vm.provision "run-tests", type: "shell", run: "once" do |sh|
+    #    sh.inline = <<~SHELL
+    #        #set -euxo pipefail
+    #        pwd
+    #        echo $HOME
+    #        ls -al $HOME/.cargo/bin || true
+    #        export CARGO_INCREMENTAL=0
+    #        export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"
+    #        export RUSTDOCFLAGS="-Cpanic=abort"
+
+    #        cd /vagrant
+    #        cargo test $CARGO_OPTIONS -- -Z unstable-options;
+    #    SHELL
+    #end
+end
