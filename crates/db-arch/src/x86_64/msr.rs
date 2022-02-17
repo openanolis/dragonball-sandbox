@@ -8,6 +8,10 @@
 #![allow(non_upper_case_globals)]
 
 /// Model Specific Registers (MSRs) related functionality.
+use std::result;
+
+use kvm_bindings::MsrList;
+use kvm_ioctls::Kvm;
 
 #[derive(Debug)]
 /// MSR related errors.
@@ -21,6 +25,8 @@ pub enum Error {
     /// Msr error
     Msr(vmm_sys_util::fam::Error),
 }
+
+type Result<T> = result::Result<T, Error>;
 
 /// MSR range
 struct MsrRange {
@@ -164,6 +170,21 @@ pub fn msr_should_serialize(index: u32) -> bool {
     WHITELISTED_MSR_RANGES
         .iter()
         .any(|range| range.contains(index))
+}
+
+/// Returns the list of supported, serializable MSRs.
+///
+/// # Arguments
+///
+/// * `kvm_fd` - Structure that holds the KVM's fd.
+pub fn supported_guest_msrs(kvm_fd: &Kvm) -> Result<MsrList> {
+    let mut msr_list = kvm_fd
+        .get_msr_index_list()
+        .map_err(Error::GetSupportedModelSpecificRegisters)?;
+
+    msr_list.retain(|msr_index| msr_should_serialize(*msr_index));
+
+    Ok(msr_list)
 }
 
 /// Base MSR for APIC
@@ -748,5 +769,10 @@ mod tests {
         let msr_range_b = MSR_RANGE!(0xCCCC, 5);
         let msr_b = 0xCCCD;
         assert!(msr_range_b.contains(msr_b));
+    }
+
+    fn test_supported_msrs() {
+        let kvm = Kvm::new().unwrap();
+        assert!(supported_guest_msrs(&kvm).is_ok());
     }
 }
