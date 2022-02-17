@@ -21,3 +21,7 @@ This repository contains the following crates:
 ```bash
 cargo build --release
 ```
+
+## License
+
+This project is licensed under [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0.
