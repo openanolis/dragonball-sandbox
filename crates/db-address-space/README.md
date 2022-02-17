@@ -39,3 +39,7 @@ let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_
 let address_space = AddressSpaceInternal::from_regions(regions, boundary.clone());
 assert_eq!(address_space.get_boundary(), boundary);
 ```
+
+## License
+
+This project is licensed under [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0.
