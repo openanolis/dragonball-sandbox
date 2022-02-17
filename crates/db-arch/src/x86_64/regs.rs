@@ -12,8 +12,9 @@
 use std::mem;
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
+use super::msr;
 
-use kvm_bindings::{kvm_fpu, kvm_sregs};
+use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use kvm_ioctls::VcpuFd;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
@@ -76,6 +77,52 @@ pub fn setup_fpu(vcpu: &VcpuFd) -> Result<()> {
     };
 
     vcpu.set_fpu(&fpu).map_err(Error::SetFPURegisters)
+}
+
+/// Configure Model Specific Registers (MSRs) for a given CPU.
+///
+/// # Arguments
+///
+/// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
+pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
+    let entry_vec = create_msr_entries();
+    let kvm_msrs =
+        Msrs::from_entries(&entry_vec).map_err(|_| Error::SetModelSpecificRegistersCount)?;
+
+    vcpu.set_msrs(&kvm_msrs)
+        .map_err(Error::SetModelSpecificRegisters)
+        .and_then(|msrs_written| {
+            if msrs_written as u32 != kvm_msrs.as_fam_struct_ref().nmsrs {
+                Err(Error::SetModelSpecificRegistersCount)
+            } else {
+                Ok(msrs_written)
+            }
+        })?;
+    Ok(())
+}
+
+/// Configure base registers for a given CPU.
+///
+/// # Arguments
+///
+/// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
+/// * `boot_ip` - Starting instruction pointer.
+pub fn setup_regs(vcpu: &VcpuFd, boot_ip: u64) -> Result<()> {
+    let regs: kvm_regs = kvm_regs {
+        rflags: 0x0000_0000_0000_0002u64,
+        rip: boot_ip,
+        // Frame pointer. It gets a snapshot of the stack pointer (rsp) so that when adjustments are
+        // made to rsp (i.e. reserving space for local variables or pushing values on to the stack),
+        // local variables and function parameters are still accessible from a constant offset from rbp.
+        rsp: db_boot::layout::BOOT_STACK_POINTER as u64,
+        // Starting stack pointer.
+        rbp: db_boot::layout::BOOT_STACK_POINTER as u64,
+        // Must point to zero page address per Linux ABI. This is x86_64 specific.
+        rsi: db_boot::layout::ZERO_PAGE_START as u64,
+        ..Default::default()
+    };
+
+    vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
 
 /// Configures the segment registers and system page tables for a given CPU.
@@ -205,10 +252,143 @@ fn write_idt_value<M: GuestMemory>(val: u64, guest_mem: &M) -> Result<()> {
         .map_err(|_| Error::WriteIDT)
 }
 
+#[allow(clippy::vec_init_then_push)]
+fn create_msr_entries() -> Vec<kvm_msr_entry> {
+    let mut entries = Vec::<kvm_msr_entry>::new();
+
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_IA32_SYSENTER_CS,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_IA32_SYSENTER_ESP,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_IA32_SYSENTER_EIP,
+        data: 0x0,
+        ..Default::default()
+    });
+    // x86_64 specific msrs, we only run on x86_64 not x86.
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_STAR,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_CSTAR,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_KERNEL_GS_BASE,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_SYSCALL_MASK,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_LSTAR,
+        data: 0x0,
+        ..Default::default()
+    });
+    // end of x86_64 specific code
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_IA32_TSC,
+        data: 0x0,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr::MSR_IA32_MISC_ENABLE,
+        data: u64::from(msr::MSR_IA32_MISC_ENABLE_FAST_STRING),
+        ..Default::default()
+    });
+
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use kvm_ioctls::Kvm;
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+
+    fn create_guest_mem() -> GuestMemoryMmap {
+        GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
+    }
+
+    fn read_u64(gm: &GuestMemoryMmap, offset: u64) -> u64 {
+        let read_addr = GuestAddress(offset as u64);
+        gm.read_obj(read_addr).unwrap()
+    }
+
+    fn validate_segments_and_sregs(gm: &GuestMemoryMmap, sregs: &kvm_sregs) {
+        assert_eq!(0x0, read_u64(gm, BOOT_GDT_OFFSET));
+        assert_eq!(0xaf_9b00_0000_ffff, read_u64(gm, BOOT_GDT_OFFSET + 8));
+        assert_eq!(0xcf_9300_0000_ffff, read_u64(gm, BOOT_GDT_OFFSET + 16));
+        assert_eq!(0x8f_8b00_0000_ffff, read_u64(gm, BOOT_GDT_OFFSET + 24));
+        assert_eq!(0x0, read_u64(gm, BOOT_IDT_OFFSET));
+
+        assert_eq!(0, sregs.cs.base);
+        assert_eq!(0xfffff, sregs.ds.limit);
+        assert_eq!(0x10, sregs.es.selector);
+        assert_eq!(1, sregs.fs.present);
+        assert_eq!(1, sregs.gs.g);
+        assert_eq!(0, sregs.ss.avl);
+        assert_eq!(0, sregs.tr.base);
+        assert_eq!(0xfffff, sregs.tr.limit);
+        assert_eq!(0, sregs.tr.avl);
+        assert!(sregs.cr0 & X86_CR0_PE != 0);
+        assert!(sregs.efer & EFER_LME != 0 && sregs.efer & EFER_LMA != 0);
+    }
+
+    fn validate_page_tables(
+        gm: &GuestMemoryMmap,
+        sregs: &kvm_sregs,
+        existing_pgtable: Option<GuestAddress>,
+    ) {
+        assert_eq!(0xa003, read_u64(gm, PML4_START));
+        assert_eq!(0xb003, read_u64(gm, PDPTE_START));
+        for i in 0..512 {
+            assert_eq!((i << 21) + 0x83u64, read_u64(gm, PDE_START + (i * 8)));
+        }
+
+        if let Some(pgtable_base) = existing_pgtable {
+            assert_eq!(pgtable_base.raw_value(), sregs.cr3);
+        } else {
+            assert_eq!(PML4_START as u64, sregs.cr3);
+        }
+        assert!(sregs.cr4 & X86_CR4_PAE != 0);
+        assert!(sregs.cr0 & X86_CR0_PG != 0);
+    }
+
+    #[test]
+    fn test_configure_segments_and_sregs() {
+        let mut sregs: kvm_sregs = Default::default();
+        let gm = create_guest_mem();
+        configure_segments_and_sregs(&gm, &mut sregs).unwrap();
+
+        validate_segments_and_sregs(&gm, &sregs);
+    }
+
+    #[test]
+    fn test_setup_page_tables() {
+        let mut sregs: kvm_sregs = Default::default();
+        let gm = create_guest_mem();
+        let existing_pgtable = Some(GuestAddress(0xdead_beaf_dead_beaf));
+        setup_page_tables(&gm, &mut sregs, None).unwrap();
+
+        validate_page_tables(&gm, &sregs, None);
+
+        setup_page_tables(&gm, &mut sregs, existing_pgtable).unwrap();
+
+        validate_page_tables(&gm, &sregs, existing_pgtable);
+    }
 
     #[test]
     fn test_setup_fpu() {
@@ -230,5 +410,74 @@ mod tests {
         // The mxcsr will stay 0 and the assert below fails. Decide whether or not we should
         // remove it at all.
         // assert!(expected_fpu.mxcsr == actual_fpu.mxcsr);
+    }
+
+    #[test]
+    #[allow(clippy::cast_ptr_alignment)]
+    fn test_setup_msrs() {
+        let kvm = Kvm::new().unwrap();
+        let vm = kvm.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        setup_msrs(&vcpu).unwrap();
+
+        // This test will check against the last MSR entry configured (the tenth one).
+        // See create_msr_entries() for details.
+        let test_kvm_msrs_entry = [kvm_msr_entry {
+            index: msr::MSR_IA32_MISC_ENABLE,
+            ..Default::default()
+        }];
+        let mut kvm_msrs = Msrs::from_entries(&test_kvm_msrs_entry).unwrap();
+
+        // kvm_ioctls::get_msrs() returns the number of msrs that it succeeded in reading.
+        // We only want to read one in this test case scenario.
+        let read_nmsrs = vcpu.get_msrs(&mut kvm_msrs).unwrap();
+        // Validate it only read one.
+        assert_eq!(read_nmsrs, 1);
+
+        // Official entries that were setup when we did setup_msrs. We need to assert that the
+        // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
+        // expect.
+        let entry_vec = create_msr_entries();
+        assert_eq!(entry_vec[9], kvm_msrs.as_slice()[0]);
+    }
+
+    #[test]
+    fn test_setup_regs() {
+        let kvm = Kvm::new().unwrap();
+        let vm = kvm.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+
+        let expected_regs: kvm_regs = kvm_regs {
+            rflags: 0x0000_0000_0000_0002u64,
+            rip: 1,
+            rsp: db_boot::layout::BOOT_STACK_POINTER as u64,
+            rbp: db_boot::layout::BOOT_STACK_POINTER as u64,
+            rsi: db_boot::layout::ZERO_PAGE_START as u64,
+            ..Default::default()
+        };
+
+        setup_regs(&vcpu, expected_regs.rip).unwrap();
+
+        let actual_regs: kvm_regs = vcpu.get_regs().unwrap();
+        assert_eq!(actual_regs, expected_regs);
+    }
+
+    #[test]
+    fn test_setup_sregs() {
+        let kvm = Kvm::new().unwrap();
+        let vm = kvm.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let gm = create_guest_mem();
+
+        assert!(vcpu.set_sregs(&Default::default()).is_ok());
+        setup_sregs(&gm, &vcpu, None).unwrap();
+
+        let mut sregs: kvm_sregs = vcpu.get_sregs().unwrap();
+        // for AMD KVM_GET_SREGS returns g = 0 for each kvm_segment.
+        // We set it to 1, otherwise the test will fail.
+        sregs.gs.g = 1;
+
+        validate_segments_and_sregs(&gm, &sregs);
+        validate_page_tables(&gm, &sregs, None);
     }
 }

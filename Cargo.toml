@@ -7,3 +7,6 @@ members = [
     "crates/db-boot",
     "crates/db-device",
 ]
+
+[patch.crates-io]
+db-boot = { path = "crates/db-boot" }
