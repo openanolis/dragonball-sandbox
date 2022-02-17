@@ -107,3 +107,7 @@ manager.mmio_write(0, &vec![0, 1]).unwrap();
     manager.pio_read(0, &mut buffer);
 }
 ```
+
+## License
+
+This project is licensed under [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0.
