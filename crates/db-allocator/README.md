@@ -132,3 +132,7 @@ mem_pool.update(&mem_range, region);
 // After allocation, we can use the memory range to do mapping and other memory related work.
 ...
 ```
+
+## License
+
+This project is licensed under [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0.
