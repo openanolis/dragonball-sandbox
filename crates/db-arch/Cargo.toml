@@ -10,10 +10,10 @@ keywords = ["dragonball", "arch", "ARM64", "x86", "VMM"]
 readme = "README.md"
 
 [dependencies]
-kvm-bindings = { version = ">=0.5.0", features = ["fam-wrappers"] }
-kvm-ioctls = ">=0.9.0"
-vm-memory = { version = "0.7", features = ["backend-mmap"] }
-vmm-sys-util = ">=0.8.0"
+kvm-bindings = { version = "0.5.0", features = ["fam-wrappers"] }
+kvm-ioctls = "0.9.0"
+vm-memory = { version = "0.7.0", features = ["backend-mmap"] }
+vmm-sys-util = "0.9.0"
 
 [package.metadata.docs.rs]
 all-features = true
