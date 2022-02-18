@@ -16,14 +16,13 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize, MemoryRegionAddress,
 };
 
-/// Internal types for Address space.
-#[cfg(not(feature = "atomic-guest-memory"))]
-pub type AddressSpace = AddressSpaceInternal;
+#[cfg(not(feature = "region-hotplug"))]
+/// Concrete type to implement address space manager.
+pub type AddressSpace = AddressSpaceBase;
 
-/// Internal types for Address space in atomic scenario.
-/// This is a fundamental feature for memory hotplug
-#[cfg(feature = "atomic-guest-memory")]
-pub type AddressSpace = self::atomic::AddressSpaceAtomic;
+#[cfg(feature = "region-hotplug")]
+/// Concrete type to implement address space manager with region hotplug capability.
+pub type AddressSpace = self::hotplug::AddressSpaceAtomic;
 
 /// Errors associated with virtual machine address space management.
 #[derive(Debug, thiserror::Error)]
@@ -37,42 +36,41 @@ pub enum AddressSpaceError {
     InvalidAddressRange(u64, GuestUsize),
 
     /// Failed to create memfd to map anonymous memory.
-    #[error("cannot create memfd to map anonymous memory")]
+    #[error("can not create memfd to map anonymous memory")]
     CreateMemFd(#[source] nix::Error),
 
     /// Failed to open memory file.
-    #[error("cannot open memory file")]
+    #[error("can not open memory file")]
     OpenFile(#[source] std::io::Error),
 
     /// Failed to set size for memory file.
-    #[error("cannot set size for memory file")]
+    #[error("can not set size for memory file")]
     SetFileSize(#[source] std::io::Error),
 
     /// Failed to unlink memory file.
-    #[error("cannot unlike memory file")]
+    #[error("can not unlink memory file")]
     UnlinkFile(#[source] nix::Error),
 }
 
 /// Type of address space regions.
 ///
 /// On physical machines, physical memory may have different properties, such as
-/// volatile vs non-volatile, read-only vs read-write, non-executable vs
-/// executable etc. On virtual machines, the concept of memory property may be
-/// extended to support better cooperation between the hypervisor and the guest
-/// kernel. Here address space region type means what the region will be used for by
-/// the guest OS, and different permissions and policies may be applied to different
-/// address space regions.
+/// volatile vs non-volatile, read-only vs read-write, non-executable vs executable etc.
+/// On virtual machines, the concept of memory property may be extended to support better
+/// cooperation between the hypervisor and the guest kernel. Here address space region type means
+/// what the region will be used for by the guest OS, and different permissions and policies may
+/// be applied to different address space regions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AddressSpaceRegionType {
-    /// Normal memory accessible by CPUs and IO devices
+    /// Normal memory accessible by CPUs and IO devices.
     DefaultMemory,
-    /// Device MMIO address
+    /// MMIO address region for Devices.
     DeviceMemory,
-    /// DAX address
+    /// DAX address region for virtio-fs/virtio-pmem.
     DAXMemory,
 }
 
-/// Represent a guest address region.
+/// Struct to maintain configuration information about a guest address region.
 #[derive(Debug, Clone)]
 pub struct AddressSpaceRegion {
     /// Type of address space regions.
@@ -85,13 +83,17 @@ pub struct AddressSpaceRegion {
     file_offset: Option<FileOffset>,
     /// Mmap permission flags.
     perm_flags: i32,
-    /// Hugepage madvise hint, this needs 'advise' or 'always' policy in host shmem config
+    /// Hugepage madvise hint.
+    ///
+    /// It needs 'advise' or 'always' policy in host shmem config.
     is_hugepage: bool,
-    /// hotplug hint, for hotplug_size region, should set 'true'
+    /// Hotplug hint.
     is_hotplug: bool,
-    /// anonymous memory, for add MADV_DONTFORK, should set 'true'
+    /// Anonymous memory hint.
+    ///
+    /// It should be true for regions with the MADV_DONTFORK flag enabled.
     is_anon: bool,
-    /// host numa node id for this address space region to be allocated from
+    /// Host NUMA node ids assigned to this region.
     host_numa_node_id: Option<u32>,
 }
 
@@ -111,21 +113,6 @@ impl AddressSpaceRegion {
         }
     }
 
-    /// Set hugeshme madvise hint, only has affect when memory type is shmem
-    pub fn set_hugepage(&mut self) {
-        self.is_hugepage = true
-    }
-
-    /// Set anonymous memory hint
-    pub fn set_anonpage(&mut self) {
-        self.is_anon = true
-    }
-
-    /// Set hotplug hint
-    pub fn set_hotplug(&mut self) {
-        self.is_hotplug = true
-    }
-
     /// Create an address space region with all configurable information.
     ///
     /// # Arguments
@@ -134,45 +121,46 @@ impl AddressSpaceRegion {
     /// * `size` - Length of content to map
     /// * `file_offset` - Optional file descriptor and offset to map content from
     /// * `perm_flags` - mmap permission flags
-    /// * `is_hugeshmem` - Enable THP on shmem
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
+    /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn build(
         ty: AddressSpaceRegionType,
         base: GuestAddress,
         size: GuestUsize,
         file_offset: Option<FileOffset>,
         perm_flags: i32,
-        is_hotplug: bool,
         host_numa_node_id: Option<u32>,
+        is_hotplug: bool,
     ) -> Self {
-        AddressSpaceRegion {
-            ty,
-            base,
-            size,
-            file_offset,
-            perm_flags,
-            is_hugepage: false,
-            is_hotplug,
-            is_anon: false,
-            host_numa_node_id,
+        let mut region = Self::new(ty, base, size);
+
+        region.set_file_offset(file_offset);
+        region.set_perm_flags(perm_flags);
+        region.set_host_numa_node_id(host_numa_node_id);
+        if is_hotplug {
+            region.set_hotplug();
         }
+
+        region
     }
 
-    /// Create an address space region to map memory from memfd/hugetlbfs into the virtual machine.
+    /// Create an address space region to map memory into the virtual machine.
     ///
     /// # Arguments
     /// * `base` - Base address in VM to map content
     /// * `size` - Length of content to map
     /// * `mem_type` - Memory mapping from, 'shmem' or 'hugetlbfs'
     /// * `mem_file_path` - Memory file path
-    /// * `numa_node_id` - NUMA node id to allocate memory from
-    /// * `mem_prealloc_enabled` - Enable prealloc of guest memory or not
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
+    /// * `mem_prealloc` - Whether to enable pre-allocation of guest memory
+    /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn create_default_memory_region(
         base: GuestAddress,
         size: GuestUsize,
         mem_type: &str,
         mem_file_path: &str,
         numa_node_id: Option<u32>,
-        mem_prealloc_enabled: bool,
+        mem_prealloc: bool,
         is_hotplug: bool,
     ) -> Result<AddressSpaceRegion, AddressSpaceError> {
         Self::create_memory_region(
@@ -181,9 +169,8 @@ impl AddressSpaceRegion {
             mem_type,
             mem_file_path,
             numa_node_id,
-            mem_prealloc_enabled,
+            mem_prealloc,
             is_hotplug,
-            AddressSpaceRegionType::DefaultMemory,
         )
     }
 
@@ -194,21 +181,19 @@ impl AddressSpaceRegion {
     /// * `size` - Length of content to map
     /// * `mem_type` - Memory mapping from, 'shmem' or 'hugetlbfs'
     /// * `mem_file_path` - Memory file path
-    /// * `numa_node_id` - NUMA node id to allocate memory from
-    /// * `mem_prealloc_enabled` - Enable prealloc of guest memory or not
-    /// * `region_type` - The type of address spacee region
-    #[allow(clippy::too_many_arguments)]
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
+    /// * `mem_prealloc` - Whether to enable pre-allocation of guest memory
+    /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn create_memory_region(
         base: GuestAddress,
         size: GuestUsize,
         mem_type: &str,
         mem_file_path: &str,
         numa_node_id: Option<u32>,
-        mem_prealloc_enabled: bool,
+        mem_prealloc: bool,
         is_hotplug: bool,
-        region_type: AddressSpaceRegionType,
     ) -> Result<AddressSpaceRegion, AddressSpaceError> {
-        let perm_flags = if mem_prealloc_enabled {
+        let perm_flags = if mem_prealloc {
             libc::MAP_SHARED | libc::MAP_POPULATE
         } else {
             libc::MAP_SHARED
@@ -227,13 +212,13 @@ impl AddressSpaceRegion {
             file.set_len(size as u64)
                 .map_err(AddressSpaceError::SetFileSize)?;
             let mut reg = Self::build(
-                region_type,
+                AddressSpaceRegionType::DefaultMemory,
                 base,
                 size,
                 Some(FileOffset::new(file, 0)),
                 perm_flags,
-                is_hotplug,
                 numa_node_id,
+                is_hotplug,
             );
             if Self::is_hugeshmem(mem_type) {
                 reg.set_hugepage();
@@ -241,17 +226,17 @@ impl AddressSpaceRegion {
             Ok(reg)
         } else if Self::is_anon(mem_type) || Self::is_hugeanon(mem_type) {
             let mut perm_flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
-            if mem_prealloc_enabled {
+            if mem_prealloc {
                 perm_flags |= libc::MAP_POPULATE
             }
             let mut reg = Self::build(
-                region_type,
+                AddressSpaceRegionType::DefaultMemory,
                 base,
                 size,
                 None,
                 perm_flags,
-                is_hotplug,
                 numa_node_id,
+                is_hotplug,
             );
             if Self::is_hugeanon(mem_type) {
                 reg.set_hugepage();
@@ -259,7 +244,6 @@ impl AddressSpaceRegion {
             reg.set_anonpage();
             Ok(reg)
         } else if Self::is_hugetlbfs(mem_type) {
-            let offset = 0;
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -269,15 +253,15 @@ impl AddressSpaceRegion {
             nix::unistd::unlink(mem_file_path).map_err(AddressSpaceError::UnlinkFile)?;
             file.set_len(size as u64)
                 .map_err(AddressSpaceError::SetFileSize)?;
-            let file_offset = FileOffset::new(file, offset);
+            let file_offset = FileOffset::new(file, 0);
             Ok(Self::build(
-                region_type,
+                AddressSpaceRegionType::DefaultMemory,
                 base,
                 size,
                 Some(file_offset),
                 perm_flags,
-                is_hotplug,
                 numa_node_id,
+                is_hotplug,
             ))
         } else {
             Err(AddressSpaceError::InvalidRegionType)
@@ -299,8 +283,8 @@ impl AddressSpaceRegion {
             size,
             None,
             0,
-            false,
             None,
+            false,
         ))
     }
 
@@ -314,19 +298,19 @@ impl AddressSpaceRegion {
         self.perm_flags
     }
 
-    /// Get hotplug hint
-    pub fn is_hotplug(&self) -> bool {
-        self.is_hotplug
+    /// Set mmap permission flags for the address space region.
+    pub fn set_perm_flags(&mut self, perm_flags: i32) {
+        self.perm_flags = perm_flags;
     }
 
-    /// Get hugepage flags
-    pub fn is_hugepage(&self) -> bool {
-        self.is_hugepage
+    /// Check whether the address space region is backed by a memory file.
+    pub fn has_file(&self) -> bool {
+        self.file_offset.is_some()
     }
 
-    /// Get anon flags
-    pub fn is_anon_flags(&self) -> bool {
-        self.is_anon
+    /// Set associated file/offset pair for the region.
+    pub fn set_file_offset(&mut self, file_offset: Option<FileOffset>) {
+        self.file_offset = file_offset;
     }
 
     /// Get host_numa_node_id flags
@@ -334,9 +318,39 @@ impl AddressSpaceRegion {
         self.host_numa_node_id
     }
 
-    /// Check whether the address space region is backed by a memory file.
-    pub fn has_file(&self) -> bool {
-        self.file_offset.is_some()
+    /// Set associated NUMA node ID to allocate memory from for this region.
+    pub fn set_host_numa_node_id(&mut self, host_numa_node_id: Option<u32>) {
+        self.host_numa_node_id = host_numa_node_id;
+    }
+
+    /// Set the hotplug hint.
+    pub fn set_hotplug(&mut self) {
+        self.is_hotplug = true
+    }
+
+    /// Get the hotplug hint.
+    pub fn is_hotplug(&self) -> bool {
+        self.is_hotplug
+    }
+
+    /// Set hugepage hint for `madvise()`, only takes effect when the memory type is `shmem`.
+    pub fn set_hugepage(&mut self) {
+        self.is_hugepage = true
+    }
+
+    /// Get the hugepage hint.
+    pub fn is_hugepage(&self) -> bool {
+        self.is_hugepage
+    }
+
+    /// Set the anonymous memory hint.
+    pub fn set_anonpage(&mut self) {
+        self.is_anon = true
+    }
+
+    /// Get the anonymous memory hint.
+    pub fn is_anonpage(&self) -> bool {
+        self.is_anon
     }
 
     /// Check whether the address space region is valid.
@@ -380,7 +394,6 @@ impl AddressSpaceRegion {
     }
 }
 
-// TODO: implement following methods on demand
 impl Bytes<MemoryRegionAddress> for AddressSpaceRegion {
     type E = GuestMemoryError;
 
@@ -475,109 +488,116 @@ impl GuestMemoryRegion for AddressSpaceRegion {
         self.base
     }
 
-    fn file_offset(&self) -> Option<&FileOffset> {
-        self.file_offset.as_ref()
-    }
-
     fn bitmap(&self) -> &Self::B {
         &()
     }
+
+    fn file_offset(&self) -> Option<&FileOffset> {
+        self.file_offset.as_ref()
+    }
 }
 
-/// Struct to preserve several boundary of address space
-#[derive(Debug, Clone, PartialEq)]
-pub struct AddressSpaceBoundary {
-    /// guest physical end address
+/// Address space layout configuration.
+///
+/// The layout configuration must guarantee that `mem_start` <= `mem_end` <= `phys_end`.
+/// Non-memory region should be arranged into the range [mem_end, phys_end).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddressSpaceLayout {
+    /// end of guest physical address
     pub phys_end: u64,
-    /// guest memory start address
+    /// start of guest memory address
     pub mem_start: u64,
-    /// guest memory end address
+    /// end of guest memory address
     pub mem_end: u64,
 }
 
-impl AddressSpaceBoundary {
-    /// Create a new boundary with several constraints.
+impl AddressSpaceLayout {
+    /// Create a new instance of `AddressSpaceLayout`.
     pub fn new(phys_end: u64, mem_start: u64, mem_end: u64) -> Self {
-        AddressSpaceBoundary {
+        AddressSpaceLayout {
             phys_end,
             mem_start,
             mem_end,
         }
     }
-}
 
-/// Struct to manage virtual machine's physical address space.
-#[derive(Clone)]
-pub struct AddressSpaceInternal {
-    regions: Vec<Arc<AddressSpaceRegion>>,
-    boundary: AddressSpaceBoundary,
-}
+    /// Check whether an region is valid with the constraints of the layout.
+    pub fn is_region_valid(&self, region: &AddressSpaceRegion) -> bool {
+        let region_end = match region.base.0.checked_add(region.size) {
+            None => return false,
+            Some(v) => v,
+        };
 
-impl AddressSpaceInternal {
-    /// Find the region to which the guest_addr belongs, and determine
-    /// whether the type of the region is DAXMemory
-    ///
-    /// # Arguments
-    /// * `guest_addr` - the guest physical address you want to inquire
-    pub fn is_reserved_region(&self, guest_addr: GuestAddress) -> bool {
-        for reg in self.regions.iter() {
-            // Safe because region is allocated from ResourceManager's mem_pool
-            // or mmio_pool, so reg.start_addr() + reg.len() will not overflow
-            if reg.region_type() == AddressSpaceRegionType::DAXMemory
-                && reg.start_addr() <= guest_addr
-                && reg.start_addr().checked_add(reg.len()).unwrap() > guest_addr
-            {
-                return true;
+        match region.ty {
+            AddressSpaceRegionType::DefaultMemory => {
+                if region.base.0 < self.mem_start || region_end > self.mem_end {
+                    return false;
+                }
+            }
+            AddressSpaceRegionType::DeviceMemory | AddressSpaceRegionType::DAXMemory => {
+                if region.base.0 < self.mem_end || region_end > self.phys_end {
+                    return false;
+                }
             }
         }
-        false
-    }
 
-    /// Create an address space instance from address space regions and boundary.
+        true
+    }
+}
+
+/// Base implementation to manage guest physical address space, without support of region hotplug.
+#[derive(Clone)]
+pub struct AddressSpaceBase {
+    regions: Vec<Arc<AddressSpaceRegion>>,
+    layout: AddressSpaceLayout,
+}
+
+impl AddressSpaceBase {
+    /// Create an instance of `AddressSpaceBase` from an `AddressSpaceRegion` array.
     ///
-    /// To achieve better performance by using binary search algorithm, the `regions` vector will
-    /// gotten sorted.
+    /// To achieve better performance by using binary search algorithm, the `regions` vector
+    /// will gotten sorted by guest physical address.
+    ///
     /// Note, panicking if some regions intersects with each other.
     ///
     /// # Arguments
     /// * `regions` - prepared regions to managed by the address space instance.
-    /// * `boundary` - prepared address space boundary.
+    /// * `layout` - prepared address space layout configuration.
     pub fn from_regions(
         mut regions: Vec<Arc<AddressSpaceRegion>>,
-        boundary: AddressSpaceBoundary,
+        layout: AddressSpaceLayout,
     ) -> Self {
-        regions.sort_by_key(|v| v.base);
+        regions.sort_unstable_by_key(|v| v.base);
+        for region in regions.iter() {
+            if !layout.is_region_valid(region) {
+                panic!(
+                    "Invalid region {:?} for address space layout {:?}",
+                    region, layout
+                );
+            }
+        }
         for idx in 1..regions.len() {
             if regions[idx].intersect_with(&regions[idx - 1]) {
                 panic!("address space regions intersect with each other");
             }
         }
-        AddressSpaceInternal { regions, boundary }
+        AddressSpaceBase { regions, layout }
     }
 
-    /// Walk each regions and call a function
+    /// Insert a new address space region into the address space.
     ///
     /// # Arguments
-    /// * `cb` - call back function applied to each region.
-    pub fn walk_regions<F>(&self, mut cb: F) -> Result<(), AddressSpaceError>
-    where
-        F: FnMut(&Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError>,
-    {
-        for reg in self.regions.iter() {
-            cb(reg)?;
-        }
-
-        Ok(())
-    }
-
-    /// Insert a new region into address space
-    ///
-    /// # Arguments
-    /// * `region` - created new region to be inserted.
+    /// * `region` - the new region to be inserted.
     pub fn insert_region(
         &mut self,
         region: Arc<AddressSpaceRegion>,
     ) -> Result<(), AddressSpaceError> {
+        if !self.layout.is_region_valid(&region) {
+            return Err(AddressSpaceError::InvalidAddressRange(
+                region.start_addr().0,
+                region.len(),
+            ));
+        }
         for idx in 0..self.regions.len() {
             if self.regions[idx].intersect_with(&region) {
                 return Err(AddressSpaceError::InvalidAddressRange(
@@ -590,28 +610,34 @@ impl AddressSpaceInternal {
         Ok(())
     }
 
-    /// Get numa node id from region.
+    /// Enumerate all regions in the address space.
     ///
     /// # Arguments
-    /// * `gpa` - guest physical address.
-    pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
+    /// * `cb` - the callback function to apply to each region.
+    pub fn walk_regions<F>(&self, mut cb: F) -> Result<(), AddressSpaceError>
+    where
+        F: FnMut(&Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError>,
+    {
         for reg in self.regions.iter() {
-            if gpa >= reg.base.0 && gpa < (reg.base.0 + reg.size) {
-                return reg.host_numa_node_id;
-            }
+            cb(reg)?;
         }
 
-        None
+        Ok(())
     }
 
-    /// Get address space boundary
-    pub fn get_boundary(&self) -> AddressSpaceBoundary {
-        self.boundary.clone()
+    /// Create a [GuestMemoryMmap] object from the address space object.
+    pub fn create_guest_memory() -> GuestMemoryMmap {
+        GuestMemoryMmap::new()
     }
 
-    /// Get last valid address from regions
+    /// Get address space layout associated with the address space.
+    pub fn get_layout(&self) -> AddressSpaceLayout {
+        self.layout.clone()
+    }
+
+    /// Get maximum of guest physical address in the address space.
     pub fn get_last_addr(&self) -> GuestAddress {
-        let mut last_addr = GuestAddress(self.boundary.mem_start);
+        let mut last_addr = GuestAddress(self.layout.mem_start);
         for reg in self.regions.iter() {
             if reg.ty != AddressSpaceRegionType::DAXMemory && reg.last_addr() > last_addr {
                 last_addr = reg.last_addr();
@@ -620,94 +646,147 @@ impl AddressSpaceInternal {
         last_addr
     }
 
-    /// Create an empty guest memory mmap.
-    pub fn create_guest_memory() -> GuestMemoryMmap {
-        GuestMemoryMmap::new()
+    /// Check whether the guest physical address `guest_addr` belongs to a DAX memory region.
+    ///
+    /// # Arguments
+    /// * `guest_addr` - the guest physical address to inquire
+    pub fn is_dax_region(&self, guest_addr: GuestAddress) -> bool {
+        for reg in self.regions.iter() {
+            // Safe because we have validate the region when creating the address space object.
+            if reg.region_type() == AddressSpaceRegionType::DAXMemory
+                && reg.start_addr() <= guest_addr
+                && reg.start_addr().0 + reg.len() > guest_addr.0
+            {
+                return true;
+            }
+        }
+        false
     }
 
-    #[cfg(not(feature = "atomic-guest-memory"))]
-    /// Wrap GuestMemoryMmap with Arc.
-    pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
-        Arc::new(gm)
+    /// Get optional NUMA node id associated with guest physical address `gpa`.
+    ///
+    /// # Arguments
+    /// * `gpa` - guest physical address to query.
+    pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
+        for reg in self.regions.iter() {
+            if gpa >= reg.base.0 && gpa < (reg.base.0 + reg.size) {
+                return reg.host_numa_node_id;
+            }
+        }
+        None
     }
 }
 
-#[cfg(feature = "atomic-guest-memory")]
-mod atomic {
+#[cfg(feature = "region-hotplug")]
+mod hotplug {
     use super::*;
     use arc_swap::ArcSwap;
-    use std::sync::Arc;
-    use vm_memory::atomic::GuestMemoryAtomic;
 
-    /// Wrapper over `AddressSpaceInternal` to support atomic address space region.
+    /// An address space implementation with region hotplug capability.
+    ///
+    /// The `AddressSpaceAtomic` is a wrapper over [AddressSpaceInternal] to support hotplug of
+    /// address space regions.
     #[derive(Clone)]
     pub struct AddressSpaceAtomic {
-        state: Arc<ArcSwap<AddressSpaceInternal>>,
+        state: Arc<ArcSwap<AddressSpaceBase>>,
     }
 
     impl AddressSpaceAtomic {
-        /// Find the region to which the guest_addr belongs, and determine
-        /// whether the type of the region is DAXMemory
+        /// Create an instance of `AddressSpaceAtomic` from an `AddressSpaceRegion` array.
+        ///
+        /// To achieve better performance by using binary search algorithm, the `regions` vector
+        /// will gotten sorted by guest physical address.
+        ///
+        /// Note, panicking if some regions intersects with each other.
         ///
         /// # Arguments
-        /// * `guest_addr` - the guest physical address you want to inquire
-        pub fn is_reserved_region(&self, guest_addr: GuestAddress) -> bool {
-            let guard = self.state.load();
-            guard.is_reserved_region(guest_addr)
-        }
-
+        /// * `regions` - prepared regions to managed by the address space instance.
+        /// * `layout` - prepared address space layout configuration.
         pub fn from_regions(
             regions: Vec<Arc<AddressSpaceRegion>>,
-            boundary: AddressSpaceBoundary,
+            boundary: AddressSpaceLayout,
         ) -> Self {
-            let internal = AddressSpaceInternal::from_regions(regions, boundary);
+            let internal = AddressSpaceBase::from_regions(regions, boundary);
 
             AddressSpaceAtomic {
                 state: Arc::new(ArcSwap::new(Arc::new(internal))),
             }
         }
 
+        /// Insert a new address space region into the address space.
+        ///
+        /// # Arguments
+        /// * `region` - the new region to be inserted.
         pub fn insert_region(
             &mut self,
             region: Arc<AddressSpaceRegion>,
         ) -> Result<(), AddressSpaceError> {
             let curr = self.state.load().regions.clone();
-            let boundary = self.state.load().boundary.clone();
-            let mut internal = AddressSpaceInternal::from_regions(curr, boundary);
+            let boundary = self.state.load().layout.clone();
+            let mut internal = AddressSpaceBase::from_regions(curr, boundary);
             internal.insert_region(region)?;
             let _old = self.state.swap(Arc::new(internal));
 
             Ok(())
         }
 
+        /// Enumerate all regions in the address space.
+        ///
+        /// # Arguments
+        /// * `cb` - the callback function to apply to each region.
         pub fn walk_regions<F>(&self, cb: F) -> Result<(), AddressSpaceError>
         where
             F: FnMut(&Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError>,
         {
-            let guard = self.state.load();
-            guard.walk_regions(cb)
+            self.state.load().walk_regions(cb)
         }
 
-        pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
-            let guard = self.state.load();
-            guard.get_numa_node_id(gpa)
+        /// Create a [GuestMemoryMmap] object from the address space object.
+        pub fn create_guest_memory() -> GuestMemoryMmap {
+            AddressSpaceBase::create_guest_memory()
         }
 
-        pub fn get_boundary(&self) -> AddressSpaceBoundary {
-            self.state.load().get_boundary()
+        /// Get address space layout associated with the address space.
+        pub fn get_layout(&self) -> AddressSpaceLayout {
+            self.state.load().get_layout()
         }
 
+        /// Get maximum of guest physical address in the address space.
         pub fn get_last_addr(&self) -> GuestAddress {
             self.state.load().get_last_addr()
         }
 
-        pub fn create_guest_memory() -> GuestMemoryMmap {
-            AddressSpaceInternal::create_guest_memory()
+        /// Check whether the guest physical address `guest_addr` belongs to a DAX memory region.
+        ///
+        /// # Arguments
+        /// * `guest_addr` - the guest physical address to inquire
+        pub fn is_dax_region(&self, guest_addr: GuestAddress) -> bool {
+            self.state.load().is_dax_region(guest_addr)
         }
 
-        pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> GuestMemoryAtomic<GuestMemoryMmap> {
-            GuestMemoryAtomic::from(Arc::new(gm))
+        /// Get optional NUMA node id associated with guest physical address `gpa`.
+        ///
+        /// # Arguments
+        /// * `gpa` - guest physical address to query.
+        pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
+            self.state.load().get_numa_node_id(gpa)
         }
+    }
+}
+
+impl AddressSpace {
+    #[cfg(feature == "memory-hotplug")]
+    /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
+    pub fn convert_into_vm_as(
+        gm: GuestMemoryMmap,
+    ) -> vm_memory::atomic::GuestMemoryAtomic<GuestMemoryMmap> {
+        GuestMemoryAtomic::from(Arc::new(gm))
+    }
+
+    #[cfg(not(feature == "memory-hotplug"))]
+    /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
+    pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
+        Arc::new(gm)
     }
 }
 
@@ -740,15 +819,15 @@ mod tests {
                 page_size as GuestUsize,
             )),
         ];
-        let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
         let address_space = AddressSpace::from_regions(address_space_region, boundary);
 
-        assert!(!address_space.is_reserved_region(GuestAddress(page_size)));
-        assert!(!address_space.is_reserved_region(GuestAddress(page_size * 2)));
-        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3)));
-        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3 + 1)));
-        assert!(!address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size)));
-        assert!(address_space.is_reserved_region(GuestAddress(page_size * 3 + page_size - 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
+        assert!(address_space.is_dax_region(GuestAddress(page_size * 3)));
+        assert!(address_space.is_dax_region(GuestAddress(page_size * 3 + 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size * 3 + page_size)));
+        assert!(address_space.is_dax_region(GuestAddress(page_size * 3 + page_size - 1)));
     }
 
     #[test]
@@ -788,8 +867,8 @@ mod tests {
             0x1000,
             Some(FileOffset::new(f, 0x0)),
             0x5a,
-            false,
             None,
+            false,
         );
         assert_eq!(reg2.region_type(), AddressSpaceRegionType::DefaultMemory);
         assert!(reg2.is_valid());
@@ -893,9 +972,9 @@ mod tests {
             AddressSpaceRegion::create_device_region(GuestAddress(0x100000), 0x1000).unwrap(),
         );
         let regions = vec![reg];
-        let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let address_space = AddressSpaceInternal::from_regions(regions, boundary.clone());
-        assert_eq!(address_space.get_boundary(), boundary);
+        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpaceBase::from_regions(regions, boundary.clone());
+        assert_eq!(address_space.get_layout(), boundary);
     }
 
     #[should_panic]
@@ -910,7 +989,7 @@ mod tests {
             AddressSpaceRegion::create_device_region(GuestAddress(0x10_0000), 0x1000).unwrap(),
         );
         let regions = vec![reg.clone(), reg];
-        let boundary = AddressSpaceBoundary::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let _ = AddressSpaceInternal::from_regions(regions, boundary);
+        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let _ = AddressSpaceBase::from_regions(regions, boundary);
     }
 }
