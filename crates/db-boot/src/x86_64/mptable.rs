@@ -8,14 +8,15 @@
 
 //! MP Table configurations used for defining VM boot status.
 
-use libc::c_char;
 use std::io;
 use std::mem;
 use std::result;
 use std::slice;
 
-use super::mpspec;
+use libc::c_char;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory};
+
+use super::mpspec;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:

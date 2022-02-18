@@ -11,11 +11,11 @@
 
 use std::mem;
 
-use super::gdt::{gdt_entry, kvm_segment_from_gdt};
-
 use kvm_bindings::{kvm_fpu, kvm_sregs};
 use kvm_ioctls::VcpuFd;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
+
+use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 
 // Initial pagetables.
 pub const PML4_START: u64 = 0x9000;

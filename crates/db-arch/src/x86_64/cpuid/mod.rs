@@ -9,12 +9,11 @@
 //! Utilities for configuring the CPUID (CPU identification) for the guest microVM.
 
 pub mod bit_helper;
-pub mod cpu_leaf;
-
 mod brand_string;
 mod common;
-mod transformer;
+pub mod cpu_leaf;
 
+mod transformer;
 pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
 
 type CpuId = kvm_bindings::CpuId;

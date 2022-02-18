@@ -7,7 +7,9 @@
 
 mod interval_tree;
 pub use interval_tree::{IntervalTree, NodeState, Range};
+
 use std::result;
+
 use thiserror::Error;
 
 /// Error conditions that may appear during `Allocator` related operations.
