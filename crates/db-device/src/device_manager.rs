@@ -86,10 +86,11 @@
 
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
-use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::result;
 use std::sync::Arc;
+
+use thiserror::Error;
 
 use crate::resources::Resource;
 #[cfg(target_arch = "x86_64")]
@@ -97,27 +98,15 @@ use crate::PioAddress;
 use crate::{DeviceIo, IoAddress, IoSize};
 
 /// Error type for `IoManager` usage.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// The inserting device overlaps with a current device.
+    #[error("device address conflicts with existing devices")]
     DeviceOverlap,
     /// The device doesn't exist.
+    #[error("no such device")]
     NoDevice,
 }
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::DeviceOverlap => write!(
-                f,
-                "device_manager: device address conflicts with existing devices"
-            ),
-            Error::NoDevice => write!(f, "device_manager: no such device"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// Simplify the `Result` type.
 pub type Result<T> = result::Result<T, Error>;
@@ -664,7 +653,7 @@ mod tests {
         assert!(err.source().is_none());
         assert_eq!(
             format!("{}", err),
-            "device_manager: device address conflicts with existing devices"
+            "device address conflicts with existing devices"
         );
 
         let err = super::Error::NoDevice;
