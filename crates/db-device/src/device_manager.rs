@@ -47,7 +47,6 @@
 //!         );
 //!     }
 //!
-//!     #[cfg(target_arch = "x86_64")]
 //!     fn pio_read(&self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {
 //!         println!(
 //!             "pio read, base: 0x{:x}, offset: 0x{:x}",
@@ -56,7 +55,6 @@
 //!         );
 //!     }
 //!
-//!     #[cfg(target_arch = "x86_64")]
 //!     fn pio_write(&self, base: PioAddress, offset: PioAddress, data: &[u8]) {
 //!         println!(
 //!             "pio write, base: 0x{:x}, offset: 0x{:x}",
@@ -72,7 +70,6 @@
 //!     base: 0,
 //!     size: 4096,
 //! });
-//! #[cfg(target_arch = "x86_64")]
 //! resources.append(Resource::PioAddressRange { base: 0, size: 32 });
 //!
 //! // Register device to `IoManager` with resources
@@ -82,7 +79,6 @@
 //!
 //! // Dispatch I/O event from `IoManager` to device
 //! manager.mmio_write(0, &vec![0, 1]).unwrap();
-//! #[cfg(target_arch = "x86_64")]
 //! {
 //!     let mut buffer = vec![0; 4];
 //!     manager.pio_read(0, &mut buffer);
@@ -98,9 +94,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::resources::Resource;
-#[cfg(target_arch = "x86_64")]
-use crate::PioAddress;
-use crate::{DeviceIo, IoAddress, IoSize};
+use crate::{DeviceIo, IoAddress, IoSize, PioAddress};
 
 /// Error types for `IoManager` related operations.
 #[derive(Error, Debug)]
@@ -124,7 +118,6 @@ pub struct IoRange {
 }
 
 impl IoRange {
-    #[cfg(target_arch = "x86_64")]
     fn new_pio_range(base: u16, size: u16) -> Self {
         IoRange {
             base: IoAddress(base as u64),
@@ -166,7 +159,6 @@ impl PartialOrd for IoRange {
 /// And then the registered callbacks will invoked by IO manager.
 #[derive(Clone, Default)]
 pub struct IoManager {
-    #[cfg(target_arch = "x86_64")]
     /// Range mapping for VM exit pio operations.
     pio_bus: BTreeMap<IoRange, Arc<dyn DeviceIo>>,
     /// Range mapping for VM exit mmio operations.
@@ -194,7 +186,6 @@ impl IoManager {
     ) -> Result<()> {
         for (idx, res) in resources.iter().enumerate() {
             match *res {
-                #[cfg(target_arch = "x86_64")]
                 Resource::PioAddressRange { base, size } => {
                     if self
                         .pio_bus
@@ -235,7 +226,6 @@ impl IoManager {
     pub fn unregister_device_io(&mut self, resources: &[Resource]) -> Result<()> {
         for res in resources.iter() {
             match *res {
-                #[cfg(target_arch = "x86_64")]
                 Resource::PioAddressRange { base, size } => {
                     self.pio_bus.remove(&IoRange::new_pio_range(base, size));
                 }
@@ -278,7 +268,6 @@ impl IoManager {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 impl IoManager {
     /// Handle VM IO Exit events triggered by trapped PIO read accesses.
     ///
@@ -312,7 +301,6 @@ impl IoManager {
 
 impl PartialEq for IoManager {
     fn eq(&self, other: &IoManager) -> bool {
-        #[cfg(target_arch = "x86_64")]
         if self.pio_bus.len() != other.pio_bus.len() {
             return false;
         }
@@ -320,7 +308,6 @@ impl PartialEq for IoManager {
             return false;
         }
 
-        #[cfg(target_arch = "x86_64")]
         for (io_range, device_io) in self.pio_bus.iter() {
             if !other.pio_bus.contains_key(io_range) {
                 return false;
@@ -431,9 +418,7 @@ mod tests {
     use super::*;
     use crate::resources::DeviceResources;
 
-    #[cfg(target_arch = "x86_64")]
     const PIO_ADDRESS_SIZE: u16 = 4;
-    #[cfg(target_arch = "x86_64")]
     const PIO_ADDRESS_BASE: u16 = 0x40;
     const MMIO_ADDRESS_SIZE: u64 = 0x8765_4321;
     const MMIO_ADDRESS_BASE: u64 = 0x1234_5678;
@@ -468,7 +453,6 @@ mod tests {
             *config = u32::from(data[0]) & 0xff;
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_read(&self, _base: PioAddress, _offset: PioAddress, data: &mut [u8]) {
             if data.len() > 4 {
                 return;
@@ -479,7 +463,6 @@ mod tests {
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_write(&self, _base: PioAddress, _offset: PioAddress, data: &[u8]) {
             let mut config = self.config.lock().expect("failed to acquire lock");
             *config = u32::from(data[0]) & 0xff;
@@ -502,37 +485,31 @@ mod tests {
         resource.push(mmio);
         resource.push(irq);
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            let pio = Resource::PioAddressRange {
-                base: PIO_ADDRESS_BASE,
-                size: PIO_ADDRESS_SIZE,
-            };
-            resource.push(pio);
-        }
+        let pio = Resource::PioAddressRange {
+            base: PIO_ADDRESS_BASE,
+            size: PIO_ADDRESS_SIZE,
+        };
+        resource.push(pio);
 
         assert!(io_mgr.register_device_io(dum.clone(), &resource).is_ok());
 
         let io_mgr2 = io_mgr.clone();
         assert_eq!(io_mgr2.mmio_bus.len(), 1);
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            assert_eq!(io_mgr2.pio_bus.len(), 1);
+        assert_eq!(io_mgr2.pio_bus.len(), 1);
 
-            let (dev, addr) = io_mgr2
-                .get_mmio_device(IoAddress(MMIO_ADDRESS_BASE + 1))
-                .unwrap();
-            assert_eq!(Arc::strong_count(dev), 5);
+        let (dev, addr) = io_mgr2
+            .get_mmio_device(IoAddress(MMIO_ADDRESS_BASE + 1))
+            .unwrap();
+        assert_eq!(Arc::strong_count(dev), 5);
 
-            assert_eq!(addr, IoAddress(MMIO_ADDRESS_BASE));
+        assert_eq!(addr, IoAddress(MMIO_ADDRESS_BASE));
 
-            drop(io_mgr);
-            assert_eq!(Arc::strong_count(dev), 3);
+        drop(io_mgr);
+        assert_eq!(Arc::strong_count(dev), 3);
 
-            drop(io_mgr2);
-            assert_eq!(Arc::strong_count(&dum), 1);
-        }
+        drop(io_mgr2);
+        assert_eq!(Arc::strong_count(&dum), 1);
     }
 
     #[test]
@@ -546,7 +523,6 @@ mod tests {
             base: MMIO_ADDRESS_BASE,
             size: MMIO_ADDRESS_SIZE,
         };
-        #[cfg(target_arch = "x86_64")]
         let pio = Resource::PioAddressRange {
             base: PIO_ADDRESS_BASE,
             size: PIO_ADDRESS_SIZE,
@@ -554,7 +530,6 @@ mod tests {
         let irq = Resource::LegacyIrq(LEGACY_IRQ);
 
         resources.append(mmio);
-        #[cfg(target_arch = "x86_64")]
         resources.append(pio);
         resources.append(irq);
 
@@ -593,7 +568,6 @@ mod tests {
             .is_err());
     }
 
-    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_pio_read_write() {
         let mut io_mgr: IoManager = Default::default();
@@ -664,18 +638,15 @@ mod tests {
             base: MMIO_ADDRESS_BASE,
             size: MMIO_ADDRESS_SIZE,
         };
-        #[cfg(target_arch = "x86_64")]
         let pio = Resource::PioAddressRange {
             base: PIO_ADDRESS_BASE,
             size: PIO_ADDRESS_SIZE,
         };
 
         resources1.append(mmio.clone());
-        #[cfg(target_arch = "x86_64")]
         resources1.append(pio.clone());
 
         resources2.append(mmio);
-        #[cfg(target_arch = "x86_64")]
         resources2.append(pio);
 
         io_mgr1.register_device_io(dummy1, &resources1).unwrap();
@@ -698,14 +669,12 @@ mod tests {
             base: MMIO_ADDRESS_BASE,
             size: MMIO_ADDRESS_SIZE,
         };
-        #[cfg(target_arch = "x86_64")]
         let pio = Resource::PioAddressRange {
             base: PIO_ADDRESS_BASE,
             size: PIO_ADDRESS_SIZE,
         };
 
         resources1.append(mmio.clone());
-        #[cfg(target_arch = "x86_64")]
         resources1.append(pio);
 
         resources2.append(mmio);

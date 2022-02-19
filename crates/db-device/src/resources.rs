@@ -25,7 +25,6 @@ use std::ops::Deref;
 /// Enumeration describing a device's resource allocation requirements and constraints.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ResourceConstraint {
-    #[cfg(target_arch = "x86_64")]
     /// Constraint for an IO Port address range.
     PioAddress {
         /// Allocating resource within the range [`min`, `max`] if specified.
@@ -84,7 +83,6 @@ pub enum ResourceConstraint {
 }
 
 impl ResourceConstraint {
-    #[cfg(target_arch = "x86_64")]
     /// Create a new PIO address constraint object with default configuration.
     pub fn new_pio(size: u16) -> Self {
         ResourceConstraint::PioAddress {
@@ -94,7 +92,6 @@ impl ResourceConstraint {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Create a new PIO address constraint object.
     pub fn pio_with_constraints(size: u16, range: Option<(u16, u16)>, align: u16) -> Self {
         ResourceConstraint::PioAddress { range, align, size }
@@ -172,7 +169,6 @@ pub enum MsiIrqType {
 /// Enumeration for device resources.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Resource {
-    #[cfg(target_arch = "x86_64")]
     /// IO Port resource range.
     PioAddressRange {
         /// Pio resource base
@@ -226,7 +222,6 @@ impl DeviceResources {
         self.0.push(entry);
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Get the IO port address resources.
     pub fn get_pio_address_ranges(&self) -> Vec<(u16, u16)> {
         let mut vec = Vec::new();
@@ -340,9 +335,7 @@ impl Deref for DeviceResources {
 pub(crate) mod tests {
     use super::*;
 
-    #[cfg(target_arch = "x86_64")]
     const PIO_ADDRESS_SIZE: u16 = 5;
-    #[cfg(target_arch = "x86_64")]
     const PIO_ADDRESS_BASE: u16 = 0;
     const MMIO_ADDRESS_SIZE: u64 = 0x8765_4321;
     const MMIO_ADDRESS_BASE: u64 = 0x1234_5678;
@@ -361,15 +354,12 @@ pub(crate) mod tests {
     pub fn get_device_resource() -> DeviceResources {
         let mut resource = DeviceResources::new();
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            let entry = Resource::PioAddressRange {
-                base: PIO_ADDRESS_BASE,
-                size: PIO_ADDRESS_SIZE,
-            };
-            resource.append(entry.clone());
-            assert_eq!(entry, resource[0]);
-        }
+        let entry = Resource::PioAddressRange {
+            base: PIO_ADDRESS_BASE,
+            size: PIO_ADDRESS_SIZE,
+        };
+        resource.append(entry.clone());
+        assert_eq!(entry, resource[0]);
 
         let entry = Resource::MmioAddressRange {
             base: MMIO_ADDRESS_BASE,
@@ -424,7 +414,6 @@ pub(crate) mod tests {
         resource
     }
 
-    #[cfg(target_arch = "x86_64")]
     #[test]
     fn get_pio_address_ranges() {
         let resources = get_device_resource();
@@ -524,33 +513,30 @@ pub(crate) mod tests {
 
     #[test]
     fn test_resource_constraint() {
-        #[cfg(target_arch = "x86_64")]
+        let pio = ResourceConstraint::new_pio(2);
+        let pio2 = pio;
+        let mmio = ResourceConstraint::new_mmio(0x1000);
+        assert_eq!(pio, pio2);
+        assert_ne!(pio, mmio);
+
+        if let ResourceConstraint::PioAddress { range, align, size } =
+            ResourceConstraint::new_pio(2)
         {
-            let pio = ResourceConstraint::new_pio(2);
-            let pio2 = pio;
-            let mmio = ResourceConstraint::new_mmio(0x1000);
-            assert_eq!(pio, pio2);
-            assert_ne!(pio, mmio);
+            assert_eq!(range, None);
+            assert_eq!(align, 1);
+            assert_eq!(size, 2);
+        } else {
+            panic!("Pio resource constraint is invalid.");
+        }
 
-            if let ResourceConstraint::PioAddress { range, align, size } =
-                ResourceConstraint::new_pio(2)
-            {
-                assert_eq!(range, None);
-                assert_eq!(align, 1);
-                assert_eq!(size, 2);
-            } else {
-                panic!("Pio resource constraint is invalid.");
-            }
-
-            if let ResourceConstraint::PioAddress { range, align, size } =
-                ResourceConstraint::pio_with_constraints(2, Some((15, 16)), 2)
-            {
-                assert_eq!(range, Some((15, 16)));
-                assert_eq!(align, 2);
-                assert_eq!(size, 2);
-            } else {
-                panic!("Pio resource constraint is invalid.");
-            }
+        if let ResourceConstraint::PioAddress { range, align, size } =
+            ResourceConstraint::pio_with_constraints(2, Some((15, 16)), 2)
+        {
+            assert_eq!(range, Some((15, 16)));
+            assert_eq!(align, 2);
+            assert_eq!(size, 2);
+        } else {
+            panic!("Pio resource constraint is invalid.");
         }
 
         if let ResourceConstraint::MmioAddress { range, align, size } =
