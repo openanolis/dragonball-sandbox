@@ -13,11 +13,10 @@
 //! [vm-device]: https://github.com/rust-vmm/vm-device
 
 use std::cmp::{Ord, PartialOrd};
+use std::convert::TryFrom;
 use std::sync::Mutex;
 
 use self::resources::DeviceResources;
-#[cfg(target_arch = "x86_64")]
-pub use self::x86::{PioAddress, PioSize};
 
 pub mod device_manager;
 pub mod resources;
@@ -74,104 +73,97 @@ impl From<IoAddress> for u64 {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-mod x86 {
-    use std::convert::TryFrom;
+type PioAddressType = u16;
 
-    use super::{IoAddress, IoSize};
+/// Size of Port I/O range/request.
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct PioSize(pub PioAddressType);
 
-    type PioAddressType = u16;
+impl PioSize {
+    /// Get the raw value as u64 to make operation simple.
+    #[inline]
+    pub fn raw_value(self) -> PioAddressType {
+        self.0
+    }
+}
 
-    /// Size of Port I/O range/request.
-    #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-    pub struct PioSize(pub PioAddressType);
+impl From<PioAddressType> for PioSize {
+    #[inline]
+    fn from(size: PioAddressType) -> Self {
+        PioSize(size)
+    }
+}
 
-    impl PioSize {
-        /// Get the raw value as u64 to make operation simple.
-        #[inline]
-        pub fn raw_value(self) -> PioAddressType {
-            self.0
+impl From<PioSize> for PioAddressType {
+    #[inline]
+    fn from(size: PioSize) -> Self {
+        size.0
+    }
+}
+
+impl TryFrom<IoSize> for PioSize {
+    type Error = IoSize;
+
+    #[inline]
+    fn try_from(size: IoSize) -> Result<Self, Self::Error> {
+        if size.raw_value() <= std::u16::MAX as u64 {
+            Ok(PioSize(size.raw_value() as PioAddressType))
+        } else {
+            Err(size)
         }
     }
+}
 
-    impl From<PioAddressType> for PioSize {
-        #[inline]
-        fn from(size: PioAddressType) -> Self {
-            PioSize(size)
+impl From<PioSize> for IoSize {
+    #[inline]
+    fn from(size: PioSize) -> Self {
+        IoSize(size.raw_value() as u64)
+    }
+}
+
+/// Port IO (PIO) address.
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct PioAddress(pub PioAddressType);
+
+impl PioAddress {
+    /// Get the raw value of IO Address to make operation simple.
+    #[inline]
+    pub fn raw_value(self) -> PioAddressType {
+        self.0
+    }
+}
+
+impl From<PioAddressType> for PioAddress {
+    #[inline]
+    fn from(addr: PioAddressType) -> Self {
+        PioAddress(addr)
+    }
+}
+
+impl From<PioAddress> for PioAddressType {
+    #[inline]
+    fn from(addr: PioAddress) -> Self {
+        addr.0
+    }
+}
+
+impl TryFrom<IoAddress> for PioAddress {
+    type Error = IoAddress;
+
+    #[inline]
+    fn try_from(addr: IoAddress) -> Result<Self, Self::Error> {
+        if addr.0 <= std::u16::MAX as u64 {
+            Ok(PioAddress(addr.raw_value() as PioAddressType))
+        } else {
+            Err(addr)
         }
     }
+}
 
-    impl From<PioSize> for PioAddressType {
-        #[inline]
-        fn from(size: PioSize) -> Self {
-            size.0
-        }
-    }
-
-    impl TryFrom<IoSize> for PioSize {
-        type Error = IoSize;
-
-        #[inline]
-        fn try_from(size: IoSize) -> Result<Self, Self::Error> {
-            if size.raw_value() <= std::u16::MAX as u64 {
-                Ok(PioSize(size.raw_value() as PioAddressType))
-            } else {
-                Err(size)
-            }
-        }
-    }
-
-    impl From<PioSize> for IoSize {
-        #[inline]
-        fn from(size: PioSize) -> Self {
-            IoSize(size.raw_value() as u64)
-        }
-    }
-
-    /// Port IO (PIO) address.
-    #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-    pub struct PioAddress(pub PioAddressType);
-
-    impl PioAddress {
-        /// Get the raw value of IO Address to make operation simple.
-        #[inline]
-        pub fn raw_value(self) -> PioAddressType {
-            self.0
-        }
-    }
-
-    impl From<PioAddressType> for PioAddress {
-        #[inline]
-        fn from(addr: PioAddressType) -> Self {
-            PioAddress(addr)
-        }
-    }
-
-    impl From<PioAddress> for PioAddressType {
-        #[inline]
-        fn from(addr: PioAddress) -> Self {
-            addr.0
-        }
-    }
-
-    impl TryFrom<IoAddress> for PioAddress {
-        type Error = IoAddress;
-
-        #[inline]
-        fn try_from(addr: IoAddress) -> Result<Self, Self::Error> {
-            if addr.0 <= std::u16::MAX as u64 {
-                Ok(PioAddress(addr.raw_value() as PioAddressType))
-            } else {
-                Err(addr)
-            }
-        }
-    }
-
-    impl From<PioAddress> for IoAddress {
-        #[inline]
-        fn from(addr: PioAddress) -> Self {
-            IoAddress(addr.raw_value() as u64)
-        }
+impl From<PioAddress> for IoAddress {
+    #[inline]
+    fn from(addr: PioAddress) -> Self {
+        IoAddress(addr.raw_value() as u64)
     }
 }
 
@@ -194,11 +186,9 @@ pub trait DeviceIo: Send + Sync {
     /// Write from `data` to the MMIO address `base + offset`.
     fn write(&self, base: IoAddress, offset: IoAddress, data: &[u8]) {}
 
-    #[cfg(target_arch = "x86_64")]
     /// Read from port `base + offset` into `data`.
     fn pio_read(&self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {}
 
-    #[cfg(target_arch = "x86_64")]
     /// Write from `data` to the port `base + offset`.
     fn pio_write(&self, base: PioAddress, offset: PioAddress, data: &[u8]) {}
 
@@ -231,11 +221,9 @@ pub trait DeviceIoMut: Send {
     /// Write from `data` to the MMIO address `base + offset`.
     fn write(&mut self, base: IoAddress, offset: IoAddress, data: &[u8]) {}
 
-    #[cfg(target_arch = "x86_64")]
     /// Read from port `base + offset` into `data`.
     fn pio_read(&mut self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {}
 
-    #[cfg(target_arch = "x86_64")]
     /// Write from `data` to the port `base + offset`.
     fn pio_write(&mut self, base: PioAddress, offset: PioAddress, data: &[u8]) {}
 
@@ -264,13 +252,11 @@ impl<T: DeviceIoMut> DeviceIo for Mutex<T> {
         self.lock().unwrap().write(base, offset, data)
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {
         // Safe to unwrap() because we don't expect poisoned lock here.
         self.lock().unwrap().pio_read(base, offset, data)
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, base: PioAddress, offset: PioAddress, data: &[u8]) {
         // Safe to unwrap() because we don't expect poisoned lock here.
         self.lock().unwrap().pio_write(base, offset, data)
@@ -289,7 +275,6 @@ impl<T: DeviceIoMut> DeviceIo for Mutex<T> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_arch = "x86_64")]
     use std::convert::TryFrom;
     use std::sync::Arc;
 
@@ -309,12 +294,10 @@ mod tests {
             *self.data.lock().unwrap() = data[0];
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_read(&self, _base: PioAddress, _offset: PioAddress, data: &mut [u8]) {
             data[0] = *self.data.lock().unwrap();
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_write(&self, _base: PioAddress, _offset: PioAddress, data: &[u8]) {
             *self.data.lock().unwrap() = data[0];
         }
@@ -334,12 +317,10 @@ mod tests {
             self.data = data[0];
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_read(&mut self, _base: PioAddress, _offset: PioAddress, data: &mut [u8]) {
             data[0] = self.data;
         }
 
-        #[cfg(target_arch = "x86_64")]
         fn pio_write(&mut self, _base: PioAddress, _offset: PioAddress, data: &[u8]) {
             self.data = data[0];
         }
@@ -351,7 +332,6 @@ mod tests {
         device.read(IoAddress(0), IoAddress(0), &mut buf);
         assert_eq!(buf[0], 0x10);
 
-        #[cfg(target_arch = "x86_64")]
         {
             device.pio_write(PioAddress(0), PioAddress(0), &[0x10u8]);
             let mut buf = [0x0u8];
@@ -398,7 +378,6 @@ mod tests {
         assert!(io_addr < io_addr1);
     }
 
-    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_pio_data_struct() {
         let pio_size = PioSize::from(0x1111u16);
