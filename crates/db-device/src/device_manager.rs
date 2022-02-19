@@ -1,20 +1,25 @@
-// Copyright 2020 Alibaba Cloud. All Rights Reserved.
+// Copyright 2020-2022 Alibaba Cloud. All Rights Reserved.
 // Copyright © 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! System level device management.
+//! IO Device Manager to handle trapped MMIO/PIO access requests.
 //!
-//! [IoManager](struct.IoManager.html) is respondsible for managing
-//! all devices of virtual machine, registering IO resources callback,
-//! unregistering devices and helping VM IO exit handling.
-//！VMM would be responsible for getting device resource request, ask
-//! vm_allocator to allocate the resources, ask vm_device to register the
-//! devices IO ranges, and finally set resources to virtual device.
+//! The [IoManager](self::IoManager) is responsible for managing all trapped MMIO/PIO accesses for
+//! virtual devices. It cooperates with the Secure Sandbox/VMM and device drivers to handle trapped
+//! accesses. The flow is as below:
+//! - device drivers allocate resources from the VMM/resource manager, including trapped MMIO/PIO
+//!   address ranges.
+//! - the device manager registers devices to the [IoManager](self::IoManager) with trapped MMIO/PIO
+//!   address ranges.
+//! - VM IO Exit events get triggered when the guest accesses those trapped address ranges.
+//! - the vmm handle those VM IO Exit events, and dispatch them to the [IoManager].
+//! - the [IoManager] invokes registered callbacks/device drivers to handle those accesses, if there
+//!   is a device registered for the address.
 //!
 //! # Examples
 //!
-//! Creating a dummy deivce which implement DeviceIo trait, and register it to
-//! IoManager with mmio/pio resources:
+//! Creating a dummy deivce which implement DeviceIo trait, and register it to [IoManager] with
+//! trapped MMIO/PIO address ranges:
 //!
 //! ```
 //! use std::sync::Arc;
@@ -97,7 +102,7 @@ use crate::resources::Resource;
 use crate::PioAddress;
 use crate::{DeviceIo, IoAddress, IoSize};
 
-/// Error type for `IoManager` usage.
+/// Error types for `IoManager` related operations.
 #[derive(Error, Debug)]
 pub enum Error {
     /// The inserting device overlaps with a current device.
@@ -108,10 +113,10 @@ pub enum Error {
     NoDevice,
 }
 
-/// Simplify the `Result` type.
+/// A specialized version of [std::result::Result] for [IoManager] realted operations.
 pub type Result<T> = result::Result<T, Error>;
 
-/// Structure describing an IO range.
+/// Structure representing an IO address range.
 #[derive(Debug, Copy, Clone, Eq)]
 pub struct IoRange {
     base: IoAddress,
@@ -153,7 +158,12 @@ impl PartialOrd for IoRange {
     }
 }
 
-/// System IO manager serving for all devices management and VM exit handling.
+/// IO manager to handle all trapped MMIO/PIO access requests.
+///
+/// All devices handling trapped MMIO/PIO accesses should register themself to the IO manager
+/// with trapped address ranges. When guest vm accesses those trapped MMIO/PIO address ranges,
+/// VM IO Exit events will be triggered and the VMM dispatches those events to IO manager.
+/// And then the registered callbacks will invoked by IO manager.
 #[derive(Clone, Default)]
 pub struct IoManager {
     #[cfg(target_arch = "x86_64")]
@@ -164,28 +174,24 @@ pub struct IoManager {
 }
 
 impl IoManager {
-    /// Create an default IoManager with empty IO member.
+    /// Create a new instance of [IoManager].
     pub fn new() -> Self {
         IoManager::default()
     }
 
-    /// Register a new device IO with its allocated resources.
-    /// VMM is responsible for providing the allocated resources to virtual device.
+    /// Register a new device to the [IoManager], with trapped MMIO/PIO address ranges.
     ///
     /// # Arguments
     ///
-    /// * `device`: device instance object to be registered
-    /// * `resources`: resources that this device owns, might include
-    ///                port I/O and memory-mapped I/O ranges, irq number, etc.
+    /// * `device`: device object to handle trapped IO access requests
+    /// * `resources`: resources representing trapped MMIO/PIO address ranges. Only MMIO/PIO address
+    ///    ranges will be handled, and other types of resource will be ignored. So the caller does
+    ///    not need to filter out non-MMIO/PIO resources.
     pub fn register_device_io(
         &mut self,
         device: Arc<dyn DeviceIo>,
         resources: &[Resource],
     ) -> Result<()> {
-        // Register and mark device resources
-        //
-        // The resources addresses being registered are sucessfully allocated
-        // before.
         for (idx, res) in resources.iter().enumerate() {
             match *res {
                 #[cfg(target_arch = "x86_64")]
@@ -195,7 +201,7 @@ impl IoManager {
                         .insert(IoRange::new_pio_range(base, size), device.clone())
                         .is_some()
                     {
-                        // Unregister registered resources.
+                        // Rollback registered resources.
                         self.unregister_device_io(&resources[0..idx])
                             .expect("failed to unregister devices");
 
@@ -208,7 +214,7 @@ impl IoManager {
                         .insert(IoRange::new_mmio_range(base, size), device.clone())
                         .is_some()
                     {
-                        // Unregister registered resources.
+                        // Rollback registered resources.
                         self.unregister_device_io(&resources[0..idx])
                             .expect("failed to unregister devices");
 
@@ -221,15 +227,11 @@ impl IoManager {
         Ok(())
     }
 
-    /// Unregister a device from `IoManager`, e.g. users specified removing.
-    ///
-    /// VMM pre-fetches the resources e.g. dev.get_assigned_resources() VMM is
-    /// responsible for freeing the resources.
+    /// Unregister a device from `IoManager`.
     ///
     /// # Arguments
     ///
-    /// * `resources`: resources that this device owns, might include port I/O
-    ///                and memory-mapped I/O ranges, irq number, etc.
+    /// * `resources`: resource list containing all trapped address ranges for the device.
     pub fn unregister_device_io(&mut self, resources: &[Resource]) -> Result<()> {
         for res in resources.iter() {
             match *res {
@@ -246,32 +248,26 @@ impl IoManager {
         Ok(())
     }
 
-    /// A helper function handling MMIO read command during VM exit.
-    ///
-    /// The virtual device itself provides mutable ability and thead-safe
-    /// protection.
+    /// Handle VM IO Exit events triggered by trapped MMIO read accesses.
     ///
     /// Return error if failed to get the device.
     pub fn mmio_read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
-        self.get_device(IoAddress(addr))
+        self.get_mmio_device(IoAddress(addr))
             .map(|(device, base)| device.read(base, IoAddress(addr - base.raw_value()), data))
             .ok_or(Error::NoDevice)
     }
 
-    /// A helper function handling MMIO write command during VM exit.
-    ///
-    /// The virtual device itself provides mutable ability and thead-safe
-    /// protection.
+    /// Handle VM IO Exit events triggered by trapped MMIO write accesses.
     ///
     /// Return error if failed to get the device.
     pub fn mmio_write(&self, addr: u64, data: &[u8]) -> Result<()> {
-        self.get_device(IoAddress(addr))
+        self.get_mmio_device(IoAddress(addr))
             .map(|(device, base)| device.write(base, IoAddress(addr - base.raw_value()), data))
             .ok_or(Error::NoDevice)
     }
 
-    // Return the Device mapped `addr` and the base address.
-    fn get_device(&self, addr: IoAddress) -> Option<(&Arc<dyn DeviceIo>, IoAddress)> {
+    /// Get the registered device handling the trapped MMIO address `addr`.
+    fn get_mmio_device(&self, addr: IoAddress) -> Option<(&Arc<dyn DeviceIo>, IoAddress)> {
         let range = IoRange::new_mmio_range(addr.raw_value(), 0);
         if let Some((range, dev)) = self.mmio_bus.range(..=&range).nth_back(0) {
             if (addr.raw_value() - range.base.raw_value()) < range.size.raw_value() {
@@ -284,10 +280,7 @@ impl IoManager {
 
 #[cfg(target_arch = "x86_64")]
 impl IoManager {
-    /// A helper function handling PIO read command during VM exit.
-    ///
-    /// The virtual device itself provides mutable ability and thead-safe
-    /// protection.
+    /// Handle VM IO Exit events triggered by trapped PIO read accesses.
     ///
     /// Return error if failed to get the device.
     pub fn pio_read(&self, addr: u16, data: &mut [u8]) -> Result<()> {
@@ -296,10 +289,7 @@ impl IoManager {
             .ok_or(Error::NoDevice)
     }
 
-    /// A helper function handling PIO write command during VM exit.
-    ///
-    /// The virtual device itself provides mutable ability and thead-safe
-    /// protection.
+    /// Handle VM IO Exit events triggered by trapped PIO write accesses.
     ///
     /// Return error if failed to get the device.
     pub fn pio_write(&self, addr: u16, data: &[u8]) -> Result<()> {
@@ -308,7 +298,7 @@ impl IoManager {
             .ok_or(Error::NoDevice)
     }
 
-    // Return the Device mapped `addr` and the base address.
+    /// Get the registered device handling the trapped PIO address `addr`.
     fn get_pio_device(&self, addr: PioAddress) -> Option<(&Arc<dyn DeviceIo>, PioAddress)> {
         let range = IoRange::new_pio_range(addr.raw_value(), 0);
         if let Some((range, dev)) = self.pio_bus.range(..=&range).nth_back(0) {
@@ -355,15 +345,18 @@ impl PartialEq for IoManager {
     }
 }
 
-/// Io manager transaction context to register/unregister devices.
+/// Trait for IO manager context object to support device hotplug at runtime.
+///
+/// The `IoManagerContext` objects are passed to devices by the IO manager, so the devices could
+/// use it to hot-add/hot-remove other devices at runtime. It provides a transaction mechanism
+/// to hot-add/hot-remove devices.
 pub trait IoManagerContext {
-    /// Type of context object.
+    /// Type of context object passed to the callbacks.
     type Context;
 
     /// Begin a transaction and return a context object.
     ///
-    /// The returned context object must be passed to commit_tx() or cancel_tx()
-    /// later.
+    /// The returned context object must be passed to commit_tx() or cancel_tx() later.
     fn begin_tx(&self) -> Self::Context;
 
     /// Commit the transaction.
@@ -372,14 +365,15 @@ pub trait IoManagerContext {
     /// Cancel the transaction.
     fn cancel_tx(&self, ctx: Self::Context);
 
-    /// Register a new device IO with its allocated resources.
+    /// Register a new device with its associated resources to the IO manager.
     ///
     /// # Arguments
     ///
     /// * `ctx`: context object returned by begin_tx().
     /// * `device`: device instance object to be registered
-    /// * `resources`: resources that this device owns, might include port I/O
-    ///                and memory-mapped I/O ranges, irq number, etc.
+    /// * `resources`: resources representing trapped MMIO/PIO address ranges. Only MMIO/PIO address
+    ///    ranges will be handled, and other types of resource will be ignored. So the caller does
+    ///    not need to filter out non-MMIO/PIO resources.
     fn register_device_io(
         &self,
         ctx: &mut Self::Context,
@@ -387,17 +381,12 @@ pub trait IoManagerContext {
         resources: &[Resource],
     ) -> Result<()>;
 
-    /// Unregister a device from `IoManager`, e.g. users specified removing.
-    ///
-    /// VMM pre-fetches the resources e.g. dev.get_assigned_resources()
-    ///
-    /// VMM is responsible for freeing the resources.
+    /// Unregister a device from the IO manager.
     ///
     /// # Arguments
     ///
     /// * `ctx`: context object returned by begin_tx().
-    /// * `resources`: resources that this device owns, might include port I/O
-    ///                and memory-mapped I/O ranges, irq number, etc.
+    /// * `resources`: resource list containing all trapped address ranges for the device.
     fn unregister_device_io(&self, ctx: &mut Self::Context, resources: &[Resource]) -> Result<()>;
 }
 
@@ -532,7 +521,7 @@ mod tests {
             assert_eq!(io_mgr2.pio_bus.len(), 1);
 
             let (dev, addr) = io_mgr2
-                .get_device(IoAddress(MMIO_ADDRESS_BASE + 1))
+                .get_mmio_device(IoAddress(MMIO_ADDRESS_BASE + 1))
                 .unwrap();
             assert_eq!(Arc::strong_count(dev), 5);
 
