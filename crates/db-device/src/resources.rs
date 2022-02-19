@@ -1,21 +1,28 @@
 // Copyright (C) 2019 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Structs to manage device resources.
+//! Descriptors representing device resource allocation requirements and assigned resources.
 //!
-//! The high level flow of resource management among the VMM, the device
-//! manager, and the device is as below:
+//! There are several components related to resource management:
+//! - the Dragonball Secure Sandbox (VMM), which is responsible for creating and registering devices
+//!   to the device manager.
+//! - the device manager, which manages all devices of a Dragonball Secure Sandbox instance.
+//! - the devices, which implement virtual device backends for the guest.
+//!
+//! They cooperate with each to provide resources required by each device. The high level flow of
+//! resource management is as below:
 //! 1) the VMM creates a new device object.
-//! 2) the VMM asks the new device object for its resource constraints.
-//! 3) the VMM allocates resources for the device object according to resource
-//!    constraints.
-//! 4) the VMM passes the allocated resources to the device object.
-//! 5) the VMM registers the new device onto corresponding device managers
-//!    according the allocated resources.
+//! 2) the device returns an array of [ResourceConstraint](self::ResourceConstraint),
+//!    describing the required resources and resource allocation constraints.
+//! 3) the VMM allocates required resources from a resource manager,
+//! 4) the VMM passes the allocated resources [DeviceResources](self::DeviceResources),
+//!    which is an array of [Resource](self::Resource), to the device object.
+//! 5) the VMM registers the new device onto corresponding device managers according the allocated
+//!    resources.
 
 use std::ops::Deref;
 
-/// Enumeration describing a device's resource constraints.
+/// Enumeration describing a device's resource allocation requirements and constraints.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ResourceConstraint {
     #[cfg(target_arch = "x86_64")]
