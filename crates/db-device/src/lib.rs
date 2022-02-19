@@ -4,10 +4,13 @@
 
 #![deny(missing_docs)]
 
-//! dragonball-vmm device model.
-
-pub mod device_manager;
-pub mod resources;
+//! Device model for Dragonball Secure Sandbox.
+//!
+//! The `db-device` crate, as a counterpart of [vm-device], defines device model for the
+//! Dragonball Secure Sandbox. The `db-device` crate shares some common concepts and data structures
+//! with [vm-device], but it also diverges from [vm-device] due to different VMM designs.
+//!
+//! [vm-device]: https://github.com/rust-vmm/vm-device
 
 use std::cmp::{Ord, PartialOrd};
 use std::sync::Mutex;
@@ -16,7 +19,10 @@ use self::resources::DeviceResources;
 #[cfg(target_arch = "x86_64")]
 pub use self::x86::{PioAddress, PioSize};
 
-/// IO Size.
+pub mod device_manager;
+pub mod resources;
+
+/// Size of MMIO range/access request.
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct IoSize(pub u64);
 
@@ -42,7 +48,7 @@ impl From<IoSize> for u64 {
     }
 }
 
-/// IO Addresses.
+/// Memory Mapped IO (MMIO) address.
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct IoAddress(pub u64);
 
@@ -76,8 +82,8 @@ mod x86 {
 
     type PioAddressType = u16;
 
+    /// Size of Port I/O range/request.
     #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-    /// Port I/O size.
     pub struct PioSize(pub PioAddressType);
 
     impl PioSize {
@@ -122,7 +128,7 @@ mod x86 {
         }
     }
 
-    /// Port I/O address.
+    /// Port IO (PIO) address.
     #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
     pub struct PioAddress(pub PioAddressType);
 
@@ -169,37 +175,31 @@ mod x86 {
     }
 }
 
-/// IO Addresses.
+/// Trait for device to handle trapped MMIO/PIO access requests with interior mutability
+/// for high performance.
 ///
-/// Device IO trait adopting interior mutability pattern.
+/// Any device which needs to trap MMIO/PIO access requests should implement the [DeviceIo] or
+/// [DeviceIoMut] trait and register itself to the [IoManager](crate::device_manager::IoManager)
+/// with those trapped IO address ranges. When the guest access those trapped address ranges,
+/// the access request will be routed to the registered callbacks.
 ///
-/// A device supporting memory based I/O should implement this trait, then
-/// register itself against the different IO type ranges it handles. The VMM
-/// will then dispatch IO (PIO or MMIO) VM exits by calling into the registered
-/// devices read or write method from this trait.
-///
-/// The DeviceIo trait adopts the interior mutability pattern so we can get a
-/// real concurrent multiple threads handling. For device backend drivers not
-/// focusing on high performance, they may use the Mutex<T: DeviceIoMut> adapter
-/// to simplify implementation.
+/// The [DeviceIo] trait adopts the interior mutability pattern so we can get a real concurrent
+/// multiple threads handling. For device backend drivers not focusing on high performance,
+/// the Mutex<T: DeviceIoMut> adapter may be used to simplify the implementation.
 #[allow(unused_variables)]
 pub trait DeviceIo: Send + Sync {
-    /// Read from the guest physical address `base`, starting at `offset`.
-    /// Result is placed in `data`.
+    /// Read from the MMIO address `base + offset` into `data`.
     fn read(&self, base: IoAddress, offset: IoAddress, data: &mut [u8]) {}
 
-    /// Write `data` to the guest physical address `base`, starting from
-    /// `offset`.
+    /// Write from `data` to the MMIO address `base + offset`.
     fn write(&self, base: IoAddress, offset: IoAddress, data: &[u8]) {}
 
     #[cfg(target_arch = "x86_64")]
-    /// Read from the guest physical address `base`, starting at `offset`.
-    /// Result is placed in `data`.
+    /// Read from port `base + offset` into `data`.
     fn pio_read(&self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {}
 
     #[cfg(target_arch = "x86_64")]
-    /// Write `data` to the guest physical address `base`, starting from
-    /// `offset`.
+    /// Write from `data` to the port `base + offset`.
     fn pio_write(&self, base: PioAddress, offset: PioAddress, data: &[u8]) {}
 
     /// Get resources assigned to the device.
@@ -207,42 +207,36 @@ pub trait DeviceIo: Send + Sync {
         DeviceResources::new()
     }
 
-    /// Get the IO resources which will be trapped by the DeviceManager.
+    /// Get the trapped IO address ranges for the device.
     ///
-    /// All none Mmio/Pio resources in the returned resource list will be
-    /// ignored.
+    /// Only MMIO/PIO address ranges in the resource list will be handled, other resources will be
+    /// ignored. So the device does not need to filter out non-MMIO/PIO resources.
     fn get_trapped_io_resources(&self) -> DeviceResources {
         self.get_assigned_resources()
     }
 }
 
-/// Device IO trait without interior mutability.
+/// Trait for device to handle trapped MMIO/PIO access requests.
 ///
-/// Many device backend drivers will mutate itself when handling IO requests.
-/// The DeviceIo trait assumes interior mutability, but it's a little complex to
-/// support interior mutability. So the Mutex<T: DeviceIoMut> adapter may be
-/// used to ease device backend driver implementations.
+/// Many device backend drivers will mutate itself when handling IO requests. The [DeviceIo] trait
+/// assumes interior mutability, but it's a little complex to support interior mutability.
+/// So the Mutex<T: DeviceIoMut> adapter may be used to ease device backend driver implementations.
 ///
-/// The Mutex<T: DeviceIoMut> adapter is an zero overhead abstraction without
-/// performance penalty.
+/// The Mutex<T: DeviceIoMut> adapter is an zero overhead abstraction without performance penalty.
 #[allow(unused_variables)]
 pub trait DeviceIoMut: Send {
-    /// Read from the guest physical address `base`, starting at `offset`.
-    /// Result is placed in `data`.
+    /// Read from the MMIO address `base + offset` into `data`.
     fn read(&mut self, base: IoAddress, offset: IoAddress, data: &mut [u8]) {}
 
-    /// Write `data` to the guest physical address `base`, starting from
-    /// `offset`.
+    /// Write from `data` to the MMIO address `base + offset`.
     fn write(&mut self, base: IoAddress, offset: IoAddress, data: &[u8]) {}
 
     #[cfg(target_arch = "x86_64")]
-    /// Read from the guest physical address `base`, starting at `offset`.
-    /// Result is placed in `data`.
+    /// Read from port `base + offset` into `data`.
     fn pio_read(&mut self, base: PioAddress, offset: PioAddress, data: &mut [u8]) {}
 
     #[cfg(target_arch = "x86_64")]
-    /// Write `data` to the guest physical address `base`, starting from
-    /// `offset`.
+    /// Write from `data` to the port `base + offset`.
     fn pio_write(&mut self, base: PioAddress, offset: PioAddress, data: &[u8]) {}
 
     /// Get resources assigned to the device.
@@ -250,10 +244,10 @@ pub trait DeviceIoMut: Send {
         DeviceResources::new()
     }
 
-    /// Get the IO resources which will be trapped by the DeviceManager.
+    /// Get the trapped IO address ranges for the device.
     ///
-    /// All none Mmio/Pio resources in the returned resource list will be
-    /// ignored.
+    /// Only MMIO/PIO address ranges in the resource list will be handled, other resources will be
+    /// ignored. So the device does not need to filter out non-MMIO/PIO resources.
     fn get_trapped_io_resources(&self) -> DeviceResources {
         self.get_assigned_resources()
     }
