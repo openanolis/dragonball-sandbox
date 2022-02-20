@@ -1,4 +1,4 @@
-// Copyright 2021 Alibaba Cloud. All Rights Reserved.
+// Copyright 2021-2022 Alibaba Cloud. All Rights Reserved.
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -6,34 +6,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-#![allow(missing_docs)]
-// x86 reg utility
+//! Constants and utilities for x86 CPU generic, system and model specific registers.
 
 use std::mem;
-
-use super::gdt::{gdt_entry, kvm_segment_from_gdt};
-use super::msr;
 
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use kvm_ioctls::VcpuFd;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
-// Initial pagetables.
-pub const PML4_START: u64 = 0x9000;
-pub const PDPTE_START: u64 = 0xa000;
-pub const PDE_START: u64 = 0xb000;
+use super::gdt::kvm_segment_from_gdt;
+use super::msr;
 
-pub const BOOT_GDT_OFFSET: u64 = 0x500;
-pub const BOOT_IDT_OFFSET: u64 = 0x520;
-
-pub const BOOT_GDT_MAX: usize = 4;
-
+/// Non-Executable bit in EFER MSR.
 pub const EFER_NX: u64 = 0x800;
+/// Long-mode active bit in EFER MSR.
 pub const EFER_LMA: u64 = 0x400;
+/// Long-mode enable bit in EFER MSR.
 pub const EFER_LME: u64 = 0x100;
 
+/// Protection mode enable bit in CR0.
 pub const X86_CR0_PE: u64 = 0x1;
+/// Paging enable bit in CR0.
 pub const X86_CR0_PG: u64 = 0x8000_0000;
+/// Physical Address Extension bit in CR4.
 pub const X86_CR4_PAE: u64 = 0x20;
 
 /// Errors thrown while setting up x86_64 registers.
@@ -62,6 +57,7 @@ pub enum Error {
     /// Writing PML4 to RAM failed.
     WritePML4Address,
 }
+
 type Result<T> = std::result::Result<T, Error>;
 
 /// Configure Floating-Point Unit (FPU) registers for a given CPU.
@@ -107,18 +103,16 @@ pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 /// * `boot_ip` - Starting instruction pointer.
-pub fn setup_regs(vcpu: &VcpuFd, boot_ip: u64) -> Result<()> {
+/// * `rsp` - Value for RSP register
+/// * `rbp` - Value for RBP register
+/// * `rsi` - Value for RSI register
+pub fn setup_regs(vcpu: &VcpuFd, boot_ip: u64, rsp: u64, rbp: u64, rsi: u64) -> Result<()> {
     let regs: kvm_regs = kvm_regs {
         rflags: 0x0000_0000_0000_0002u64,
         rip: boot_ip,
-        // Frame pointer. It gets a snapshot of the stack pointer (rsp) so that when adjustments are
-        // made to rsp (i.e. reserving space for local variables or pushing values on to the stack),
-        // local variables and function parameters are still accessible from a constant offset from rbp.
-        rsp: db_boot::layout::BOOT_STACK_POINTER as u64,
-        // Starting stack pointer.
-        rbp: db_boot::layout::BOOT_STACK_POINTER as u64,
-        // Must point to zero page address per Linux ABI. This is x86_64 specific.
-        rsi: db_boot::layout::ZERO_PAGE_START as u64,
+        rsp,
+        rbp,
+        rsi,
         ..Default::default()
     };
 
@@ -135,33 +129,19 @@ pub fn setup_regs(vcpu: &VcpuFd, boot_ip: u64) -> Result<()> {
 pub fn setup_sregs<M: GuestMemory>(
     mem: &M,
     vcpu: &VcpuFd,
-    pgtable_addr: Option<GuestAddress>,
+    pgtable_addr: GuestAddress,
+    gdt_table: &[u64],
+    gdt_addr: u64,
+    idt_addr: u64,
 ) -> Result<()> {
     let mut sregs: kvm_sregs = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
 
-    configure_segments_and_sregs(mem, &mut sregs)?;
-    setup_page_tables(mem, &mut sregs, pgtable_addr)?; // TODO(dgreid) - Can this be done once per system instead?
-
+    configure_segments_and_sregs(mem, &mut sregs, gdt_table, gdt_addr, idt_addr)?;
+    setup_page_tables(&mut sregs, pgtable_addr)?;
     vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
-fn setup_page_tables<M: GuestMemory>(
-    mem: &M,
-    sregs: &mut kvm_sregs,
-    existing_pgtable: Option<GuestAddress>,
-) -> Result<()> {
-    if let Some(pgtable_addr) = existing_pgtable {
-        setup_ap_page_tables(mem, sregs, pgtable_addr)
-    } else {
-        setup_bp_page_tables(mem, sregs)
-    }
-}
-
-fn setup_ap_page_tables<M: GuestMemory>(
-    _mem: &M,
-    sregs: &mut kvm_sregs,
-    pgtable_addr: GuestAddress,
-) -> Result<()> {
+fn setup_page_tables(sregs: &mut kvm_sregs, pgtable_addr: GuestAddress) -> Result<()> {
     // Setup page tables with specified pgtable_addr.
     sregs.cr3 = pgtable_addr.raw_value() as u64;
     sregs.cr4 |= X86_CR4_PAE;
@@ -170,51 +150,25 @@ fn setup_ap_page_tables<M: GuestMemory>(
     Ok(())
 }
 
-fn setup_bp_page_tables<M: GuestMemory>(mem: &M, sregs: &mut kvm_sregs) -> Result<()> {
-    // Puts PML4 right after zero page but aligned to 4k.
-    let boot_pml4_addr = GuestAddress(PML4_START);
-    let boot_pdpte_addr = GuestAddress(PDPTE_START);
-    let boot_pde_addr = GuestAddress(PDE_START);
-
-    // Entry covering VA [0..512GB)
-    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
-        .map_err(|_| Error::WritePML4Address)?;
-
-    // Entry covering VA [0..1GB)
-    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
-        .map_err(|_| Error::WritePDPTEAddress)?;
-    // 512 2MB entries together covering VA [0..1GB). Note we are assuming
-    // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
-    for i in 0..512 {
-        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
-            .map_err(|_| Error::WritePDEAddress)?;
-    }
-
-    sregs.cr3 = boot_pml4_addr.raw_value() as u64;
-    sregs.cr4 |= X86_CR4_PAE;
-    sregs.cr0 |= X86_CR0_PG;
-    Ok(())
-}
-
-fn configure_segments_and_sregs<M: GuestMemory>(mem: &M, sregs: &mut kvm_sregs) -> Result<()> {
-    let gdt_table: [u64; BOOT_GDT_MAX as usize] = [
-        gdt_entry(0, 0, 0),            // NULL
-        gdt_entry(0xa09b, 0, 0xfffff), // CODE
-        gdt_entry(0xc093, 0, 0xfffff), // DATA
-        gdt_entry(0x808b, 0, 0xfffff), // TSS
-    ];
-
+fn configure_segments_and_sregs<M: GuestMemory>(
+    mem: &M,
+    sregs: &mut kvm_sregs,
+    gdt_table: &[u64],
+    gdt_addr: u64,
+    idt_addr: u64,
+) -> Result<()> {
+    assert!(gdt_table.len() >= 4);
     let code_seg = kvm_segment_from_gdt(gdt_table[1], 1);
     let data_seg = kvm_segment_from_gdt(gdt_table[2], 2);
     let tss_seg = kvm_segment_from_gdt(gdt_table[3], 3);
 
     // Write segments
-    write_gdt_table(&gdt_table[..], mem)?;
-    sregs.gdt.base = BOOT_GDT_OFFSET as u64;
-    sregs.gdt.limit = mem::size_of_val(&gdt_table) as u16 - 1;
+    write_gdt_table(gdt_table, gdt_addr, mem)?;
+    sregs.gdt.base = gdt_addr;
+    sregs.gdt.limit = (mem::size_of::<u64>() * gdt_table.len()) as u16 - 1;
 
-    write_idt_value(0, mem)?;
-    sregs.idt.base = BOOT_IDT_OFFSET as u64;
+    write_idt_value(0, idt_addr, mem)?;
+    sregs.idt.base = idt_addr;
     sregs.idt.limit = mem::size_of::<u64>() as u16 - 1;
 
     sregs.cs = code_seg;
@@ -232,9 +186,9 @@ fn configure_segments_and_sregs<M: GuestMemory>(mem: &M, sregs: &mut kvm_sregs) 
     Ok(())
 }
 
-fn write_gdt_table<M: GuestMemory>(table: &[u64], guest_mem: &M) -> Result<()> {
-    let boot_gdt_addr = GuestAddress(BOOT_GDT_OFFSET);
-    for (index, entry) in table.iter().enumerate() {
+fn write_gdt_table<M: GuestMemory>(gdt_table: &[u64], gdt_addr: u64, guest_mem: &M) -> Result<()> {
+    let boot_gdt_addr = GuestAddress(gdt_addr);
+    for (index, entry) in gdt_table.iter().enumerate() {
         let addr = guest_mem
             .checked_offset(boot_gdt_addr, index * mem::size_of::<u64>())
             .ok_or(Error::WriteGDT)?;
@@ -245,10 +199,10 @@ fn write_gdt_table<M: GuestMemory>(table: &[u64], guest_mem: &M) -> Result<()> {
     Ok(())
 }
 
-fn write_idt_value<M: GuestMemory>(val: u64, guest_mem: &M) -> Result<()> {
-    let boot_idt_addr = GuestAddress(BOOT_IDT_OFFSET);
+fn write_idt_value<M: GuestMemory>(idt_table: u64, idt_addr: u64, guest_mem: &M) -> Result<()> {
+    let boot_idt_addr = GuestAddress(idt_addr);
     guest_mem
-        .write_obj(val, boot_idt_addr)
+        .write_obj(idt_table, boot_idt_addr)
         .map_err(|_| Error::WriteIDT)
 }
 
@@ -315,8 +269,19 @@ fn create_msr_entries() -> Vec<kvm_msr_entry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::x86_64::gdt::gdt_entry;
     use kvm_ioctls::Kvm;
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+
+    const PML4_START: u64 = 0x9000;
+    const PDPTE_START: u64 = 0xa000;
+    const PDE_START: u64 = 0xb000;
+
+    const BOOT_GDT_OFFSET: u64 = 0x500;
+    const BOOT_IDT_OFFSET: u64 = 0x520;
+    const BOOT_STACK_POINTER: u64 = 0x100_0000;
+    const ZERO_PAGE_START: u64 = 0x7_C000;
+    const BOOT_GDT_MAX: usize = 4;
 
     fn create_guest_mem() -> GuestMemoryMmap {
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
@@ -347,6 +312,29 @@ mod tests {
         assert!(sregs.efer & EFER_LME != 0 && sregs.efer & EFER_LMA != 0);
     }
 
+    fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<()> {
+        let boot_pml4_addr = GuestAddress(PML4_START);
+        let boot_pdpte_addr = GuestAddress(PDPTE_START);
+        let boot_pde_addr = GuestAddress(PDE_START);
+
+        // Entry covering VA [0..512GB)
+        mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
+            .map_err(|_| Error::WritePML4Address)?;
+
+        // Entry covering VA [0..1GB)
+        mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
+            .map_err(|_| Error::WritePDPTEAddress)?;
+
+        // 512 2MB entries together covering VA [0..1GB). Note we are assuming
+        // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
+        for i in 0..512 {
+            mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
+                .map_err(|_| Error::WritePDEAddress)?;
+        }
+
+        Ok(())
+    }
+
     fn validate_page_tables(
         gm: &GuestMemoryMmap,
         sregs: &kvm_sregs,
@@ -371,7 +359,20 @@ mod tests {
     fn test_configure_segments_and_sregs() {
         let mut sregs: kvm_sregs = Default::default();
         let gm = create_guest_mem();
-        configure_segments_and_sregs(&gm, &mut sregs).unwrap();
+        let gdt_table: [u64; BOOT_GDT_MAX as usize] = [
+            gdt_entry(0, 0, 0),            // NULL
+            gdt_entry(0xa09b, 0, 0xfffff), // CODE
+            gdt_entry(0xc093, 0, 0xfffff), // DATA
+            gdt_entry(0x808b, 0, 0xfffff), // TSS
+        ];
+        configure_segments_and_sregs(
+            &gm,
+            &mut sregs,
+            &gdt_table,
+            BOOT_GDT_OFFSET,
+            BOOT_IDT_OFFSET,
+        )
+        .unwrap();
 
         validate_segments_and_sregs(&gm, &sregs);
     }
@@ -380,14 +381,11 @@ mod tests {
     fn test_setup_page_tables() {
         let mut sregs: kvm_sregs = Default::default();
         let gm = create_guest_mem();
-        let existing_pgtable = Some(GuestAddress(0xdead_beaf_dead_beaf));
-        setup_page_tables(&gm, &mut sregs, None).unwrap();
 
+        setup_bp_page_tables(&gm).unwrap();
+        setup_page_tables(&mut sregs, GuestAddress(PML4_START)).unwrap();
         validate_page_tables(&gm, &sregs, None);
-
-        setup_page_tables(&gm, &mut sregs, existing_pgtable).unwrap();
-
-        validate_page_tables(&gm, &sregs, existing_pgtable);
+        validate_page_tables(&gm, &sregs, Some(GuestAddress(PML4_START)));
     }
 
     #[test]
@@ -403,7 +401,6 @@ mod tests {
             ..Default::default()
         };
         let actual_fpu: kvm_fpu = vcpu.get_fpu().unwrap();
-        // TODO: auto-generate kvm related structures with PartialEq on.
         assert_eq!(expected_fpu.fcw, actual_fpu.fcw);
         // Setting the mxcsr register from kvm_fpu inside setup_fpu does not influence anything.
         // See 'kvm_arch_vcpu_ioctl_set_fpu' from arch/x86/kvm/x86.c.
@@ -450,13 +447,20 @@ mod tests {
         let expected_regs: kvm_regs = kvm_regs {
             rflags: 0x0000_0000_0000_0002u64,
             rip: 1,
-            rsp: db_boot::layout::BOOT_STACK_POINTER as u64,
-            rbp: db_boot::layout::BOOT_STACK_POINTER as u64,
-            rsi: db_boot::layout::ZERO_PAGE_START as u64,
+            rsp: BOOT_STACK_POINTER as u64,
+            rbp: BOOT_STACK_POINTER as u64,
+            rsi: ZERO_PAGE_START as u64,
             ..Default::default()
         };
 
-        setup_regs(&vcpu, expected_regs.rip).unwrap();
+        setup_regs(
+            &vcpu,
+            expected_regs.rip,
+            BOOT_STACK_POINTER,
+            BOOT_STACK_POINTER,
+            ZERO_PAGE_START,
+        )
+        .unwrap();
 
         let actual_regs: kvm_regs = vcpu.get_regs().unwrap();
         assert_eq!(actual_regs, expected_regs);
@@ -468,9 +472,25 @@ mod tests {
         let vm = kvm.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let gm = create_guest_mem();
+        let gdt_table: [u64; BOOT_GDT_MAX as usize] = [
+            gdt_entry(0, 0, 0),            // NULL
+            gdt_entry(0xa09b, 0, 0xfffff), // CODE
+            gdt_entry(0xc093, 0, 0xfffff), // DATA
+            gdt_entry(0x808b, 0, 0xfffff), // TSS
+        ];
+
+        setup_bp_page_tables(&gm).unwrap();
 
         assert!(vcpu.set_sregs(&Default::default()).is_ok());
-        setup_sregs(&gm, &vcpu, None).unwrap();
+        setup_sregs(
+            &gm,
+            &vcpu,
+            GuestAddress(PML4_START),
+            &gdt_table,
+            BOOT_GDT_OFFSET,
+            BOOT_IDT_OFFSET,
+        )
+        .unwrap();
 
         let mut sregs: kvm_sregs = vcpu.get_sregs().unwrap();
         // for AMD KVM_GET_SREGS returns g = 0 for each kvm_segment.
