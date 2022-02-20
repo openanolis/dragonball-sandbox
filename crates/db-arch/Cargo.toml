@@ -6,15 +6,17 @@ license = "Apache-2.0"
 edition = "2018"
 homepage = "https://github.com/openanolis/dragonball-sandbox"
 repository = "https://github.com/openanolis/dragonball-sandbox"
-keywords = ["dragonball", "arch", "ARM64", "x86", "VMM"]
+keywords = ["dragonball", "secure-sandbox", "arch", "ARM64", "x86", "VMM"]
 readme = "README.md"
 
 [dependencies]
 kvm-bindings = { version = ">=0.5.0", features = ["fam-wrappers"] }
 kvm-ioctls = ">=0.9.0"
-vm-memory = { version = "0.7", features = ["backend-mmap"] }
+vm-memory = { version = "0.7" }
 vmm-sys-util = ">=0.8.0"
-db-boot = "0.1.0"
+
+[dev-dependencies]
+vm-memory = { version = "0.7", features = ["backend-mmap"] }
 
 [package.metadata.docs.rs]
 all-features = true

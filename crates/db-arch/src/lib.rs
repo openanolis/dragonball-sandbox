@@ -3,10 +3,10 @@
 
 #![deny(missing_docs)]
 
-//! CPU architecture specific constants and utilities.
+//! CPU architecture specific constants, structures and utilities.
 //!
-//! This crate provides CPU architecture specific constants and utilities to abstract away CPU
-//! architecture specific details from the Dragonball Sandbox or other VMMs.
+//! This crate provides CPU architecture specific constants, structures and utilities to abstract
+//! away CPU architecture specific details from the Dragonball Secure Sandbox or other VMMs.
 //!
 //! # Supported CPU Architectures
 //! - **x86_64**: x86_64 (also known as x64, x86-64, AMD64, and Intel 64) is a 64-bit
