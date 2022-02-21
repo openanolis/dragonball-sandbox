@@ -24,9 +24,9 @@
 //! ```
 //! use std::sync::Arc;
 //!
-//! use db_device::device_manager::IoManager;
-//! use db_device::resources::{DeviceResources, Resource};
-//! use db_device::{DeviceIo, IoAddress, PioAddress};
+//! use dbs_device::device_manager::IoManager;
+//! use dbs_device::resources::{DeviceResources, Resource};
+//! use dbs_device::{DeviceIo, IoAddress, PioAddress};
 //!
 //! struct DummyDevice {}
 //!

@@ -1,5 +1,5 @@
 [package]
-name = "db-device"
+name = "dbs-device"
 version = "0.1.0"
 authors = ["Alibaba Dragonball Team"]
 license = "Apache-2.0"

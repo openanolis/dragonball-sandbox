@@ -6,8 +6,8 @@
 
 //! Device model for Dragonball Secure Sandbox.
 //!
-//! The `db-device` crate, as a counterpart of [vm-device], defines device model for the
-//! Dragonball Secure Sandbox. The `db-device` crate shares some common concepts and data structures
+//! The `dbs-device` crate, as a counterpart of [vm-device], defines device model for the
+//! Dragonball Secure Sandbox. The `dbs-device` crate shares some common concepts and data structures
 //! with [vm-device], but it also diverges from [vm-device] due to different VMM designs.
 //!
 //! [vm-device]: https://github.com/rust-vmm/vm-device
