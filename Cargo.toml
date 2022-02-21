@@ -6,6 +6,7 @@ members = [
     "crates/db-arch",
     "crates/db-boot",
     "crates/dbs-device",
+    "crates/dbs-legacy-devices",
 ]
 
 [patch.crates-io]
