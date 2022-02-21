@@ -1,10 +1,10 @@
-# db-device
+# dbs-device
 
-The `db-device` crate, as a counterpart of [vm-device], defines device model for the Dragonball Secure Sandbox.
-The `db-device` crate shares some common concepts and data structures with [vm-device], but it also diverges from
+The `dbs-device` crate, as a counterpart of [vm-device], defines device model for the Dragonball Secure Sandbox.
+The `dbs-device` crate shares some common concepts and data structures with [vm-device], but it also diverges from
 [vm-device] due to different VMM designs.
 
-The db-device crate provides:
+The dbs-device crate provides:
 
 - [DeviceIo] and [DeviceIoMut]: trait for device to handle trapped MMIO/PIO access requests.
 - [IoManager]: IO manager to handle trapped MMIO/PIO access requests.
@@ -13,13 +13,13 @@ The db-device crate provides:
 
 ## Design
 
-The db-device crate is designed to support the virtual machine's device model.
+The dbs-device crate is designed to support the virtual machine's device model.
 
 The core concepts of device model are [Port I/O](https://wiki.osdev.org/I/O_Ports) and 
 [Memory-mapped I/O](https://en.wikipedia.org/wiki/Memory-mapped_I/O),
 which are two main methods of performing I/O between CPU and devices.
 
-The device model provided by the db-device crate works as below:
+The device model provided by the dbs-device crate works as below:
 - The VMM creates a global resource manager, device manager and IO manager.
 - The device manager creates virtual devices configured by the VMM
     - create device object
@@ -66,9 +66,9 @@ From now on, the [IoManager] will dispatch I/O requests for the registered addre
 ```rust
 use std::sync::Arc;
 
-use db_device::device_manager::IoManager;
-use db_device::resources::{DeviceResources, Resource};
-use db_device::{DeviceIo, IoAddress, PioAddress};
+use dbs_device::device_manager::IoManager;
+use dbs_device::resources::{DeviceResources, Resource};
+use dbs_device::{DeviceIo, IoAddress, PioAddress};
 
 struct DummyDevice {}
 
