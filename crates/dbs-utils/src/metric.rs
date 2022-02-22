@@ -130,3 +130,70 @@ impl Serialize for SharedStoreMetric {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::fence;
+    use std::sync::Arc;
+    use std::thread;
+
+    use super::*;
+
+    #[test]
+    fn test_shared_inc_metric() {
+        let metric = Arc::new(SharedIncMetric::default());
+
+        // We're going to create a number of threads that will attempt to increase this metric
+        // in parallel. If everything goes fine we still can't be sure the synchronization works,
+        // but if something fails, then we definitely have a problem :-s
+
+        const NUM_THREADS_TO_SPAWN: usize = 4;
+        const NUM_INCREMENTS_PER_THREAD: usize = 10_0000;
+        const M2_INITIAL_COUNT: usize = 123;
+
+        metric.add(M2_INITIAL_COUNT);
+
+        let mut v = Vec::with_capacity(NUM_THREADS_TO_SPAWN);
+
+        for _ in 0..NUM_THREADS_TO_SPAWN {
+            let r = metric.clone();
+            v.push(thread::spawn(move || {
+                for _ in 0..NUM_INCREMENTS_PER_THREAD {
+                    r.inc();
+                }
+            }));
+        }
+
+        for handle in v {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(
+            metric.count(),
+            M2_INITIAL_COUNT + NUM_THREADS_TO_SPAWN * NUM_INCREMENTS_PER_THREAD
+        );
+    }
+
+    #[test]
+    fn test_shared_store_metric() {
+        let m1 = Arc::new(SharedStoreMetric::default());
+        m1.store(1);
+        fence(Ordering::SeqCst);
+        assert_eq!(1, m1.fetch());
+    }
+
+    #[test]
+    fn test_serialize() {
+        let s = serde_json::to_string(&SharedIncMetric(
+            AtomicUsize::new(123),
+            AtomicUsize::new(111),
+        ));
+        assert!(s.is_ok());
+    }
+
+    #[test]
+    fn test_wraps_around() {
+        let m = SharedStoreMetric(AtomicUsize::new(usize::MAX));
+        m.add(1);
+        assert_eq!(m.count(), 0);
+    }
+}
