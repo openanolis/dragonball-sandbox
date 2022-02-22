@@ -14,6 +14,7 @@ This repository contains the following crates:
 | [db-arch](crates/db-arch) | collections of CPU architecture related modules | TBD |
 | [db-boot](crates/db-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |
 | [dbs-device](crates/dbs-device) | virtual machine's device model | TBD |
+| [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | TBD |
 
 (Dragonball is a virtual machine monitor developed by Alibaba and db is the abbreviation for Dragonball.)
 

@@ -8,6 +8,7 @@ members = [
     "crates/dbs-device",
     "crates/dbs-legacy-devices",
     "crates/dbs-utils",
+    "crates/dbs-interrupt",
 ]
 
 [patch.crates-io]
