@@ -42,3 +42,21 @@ impl EventFdTrigger {
         self.0.try_clone().unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Deref;
+
+    use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+
+    #[test]
+    fn test_eventfd_trigger() {
+        let intr_evt = EventFdTrigger::new(EventFd::new(libc::EFD_NONBLOCK).unwrap());
+        intr_evt.trigger().unwrap();
+        assert_eq!(intr_evt.get_event().read().unwrap(), 1);
+        intr_evt.try_clone().unwrap().trigger().unwrap();
+        assert_eq!(intr_evt.deref().read().unwrap(), 1);
+    }
+}

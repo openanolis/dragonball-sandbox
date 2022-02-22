@@ -78,3 +78,98 @@ impl<W: Write + Send + 'static> DeviceIoMut
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+    use std::sync::{Arc, Mutex};
+    use vmm_sys_util::eventfd::EventFd;
+
+    #[derive(Clone)]
+    struct SharedBuffer {
+        buf: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl SharedBuffer {
+        fn new() -> SharedBuffer {
+            SharedBuffer {
+                buf: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl io::Write for SharedBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.buf.lock().unwrap().write(buf)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.buf.lock().unwrap().flush()
+        }
+    }
+
+    #[test]
+    fn test_serial_bus_write() {
+        let serial_out = SharedBuffer::new();
+        let intr_evt = EventFdTrigger::new(EventFd::new(libc::EFD_NONBLOCK).unwrap());
+
+        let mut serial = SerialDevice {
+            serial: Serial::with_events(
+                intr_evt,
+                SerialEventsWrapper {
+                    buffer_ready_event_fd: None,
+                },
+                Box::new(serial_out.clone()),
+            ),
+        };
+        <dyn DeviceIoMut>::pio_write(&mut serial, PioAddress(0), PioAddress(0), &[b'x', b'y']);
+
+        assert_eq!(serial_out.buf.lock().unwrap().as_slice().len(), 0);
+        <dyn DeviceIoMut>::write(&mut serial, IoAddress(0), IoAddress(0), &[b'x', b'y']);
+
+        assert_eq!(serial_out.buf.lock().unwrap().as_slice().len(), 0);
+
+        <dyn DeviceIoMut>::pio_write(&mut serial, PioAddress(0), PioAddress(0), &[b'a']);
+        <dyn DeviceIoMut>::pio_write(&mut serial, PioAddress(0), PioAddress(0), &[b'b']);
+        <dyn DeviceIoMut>::write(&mut serial, IoAddress(0), IoAddress(0), &[b'c']);
+        assert_eq!(
+            serial_out.buf.lock().unwrap().as_slice(),
+            &[b'a', b'b', b'c']
+        );
+    }
+
+    #[test]
+    fn test_serial_bus_read() {
+        let intr_evt = EventFdTrigger::new(EventFd::new(libc::EFD_NONBLOCK).unwrap());
+
+        let mut serial = SerialDevice {
+            serial: Serial::with_events(
+                intr_evt,
+                SerialEventsWrapper {
+                    buffer_ready_event_fd: None,
+                },
+                Box::new(std::io::sink()),
+            ),
+        };
+        serial
+            .serial
+            .enqueue_raw_bytes(&[b'a', b'b', b'c'])
+            .unwrap();
+
+        let mut v = [0x00; 2];
+        <dyn DeviceIoMut>::pio_read(&mut serial, PioAddress(0), PioAddress(0), &mut v);
+        assert_eq!(v[0], b'\0');
+        <dyn DeviceIoMut>::read(&mut serial, IoAddress(0), IoAddress(0), &mut v);
+        assert_eq!(v[0], b'\0');
+
+        let mut v = [0x00; 1];
+        <dyn DeviceIoMut>::pio_read(&mut serial, PioAddress(0), PioAddress(0), &mut v);
+        assert_eq!(v[0], b'a');
+
+        <dyn DeviceIoMut>::pio_read(&mut serial, PioAddress(0), PioAddress(0), &mut v);
+        assert_eq!(v[0], b'b');
+
+        <dyn DeviceIoMut>::read(&mut serial, IoAddress(0), IoAddress(0), &mut v);
+        assert_eq!(v[0], b'c');
+    }
+}
