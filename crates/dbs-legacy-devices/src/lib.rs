@@ -10,6 +10,11 @@
 pub mod serial;
 pub use self::serial::{SerialDevice, SerialWrapper};
 
+#[cfg(target_arch = "x86_64")]
+mod i8042;
+#[cfg(target_arch = "x86_64")]
+pub use self::i8042::{Error as I8042DeviceError, I8042Device};
+
 use vm_superio::Trigger;
 use vmm_sys_util::eventfd::EventFd;
 /// Newtype for implementing the trigger functionality for `EventFd`.

@@ -10,8 +10,11 @@ which is one crate can not implement a trait for a struct defined in
 another crate. This wrapper also contains the input field that is
 missing from upstream implementation.
 
+## i8042 PS/2 Controller
 
-### Acknowledgement
+The i8042 PS/2 controller emulates.
+
+## Acknowledgement
 
 Part of the code is derived from the [Firecracker](https://github.com/firecracker-microvm/firecracker) project.
 And modified to use [DeviceIoMut](../dbs-device/src/lib.rs) to support serial port to Bus.
