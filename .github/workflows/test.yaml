@@ -39,7 +39,7 @@ jobs:
 
       - name: Run test
         working-directory: .github
-        run: vagrant ssh -c 'export CARGO_INCREMENTAL=0; export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"; export RUSTDOCFLAGS=-Cpanic=abort; cd /vagrant; cargo clean; sudo -E cargo test $CARGO_OPTIONS -- -Z unstable-options'
+        run: vagrant ssh -c 'export CARGO_INCREMENTAL=0; export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"; export RUSTDOCFLAGS=-Cpanic=abort; cd /vagrant; cargo clean; sudo -E cargo test $CARGO_OPTIONS -- -Z unstable-options --test-threads 1'
 
       - name: Coverage
         uses: actions-rs/grcov@v0.1
