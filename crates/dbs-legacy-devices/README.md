@@ -10,6 +10,10 @@ which is one crate can not implement a trait for a struct defined in
 another crate. This wrapper also contains the input field that is
 missing from upstream implementation.
 
+## i8042 Devices
+
+Defined a wrapper over the `i8042 PS/2 Controller` of [vm-superio](https://github.com/rust-vmm/vm-superio). 
+The i8042 PS/2 controller emulates, at this point, only the CPU reset command which is needed for announcing the VMM about the guest's shutdown.
 
 ### Acknowledgement
 

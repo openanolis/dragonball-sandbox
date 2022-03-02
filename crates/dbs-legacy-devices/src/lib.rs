@@ -10,6 +10,9 @@
 pub mod serial;
 pub use self::serial::{SerialDevice, SerialWrapper};
 
+mod i8042;
+pub use self::i8042::I8042Device;
+
 use vm_superio::Trigger;
 use vmm_sys_util::eventfd::EventFd;
 /// Newtype for implementing the trigger functionality for `EventFd`.
