@@ -239,6 +239,7 @@ mod test {
                 panic!();
             }
         }
+        vmfd.create_irq_chip().unwrap();
         assert_eq!(group.len(), 1);
         assert_eq!(group.base(), base);
         group.enable(&legacy_fds).unwrap();
