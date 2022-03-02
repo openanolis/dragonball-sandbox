@@ -493,11 +493,11 @@ pub(crate) mod tests {
 
     fn create_interrupt_manager() -> DeviceInterruptManager<Arc<KvmIrqManager>> {
         let vmfd = Arc::new(create_vm_fd());
-        assert!(vmfd.create_irq_chip().is_ok());
+        vmfd.create_irq_chip().unwrap();
         let intr_mgr = Arc::new(KvmIrqManager::new(vmfd));
 
         let resource = create_init_resources();
-        assert!(intr_mgr.initialize().is_ok());
+        intr_mgr.initialize().unwrap();
         DeviceInterruptManager::new(intr_mgr, &resource).unwrap()
     }
 
@@ -625,15 +625,15 @@ pub(crate) mod tests {
         let mut interrupt_manager = create_interrupt_manager();
 
         assert!(interrupt_manager.set_msi_data(512, 0).is_err());
-        assert!(interrupt_manager.set_msi_data(0, 0).is_ok());
+        interrupt_manager.set_msi_data(0, 0).unwrap();
         assert!(interrupt_manager.set_msi_high_address(512, 0).is_err());
-        assert!(interrupt_manager.set_msi_high_address(0, 0).is_ok());
+        interrupt_manager.set_msi_high_address(0, 0).unwrap();
         assert!(interrupt_manager.set_msi_low_address(512, 0).is_err());
-        assert!(interrupt_manager.set_msi_low_address(0, 0).is_ok());
+        interrupt_manager.set_msi_low_address(0, 0).unwrap();
         assert!(interrupt_manager.get_msi_mask(512).is_err());
         assert!(!interrupt_manager.get_msi_mask(0).unwrap());
         assert!(interrupt_manager.set_msi_mask(512, true).is_err());
-        assert!(interrupt_manager.set_msi_mask(0, true).is_ok());
+        interrupt_manager.set_msi_mask(0, true).unwrap();
         assert!(interrupt_manager.get_msi_mask(0).unwrap());
     }
 
@@ -663,9 +663,9 @@ pub(crate) mod tests {
         let mut interrupt_manager = create_interrupt_manager();
         interrupt_manager.activated = false;
         interrupt_manager.mode = DeviceInterruptMode::Disabled;
-        assert!(interrupt_manager
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::LegacyIrq)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
@@ -673,9 +673,9 @@ pub(crate) mod tests {
         let mut interrupt_manager = create_interrupt_manager();
         interrupt_manager.activated = false;
         interrupt_manager.mode = DeviceInterruptMode::Disabled;
-        assert!(interrupt_manager
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::GenericMsiIrq)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
@@ -683,12 +683,12 @@ pub(crate) mod tests {
         let mut interrupt_manager = create_interrupt_manager();
         interrupt_manager.activated = false;
         interrupt_manager.mode = DeviceInterruptMode::Disabled;
-        assert!(interrupt_manager
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::LegacyIrq)
-            .is_ok());
-        assert!(interrupt_manager
+            .unwrap();
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::GenericMsiIrq)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
@@ -696,27 +696,27 @@ pub(crate) mod tests {
         let mut interrupt_manager = create_interrupt_manager();
         interrupt_manager.activated = false;
         interrupt_manager.mode = DeviceInterruptMode::Disabled;
-        assert!(interrupt_manager
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::GenericMsiIrq)
-            .is_ok());
-        assert!(interrupt_manager
+            .unwrap();
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::LegacyIrq)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
     fn test_update() {
         let mut interrupt_manager = create_interrupt_manager();
-        assert!(interrupt_manager
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::GenericMsiIrq)
-            .is_ok());
-        assert!(interrupt_manager.enable().is_ok());
+            .unwrap();
+        interrupt_manager.enable().unwrap();
         assert!(interrupt_manager.update(0x10).is_err());
-        assert!(interrupt_manager.update(0x01).is_ok());
-        assert!(interrupt_manager.reset().is_ok());
-        assert!(interrupt_manager
+        interrupt_manager.update(0x01).unwrap();
+        interrupt_manager.reset().unwrap();
+        interrupt_manager
             .set_working_mode(DeviceInterruptMode::LegacyIrq)
-            .is_ok());
+            .unwrap();
         assert!(interrupt_manager.update(0x10).is_err());
     }
 
