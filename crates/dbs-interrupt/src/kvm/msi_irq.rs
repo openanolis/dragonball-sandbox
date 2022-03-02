@@ -210,10 +210,10 @@ mod test {
     #[allow(unreachable_patterns)]
     fn test_msi_interrupt_group() {
         let vmfd = Arc::new(create_vm_fd());
-        assert!(vmfd.create_irq_chip().is_ok());
+        vmfd.create_irq_chip().unwrap();
 
         let rounting = Arc::new(KvmIrqRouting::new(vmfd.clone()));
-        assert!(rounting.initialize().is_ok());
+        rounting.initialize().unwrap();
 
         let base = 168;
         let count = 32;
@@ -244,7 +244,7 @@ mod test {
             msi_fds.push(InterruptSourceConfig::MsiIrq(msi_source_config));
         }
 
-        assert!(group.enable(&msi_fds).is_ok());
+        group.enable(&msi_fds).unwrap();
         assert_eq!(group.len(), count);
         assert_eq!(group.base(), base);
 
@@ -255,14 +255,14 @@ mod test {
                 data: i + 0x9876,
                 msg_ctl: i + 0x6789,
             };
-            assert!(group.notifier(i).unwrap().write(1).is_ok());
-            assert!(group.trigger(i).is_ok());
-            assert!(group
+            group.notifier(i).unwrap().write(1).unwrap();
+            group.trigger(i).unwrap();
+            group
                 .update(0, &InterruptSourceConfig::MsiIrq(msi_source_config))
-                .is_ok());
+                .unwrap();
         }
         assert!(group.trigger(33).is_err());
-        assert!(group.disable().is_ok());
+        group.disable().unwrap();
 
         assert!(MsiIrq::new(
             base,

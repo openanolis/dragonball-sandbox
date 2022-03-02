@@ -134,6 +134,7 @@ impl InterruptSourceGroup for LegacyIrq {
         if configs.len() != 1 {
             return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
         }
+
         // The IRQ routings for legacy IRQs have been configured during KvmIrqManager::initialize(),
         // so only need to register irqfd to the KVM driver.
         self.vmfd
@@ -240,17 +241,17 @@ mod test {
         }
         assert_eq!(group.len(), 1);
         assert_eq!(group.base(), base);
-        assert!(group.enable(&legacy_fds).is_ok());
-        assert!(group.notifier(0).unwrap().write(1).is_ok());
-        assert!(group.trigger(0).is_ok());
+        group.enable(&legacy_fds).unwrap();
+        group.notifier(0).unwrap().write(1).unwrap();
+        group.trigger(0).unwrap();
         assert!(group.trigger(1).is_err());
-        assert!(group
+        group
             .update(
                 0,
-                &InterruptSourceConfig::LegacyIrq(LegacyIrqSourceConfig {})
+                &InterruptSourceConfig::LegacyIrq(LegacyIrqSourceConfig {}),
             )
-            .is_ok());
-        assert!(group.disable().is_ok());
+            .unwrap();
+        group.disable().unwrap();
 
         assert!(LegacyIrq::new(base, 2, vmfd.clone(), rounting.clone()).is_err());
         assert!(LegacyIrq::new(110, 1, vmfd, rounting).is_err());

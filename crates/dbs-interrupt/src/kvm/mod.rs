@@ -303,16 +303,16 @@ mod tests {
     fn test_create_kvm_irq_manager() {
         let vmfd = Arc::new(create_vm_fd());
         let manager = KvmIrqManager::new(vmfd.clone());
-        assert!(vmfd.create_irq_chip().is_ok());
-        assert!(manager.initialize().is_ok());
+        vmfd.create_irq_chip().unwrap();
+        manager.initialize().unwrap();
     }
 
     #[test]
     fn test_kvm_irq_manager_opt() {
         let vmfd = Arc::new(create_vm_fd());
-        assert!(vmfd.create_irq_chip().is_ok());
+        vmfd.create_irq_chip().unwrap();
         let manager = Arc::new(KvmIrqManager::new(vmfd.clone()));
-        assert!(manager.initialize().is_ok());
+        manager.initialize().unwrap();
 
         // set max irqs
         manager.set_max_msi_irqs(0x128);
@@ -321,12 +321,12 @@ mod tests {
         // irq
         let group = create_irq_group(manager.clone(), vmfd.clone());
         let _ = group.clone();
-        assert!(manager.destroy_group(group).is_ok());
+        manager.destroy_group(group).unwrap();
 
         // msi
         let group = create_msi_group(manager.clone(), vmfd);
         let _ = group.clone();
-        assert!(manager.destroy_group(group).is_ok());
+        manager.destroy_group(group).unwrap();
     }
 
     #[test]
@@ -337,8 +337,8 @@ mod tests {
         // this would ok on 4.9 kernel
         assert!(routing.initialize().is_err());
 
-        assert!(vmfd.create_irq_chip().is_ok());
-        assert!(routing.initialize().is_ok());
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
 
         let routes = &routing.routes.lock().unwrap();
         assert_eq!(routes.len(), MASTER_PIC + SLAVE_PIC + IOAPIC);
@@ -352,8 +352,8 @@ mod tests {
         // this would ok on 4.9 kernel
         assert!(routing.initialize().is_err());
 
-        assert!(vmfd.create_irq_chip().is_ok());
-        assert!(routing.initialize().is_ok());
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
 
         let mut entry = kvm_irq_routing_entry {
             gsi: 8,
@@ -368,10 +368,10 @@ mod tests {
         let entrys = vec![entry];
 
         assert!(routing.modify(&entry).is_err());
-        assert!(routing.add(&entrys).is_ok());
+        routing.add(&entrys).unwrap();
         entry.u.irqchip.pin = 4;
-        assert!(routing.modify(&entry).is_ok());
-        assert!(routing.remove(&entrys).is_ok());
+        routing.modify(&entry).unwrap();
+        routing.remove(&entrys).unwrap();
         assert!(routing.modify(&entry).is_err());
     }
 
@@ -383,8 +383,8 @@ mod tests {
         // this would ok on 4.9 kernel
         assert!(routing.initialize().is_err());
 
-        assert!(vmfd.create_irq_chip().is_ok());
-        assert!(routing.initialize().is_ok());
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
 
         let mut entry = kvm_irq_routing_entry {
             gsi: 8,
@@ -400,7 +400,7 @@ mod tests {
             .unwrap()
             .insert(hash_key(&entry), entry);
         let routes = routing.routes.lock().unwrap();
-        assert!(routing.set_routing(&routes).is_ok());
+        routing.set_routing(&routes).unwrap();
     }
 
     #[test]
