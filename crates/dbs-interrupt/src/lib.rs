@@ -59,6 +59,9 @@ mod manager;
 pub use manager::MSI_DEVICE_ID_SHIFT;
 pub use manager::{DeviceInterruptManager, DeviceInterruptMode, InterruptStatusRegister32};
 
+mod notifier;
+pub use self::notifier::*;
+
 #[cfg(feature = "kvm-irq")]
 pub mod kvm;
 #[cfg(feature = "kvm-irq")]
