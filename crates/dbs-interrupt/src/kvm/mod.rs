@@ -267,7 +267,7 @@ pub fn from_sys_util_errno(e: vmm_sys_util::errno::Error) -> std::io::Error {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::manager::tests::create_vm_fd;
 
@@ -299,12 +299,16 @@ mod tests {
     const SLAVE_PIC: usize = 8;
     const IOAPIC: usize = 23;
 
-    #[test]
-    fn test_create_kvm_irq_manager() {
+    pub fn create_kvm_irq_manager() -> (Arc<VmFd>, KvmIrqManager) {
         let vmfd = Arc::new(create_vm_fd());
         let manager = KvmIrqManager::new(vmfd.clone());
         vmfd.create_irq_chip().unwrap();
         manager.initialize().unwrap();
+        (vmfd, manager)
+    }
+    #[test]
+    fn test_create_kvm_irq_manager() {
+        let _ = create_kvm_irq_manager();
     }
 
     #[test]
