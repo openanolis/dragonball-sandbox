@@ -139,9 +139,13 @@ mod tests {
     fn test_epoll_manager() {
         let mut epoll_manager = EpollManager::default();
         let epoll_manager_clone = epoll_manager.clone();
-        let thread = std::thread::spawn(move || {
-            let count = epoll_manager_clone.handle_events(0).unwrap();
+        let thread = std::thread::spawn(move || loop {
+            let count = epoll_manager_clone.handle_events(-1).unwrap();
+            if count == 0 {
+                continue;
+            }
             assert_eq!(count, 1);
+            break;
         });
         let handler = DummySubscriber::new();
         let event = handler.event.try_clone().unwrap();
@@ -155,9 +159,13 @@ mod tests {
         event.write(1).unwrap();
 
         let epoll_manager_clone = epoll_manager.clone();
-        let thread = std::thread::spawn(move || {
-            let count = epoll_manager_clone.handle_events(0).unwrap();
+        let thread = std::thread::spawn(move || loop {
+            let count = epoll_manager_clone.handle_events(-1).unwrap();
+            if count == 0 {
+                continue;
+            }
             assert_eq!(count, 2);
+            break;
         });
 
         thread.join().unwrap();
