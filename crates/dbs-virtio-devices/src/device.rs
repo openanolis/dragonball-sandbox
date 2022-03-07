@@ -15,7 +15,9 @@ use dbs_device::resources::DeviceResources;
 use dbs_interrupt::{InterruptNotifier, NoopNotifier};
 use kvm_ioctls::VmFd;
 use virtio_queue::{AvailIter, QueueState, QueueStateT};
-use vm_memory::{GuestAddressSpace, GuestMemory};
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestRegionMmap, GuestUsize,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{Error, Result};
@@ -144,6 +146,8 @@ pub struct VirtioDeviceConfig<AS: GuestAddressSpace> {
     pub ctrl_queue: Option<VirtioQueueConfig>,
     /// Notifier to inject virtio device change interrupt to guest.
     pub device_change_notifier: Box<dyn InterruptNotifier>,
+    /// Shared memory regions
+    pub shm_regions: Option<VirtioSharedMemoryList>,
 }
 
 impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
@@ -163,6 +167,7 @@ impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
             queues,
             ctrl_queue,
             device_change_notifier,
+            shm_regions: None,
         }
     }
 
@@ -179,10 +184,61 @@ impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
             .collect()
     }
 
+    /// Sets shm regions to `VirtioDeviceConfig`
+    pub fn set_shm_regions(&mut self, shm_regions: VirtioSharedMemoryList) {
+        self.shm_regions = Some(shm_regions);
+    }
+
+    /// Gets host addr and guest addr of shm region base
+    pub fn get_shm_region_addr(&self) -> Option<(u64, u64)> {
+        self.shm_regions
+            .as_ref()
+            .map(|shms| (shms.host_addr, shms.guest_addr.raw_value()))
+    }
+
     /// Gets a shared reference to the guest memory object.
     pub fn lock_guest_memory(&self) -> AS::T {
         self.vm_as.memory()
     }
+}
+
+/// Shared Memory between device and guest
+#[derive(Clone, PartialEq, Debug)]
+pub struct VirtioSharedMemory {
+    /// offset from the base
+    pub offset: u64,
+    /// len of this shared memory region
+    pub len: u64,
+}
+
+/// A list of Shared Memory regions
+#[derive(Clone, Debug)]
+pub struct VirtioSharedMemoryList {
+    /// Host address
+    pub host_addr: u64,
+    /// Guest address
+    pub guest_addr: GuestAddress,
+    /// Length
+    pub len: GuestUsize,
+    /// kvm_userspace_memory_region flags
+    pub kvm_userspace_memory_region_flags: u32,
+    /// kvm_userspace_memory_region slot
+    pub kvm_userspace_memory_region_slot: u32,
+    /// List of shared regions.
+    pub region_list: Vec<VirtioSharedMemory>,
+
+    /// List of mmap()ed regions managed through GuestRegionMmap instances. Using
+    /// GuestRegionMmap will perform the unmapping automatically when the instance
+    /// is dropped, which happens when the VirtioDevice gets dropped.
+    ///
+    /// GuestRegionMmap is used instead of MmapRegion. Because We need to insert
+    /// this region into vm_as，but vm_as uses GuestRegionMmap to manage regions.
+    /// If MmapRegion is used in here, the MmapRegion needs to be clone() to create
+    /// new GuestRegionMmap for vm_as. MmapRegion clone() will cause the problem of
+    /// duplicate unmap during automatic drop, so we should try to avoid the clone
+    /// of MmapRegion. This problem does not exist with GuestRegionMmap because
+    /// vm_as and VirtioSharedMemoryList can share GuestRegionMmap through Arc.
+    pub mmap_region: Arc<GuestRegionMmap>,
 }
 
 #[cfg(test)]
@@ -193,7 +249,7 @@ pub(crate) mod tests {
     use dbs_interrupt::{
         InterruptManager, InterruptSourceType, InterruptStatusRegister32, LegacyNotifier,
     };
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
 
     pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
         let (vmfd, irq_manager) = crate::tests::create_vm_and_irq_manager();
@@ -260,9 +316,30 @@ pub(crate) mod tests {
 
     #[test]
     fn test_create_virtio_device_config() {
-        let device_config = create_virtio_device_config();
+        let mut device_config = create_virtio_device_config();
 
         device_config.notify_device_changes().unwrap();
-        assert_eq!(device_config.get_vring_notifier().len(), 8)
+        assert_eq!(device_config.get_vring_notifier().len(), 8);
+
+        let shared_mem =
+            GuestRegionMmap::new(MmapRegion::new(4096).unwrap(), GuestAddress(0)).unwrap();
+
+        let list = VirtioSharedMemoryList {
+            host_addr: 0x1234,
+            guest_addr: GuestAddress(0x5678),
+            len: shared_mem.len(),
+            kvm_userspace_memory_region_flags: 0,
+            kvm_userspace_memory_region_slot: 1,
+            region_list: vec![VirtioSharedMemory {
+                offset: 0,
+                len: 4096,
+            }],
+            mmap_region: Arc::new(shared_mem),
+        };
+
+        device_config.set_shm_regions(list);
+        let (host_addr, guest_addr) = device_config.get_shm_region_addr().unwrap();
+        assert_eq!(host_addr, 0x1234);
+        assert_eq!(guest_addr, 0x5678);
     }
 }
