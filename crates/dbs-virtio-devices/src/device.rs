@@ -8,19 +8,24 @@
 
 //! Traits and Structs to implement Virtio device backend drivers.
 
+use std::any::Any;
+use std::cmp;
+use std::io::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use dbs_device::resources::DeviceResources;
+use dbs_device::resources::{DeviceResources, ResourceConstraint};
 use dbs_interrupt::{InterruptNotifier, NoopNotifier};
+use dbs_utils::epoll_manager::{EpollManager, EpollSubscriber, SubscriberId};
 use kvm_ioctls::VmFd;
+use log::{error, warn};
 use virtio_queue::{AvailIter, QueueState, QueueStateT};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestRegionMmap, GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{Error, Result};
+use crate::{ActivateError, ActivateResult, Error, Result};
 
 /// Configuration information for a virtio queue.
 ///
@@ -103,25 +108,25 @@ impl VirtioQueueConfig {
             .unwrap_or_else(|_| panic!("Failed to add used. index: {}", desc_index))
     }
 
-    /// Consume a notification event.
+    /// Consumes a notification event.
     #[inline]
     pub fn comsume_event(&self) -> Result<u64> {
         self.eventfd.read().map_err(Error::IOError)
     }
 
-    /// Produce a queue notification.
+    /// Produces a queue notification.
     #[inline]
     pub fn generate_event(&self) -> Result<()> {
         self.eventfd.write(1).map_err(Error::IOError)
     }
 
-    /// Inject an interrupt to guest to notify queue change events.
+    /// Injects an interrupt to guest to notify queue change events.
     #[inline]
     pub fn notify(&self) -> Result<()> {
         self.notifier.notify().map_err(Error::IOError)
     }
 
-    /// Set event notifier to inject intterupt.
+    /// Sets event notifier to inject intterupt.
     #[inline]
     pub fn set_notifier(&mut self, notifier: Box<dyn InterruptNotifier>) {
         self.notifier = notifier;
@@ -239,6 +244,223 @@ pub struct VirtioSharedMemoryList {
     /// of MmapRegion. This problem does not exist with GuestRegionMmap because
     /// vm_as and VirtioSharedMemoryList can share GuestRegionMmap through Arc.
     pub mmap_region: Arc<GuestRegionMmap>,
+}
+
+/// Trait for virtio devices to be driven by a virtio transport.
+///
+/// The lifecycle of a virtio device is to be moved to a virtio transport, which will then query the
+/// device. Once the guest driver has configured the device, `VirtioDevice::activate` will be called
+/// and all the events, memory, and queues for device operation will be moved into the device.
+/// Optionally, a virtio device can implement device reset in which it returns said resources and
+/// resets its internal.
+pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
+    /// The virtio device type.
+    fn device_type(&self) -> u32;
+
+    /// The maximum size of each queue that this device supports.
+    fn queue_max_sizes(&self) -> &[u16];
+
+    /// The maxinum size of control queue
+    fn ctrl_queue_max_sizes(&self) -> u16 {
+        0
+    }
+
+    /// The set of feature bits shifted by `page * 32`.
+    fn get_avail_features(&self, page: u32) -> u32 {
+        let _ = page;
+        0
+    }
+
+    /// Acknowledges that this set of features should be enabled.
+    fn set_acked_features(&mut self, page: u32, value: u32);
+
+    /// Reads this device configuration space at `offset`.
+    fn read_config(&mut self, offset: u64, data: &mut [u8]);
+
+    /// Writes to this device configuration space at `offset`.
+    fn write_config(&mut self, offset: u64, data: &[u8]);
+
+    /// Activates this device for real usage.
+    fn activate(&mut self, config: VirtioDeviceConfig<AS>) -> ActivateResult;
+
+    /// Deactivates this device.
+    fn reset(&mut self) -> ActivateResult {
+        Err(ActivateError::InternalError)
+    }
+
+    /// every new device object has its resource requirements
+    fn get_resource_requirements(
+        &self,
+        requests: &mut Vec<ResourceConstraint>,
+        use_generic_irq: bool,
+    );
+
+    /// Assigns requested resources back to virtio device
+    fn set_resource(
+        &mut self,
+        _vm_fd: Arc<VmFd>,
+        _resource: DeviceResources,
+    ) -> Result<Option<VirtioSharedMemoryList>> {
+        Ok(None)
+    }
+
+    /// Removes this devices.
+    fn remove(&mut self) {}
+
+    /// Used to downcast to the specific type.
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// A helper struct to support basic operations for emulated VirtioDevice backend devices.
+pub struct VirtioDeviceInfo {
+    /// Name of the virtio backend device.
+    pub driver_name: String,
+    /// Available features of the virtio backend device.
+    pub avail_features: u64,
+    /// Acknowledged features of the virtio backend device.
+    pub acked_features: u64,
+    /// Array of queue sizes.
+    pub queue_sizes: Arc<Vec<u16>>,
+    /// Space to store device specific configuration data.
+    pub config_space: Vec<u8>,
+    /// EventManager SubscriberOps to register/unregister epoll events.
+    pub epoll_manager: EpollManager,
+}
+
+/// A helper struct to support basic operations for emulated VirtioDevice backend devices.
+impl VirtioDeviceInfo {
+    /// Creates a VirtioDeviceInfo instance.
+    pub fn new(
+        driver_name: String,
+        avail_features: u64,
+        queue_sizes: Arc<Vec<u16>>,
+        config_space: Vec<u8>,
+        epoll_manager: EpollManager,
+    ) -> Self {
+        VirtioDeviceInfo {
+            driver_name,
+            avail_features,
+            acked_features: 0u64,
+            queue_sizes,
+            config_space,
+            epoll_manager,
+        }
+    }
+
+    /// Gets available features of virtio backend device.
+    #[inline]
+    pub fn avail_features(&self) -> u64 {
+        self.avail_features
+    }
+
+    /// Gets available features of virtio backend device.
+    pub fn get_avail_features(&self, page: u32) -> u32 {
+        match page {
+            // Get the lower 32-bits of the features bitfield.
+            0 => self.avail_features as u32,
+            // Get the upper 32-bits of the features bitfield.
+            1 => (self.avail_features >> 32) as u32,
+            _ => {
+                warn!("{}: query features page: {}", self.driver_name, page);
+                0u32
+            }
+        }
+    }
+
+    /// Gets acknowledged features of virtio backend device.
+    #[inline]
+    pub fn acked_features(&self) -> u64 {
+        self.acked_features
+    }
+
+    /// Sets acknowledged features of virtio backend device.
+    pub fn set_acked_features(&mut self, page: u32, value: u32) {
+        let mut v = match page {
+            0 => value as u64,
+            1 => (value as u64) << 32,
+            _ => {
+                warn!("{}: ack unknown feature page: {}", self.driver_name, page);
+                0u64
+            }
+        };
+
+        // Check if the guest is ACK'ing a feature that we didn't claim to have.
+        let unrequested_features = v & !self.avail_features;
+        if unrequested_features != 0 {
+            warn!("{}: ackknowlege unknown feature: {:x}", self.driver_name, v);
+            // Don't count these features as acked.
+            v &= !unrequested_features;
+        }
+        self.acked_features |= v;
+    }
+
+    /// Reads device specific configuration data of virtio backend device.
+    ///
+    /// The `offset` is based of 0x100 from the MMIO configuration address space.
+    pub fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+        let config_len = self.config_space.len() as u64;
+        if offset >= config_len {
+            error!(
+                "{}: config space read request out of range, offset {}",
+                self.driver_name, offset
+            );
+            return;
+        }
+        if let Some(end) = offset.checked_add(data.len() as u64) {
+            // This write can't fail, offset and end are checked against config_len.
+            data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+                .unwrap();
+        }
+    }
+
+    /// Writes device specific configuration data of virtio backend device.
+    ///
+    /// The `offset` is based of 0x100 from the MMIO configuration address space.
+    pub fn write_config(&mut self, offset: u64, data: &[u8]) {
+        let data_len = data.len() as u64;
+        let config_len = self.config_space.len() as u64;
+        if offset >= config_len
+            || offset.checked_add(data_len).is_none()
+            || offset + data_len > config_len
+        {
+            error!(
+                "{}: config space write request out of range, offset {}",
+                self.driver_name, offset
+            );
+            return;
+        }
+        let dst = &mut self.config_space[offset as usize..(offset + data_len) as usize];
+        dst.copy_from_slice(data);
+    }
+
+    /// Validate size of queues and queue eventfds.
+    pub fn check_queue_sizes(&self, queues: &[VirtioQueueConfig]) -> ActivateResult {
+        if queues.is_empty() || queues.len() != self.queue_sizes.len() {
+            error!(
+                "{}: invalid configuration: maximum {} queue(s), got {} queues",
+                self.driver_name,
+                self.queue_sizes.len(),
+                queues.len(),
+            );
+            return Err(ActivateError::InvalidParam);
+        }
+        Ok(())
+    }
+
+    /// Register event handler for the device.
+    pub fn register_event_handler(&self, handler: EpollSubscriber) -> SubscriberId {
+        self.epoll_manager.add_subscriber(handler)
+    }
+
+    /// Unregister event handler for the device.
+    pub fn remove_event_handler(&mut self, id: SubscriberId) -> Result<EpollSubscriber> {
+        self.epoll_manager.remove_subscriber(id).map_err(|e| {
+            Error::IOError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("remove_event_handler failed: {:?}", e),
+            ))
+        })
+    }
 }
 
 #[cfg(test)]
