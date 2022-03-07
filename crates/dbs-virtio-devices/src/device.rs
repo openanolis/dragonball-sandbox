@@ -471,7 +471,9 @@ pub(crate) mod tests {
     use dbs_interrupt::{
         InterruptManager, InterruptSourceType, InterruptStatusRegister32, LegacyNotifier,
     };
-    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
+    use dbs_utils::epoll_manager::{EventOps, Events, MutEventSubscriber};
+    use kvm_ioctls::Kvm;
+    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
 
     pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
         let (vmfd, irq_manager) = crate::tests::create_vm_and_irq_manager();
@@ -563,5 +565,170 @@ pub(crate) mod tests {
         let (host_addr, guest_addr) = device_config.get_shm_region_addr().unwrap();
         assert_eq!(host_addr, 0x1234);
         assert_eq!(guest_addr, 0x5678);
+        let list = device_config.shm_regions.unwrap();
+        assert_eq!(list.kvm_userspace_memory_region_slot, 1);
+        assert_eq!(list.kvm_userspace_memory_region_flags, 0);
+        assert_eq!(list.region_list.len(), 1);
+    }
+
+    struct DummyDevice {
+        queue_size: Arc<Vec<u16>>,
+        device_info: VirtioDeviceInfo,
+    }
+
+    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>> for DummyDevice {
+        fn device_type(&self) -> u32 {
+            0xffff
+        }
+        fn queue_max_sizes(&self) -> &[u16] {
+            &self.queue_size
+        }
+
+        fn get_avail_features(&self, page: u32) -> u32 {
+            self.device_info.get_avail_features(page)
+        }
+        fn set_acked_features(&mut self, page: u32, value: u32) {
+            self.device_info.set_acked_features(page, value)
+        }
+
+        fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+            self.device_info.read_config(offset, data)
+        }
+        fn write_config(&mut self, offset: u64, data: &[u8]) {
+            self.device_info.write_config(offset, data)
+        }
+        fn activate(
+            &mut self,
+            _config: VirtioDeviceConfig<GuestMemoryAtomic<GuestMemoryMmap>>,
+        ) -> ActivateResult {
+            Ok(())
+        }
+        fn get_resource_requirements(
+            &self,
+            _requests: &mut Vec<ResourceConstraint>,
+            _use_generic_irq: bool,
+        ) {
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    struct DummyHandler;
+    impl MutEventSubscriber for DummyHandler {
+        fn process(&mut self, _events: Events, _ops: &mut EventOps) {}
+        fn init(&mut self, _ops: &mut EventOps) {}
+    }
+
+    #[test]
+    fn test_virtio_device() {
+        let epoll_mgr = EpollManager::default();
+
+        let avail_features = 0x1234 << 32 | 0x4567;
+        let config_space = vec![1; 16];
+        let queue_size = Arc::new(vec![256; 1]);
+        let device_info = VirtioDeviceInfo::new(
+            String::from("dummy-device"),
+            avail_features,
+            queue_size.clone(),
+            config_space,
+            epoll_mgr,
+        );
+
+        let mut device = DummyDevice {
+            queue_size,
+            device_info,
+        };
+        assert_eq!(device.device_type(), 0xffff);
+        assert_eq!(device.queue_max_sizes(), &[256]);
+        assert_eq!(device.ctrl_queue_max_sizes(), 0);
+
+        device.get_resource_requirements(&mut Vec::new(), true);
+
+        // tests avail features
+        assert_eq!(device.get_avail_features(0), 0x4567);
+        assert_eq!(
+            device.get_avail_features(1),
+            (device.device_info.avail_features() >> 32) as u32
+        );
+        assert_eq!(device.get_avail_features(2), 0);
+
+        // tests acked features
+        assert_eq!(device.device_info.acked_features(), 0);
+        device.set_acked_features(2, 0x0004 | 0x0002);
+        assert_eq!(device.device_info.acked_features(), 0);
+        device.set_acked_features(1, 0x0004 | 0x0002);
+        assert_eq!(device.device_info.acked_features(), 0x0004 << 32);
+        device.set_acked_features(0, 0x4567 | 0x0008);
+        assert_eq!(device.device_info.acked_features(), 0x4567 | 0x0004 << 32);
+
+        // test config space invalid read
+        let mut data = vec![0u8; 16];
+        device.read_config(16, data.as_mut_slice());
+        assert_eq!(data, vec![0; 16]);
+        // test read config
+        device.read_config(4, &mut data[..14]);
+        assert_eq!(data, vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]);
+        device.read_config(0, data.as_mut_slice());
+        assert_eq!(data, vec![1; 16]);
+
+        // test config space invalid write
+        let write_data = vec![0xffu8; 16];
+        let mut read_data = vec![0x0; 16];
+        device.write_config(4, &write_data[..13]);
+        device.write_config(16, &write_data[..4]);
+        device.read_config(0, read_data.as_mut_slice());
+        assert_eq!(read_data, vec![0x1; 16]);
+
+        // test config space write
+        device.write_config(4, &write_data[6..10]);
+        assert_eq!(
+            device.device_info.config_space,
+            vec![1, 1, 1, 1, 0xff, 0xff, 0xff, 0xff, 1, 1, 1, 1, 1, 1, 1, 1]
+        );
+
+        // test device info check_queue_sizes
+        let queue_size = Vec::new();
+        assert!(matches!(
+            device.device_info.check_queue_sizes(&queue_size),
+            Err(ActivateError::InvalidParam)
+        ));
+
+        assert!(matches!(device.reset(), Err(ActivateError::InternalError)));
+
+        // test event handler
+        let handler = DummyHandler;
+        let id = device.device_info.register_event_handler(Box::new(handler));
+        device.device_info.remove_event_handler(id).unwrap();
+        assert!(matches!(
+            device.device_info.remove_event_handler(id),
+            Err(Error::IOError(_))
+        ));
+
+        // test device activate
+        let region_size = 0x400;
+        let regions = vec![
+            (GuestAddress(0x0), region_size),
+            (GuestAddress(0x1000), region_size),
+        ];
+        let gmm = GuestMemoryMmap::from_ranges(&regions).unwrap();
+        let gm = GuestMemoryAtomic::<GuestMemoryMmap>::new(gmm);
+
+        let queues = vec![
+            VirtioQueueConfig::create(0, 0).unwrap(),
+            VirtioQueueConfig::create(0, 0).unwrap(),
+        ];
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let resources = DeviceResources::new();
+        let device_config = VirtioDeviceConfig::new(
+            gm,
+            vm_fd,
+            resources,
+            queues,
+            None,
+            Box::new(NoopNotifier::new()),
+        );
+        device.activate(device_config).unwrap();
     }
 }
