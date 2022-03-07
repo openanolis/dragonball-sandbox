@@ -28,6 +28,18 @@ pub const VIRTIO_INTR_VRING: u32 = 0x01;
 /// Device configuration changed.
 pub const VIRTIO_INTR_CONFIG: u32 = 0x02;
 
+/// Error code for VirtioDevice::activate().
+#[derive(Debug, thiserror::Error)]
+pub enum ActivateError {
+    #[error("Invalid param.")]
+    InvalidParam,
+    #[error("Internal error.")]
+    InternalError,
+}
+
+/// Specialized std::result::Result for VirtioDevice::activate().
+pub type ActivateResult = std::result::Result<(), ActivateError>;
+
 /// Error for virtio devices to handle requests from guests.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
