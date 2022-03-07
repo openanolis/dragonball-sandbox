@@ -7,6 +7,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use lazy_static::lazy_static;
+
 /// Magic addresses externally used to lay out x86_64 VMs.
 
 /// Address of Global Descriptor Table (GDT)
@@ -51,3 +53,41 @@ pub const IRQ_MAX: u32 = 15;
 
 /// Address for the TSS setup.
 pub const KVM_TSS_ADDRESS: u64 = 0xfffb_d000;
+
+/// Start address of the lower MMIO window.
+pub const MMIO_LOW_START: u64 = 3u64 << 30;
+/// End address (inclusive) of the lower MMIO window.
+pub const MMIO_LOW_END: u64 = (4u64 << 30) - 1;
+/// Lower bound of guest memory.
+pub const GUEST_MEM_START: u64 = 0u64;
+/// Size of memory below MMIO hole.
+pub const GUEST_MEM_LOW_SIZE: u64 = MMIO_LOW_START - GUEST_MEM_START;
+
+/// Max retry times for reading /proc/cpuinfo
+const CPUINFO_READ_RETRY: u64 = 5;
+
+lazy_static! {
+    /// Maximum guest physical address supported.
+    pub static ref GUEST_PHYS_END: u64 = {
+        for _ in 0..CPUINFO_READ_RETRY {
+            if let Ok(buf) = std::fs::read("/proc/cpuinfo") {
+                let content = String::from_utf8_lossy(&buf);
+                for line in content.lines() {
+                    if line.starts_with("address sizes	: ") {
+                        if let Some(end) = line.find(" bits physical") {
+                            if let Ok(size) = line[16..end].parse::<u64>() {
+                                if (36..=64).contains(&size) {
+                                    return (1u64 << size) - 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        panic!("Exceed max retry times. Cannot get physical address size from /proc/cpuinfo");
+    };
+
+    /// Upper bound of guest memory.
+    pub static ref GUEST_MEM_END: u64 = *GUEST_PHYS_END >> 1;
+}
