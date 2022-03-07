@@ -12,8 +12,14 @@
 //! (http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-1090002)
 //! for more information.
 
+mod device;
+pub use self::device::*;
 mod notifier;
 pub use self::notifier::*;
+
+use std::io::Error as IOError;
+
+use virtio_queue::Error as VqError;
 
 // Interrupt status flags for legacy interrupts. It happens to be the same for both PCI and MMIO
 // virtio devices.
@@ -21,6 +27,20 @@ pub use self::notifier::*;
 pub const VIRTIO_INTR_VRING: u32 = 0x01;
 /// Device configuration changed.
 pub const VIRTIO_INTR_CONFIG: u32 = 0x02;
+
+/// Error for virtio devices to handle requests from guests.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Generic IO error
+    #[error("IO: {0}.")]
+    IOError(#[from] IOError),
+    /// Error from virtio_queue
+    #[error("virtio queue error: {0}")]
+    VirtioQueueError(VqError),
+}
+
+/// Specialized std::result::Result for Virtio device operations.
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 pub mod tests {
