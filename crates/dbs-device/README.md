@@ -130,6 +130,7 @@ manager.pio_read(0, &mut buffer);
 
 This project is licensed under [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
 
+[DeviceIo::get_trapped_io_resources()]: https://docs.rs/dbs-device/0.1.0/dbs_device/trait.DeviceIo.html#method.get_trapped_io_resources
 [DeviceIo]: src/lib.rs
 [DeviceIoMut]: src/lib.rs
 [IoManager]: src/device_manager.rs
