@@ -9,3 +9,11 @@ repository = "https://github.com/openanolis/dragonball-sandbox"
 keywords = ["dragonball", "secure-sandbox", "devices", "virtio"]
 readme = "README.md"
 
+[dependencies]
+dbs-device = { version = "0.1.0", path = "../dbs-device" }
+dbs-interrupt = { version = "0.1.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
+kvm-ioctls = "0.11.0"
+log = "0.4.14"
+virtio-queue = "0.1.0"
+vmm-sys-util = "0.9.0"
+
