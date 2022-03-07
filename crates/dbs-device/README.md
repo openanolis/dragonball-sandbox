@@ -136,5 +136,5 @@ This project is licensed under [Apache License, Version 2.0](http://www.apache.o
 [IoManagerContext]: src/device_manager.rs
 [ResourceConstraint]: src/resources.rs
 [Resource]: src/resources.rs
-[DeviceResource]: src/resources.rs
+[DeviceResources]: src/resources.rs
 [vm-device]: https://github.com/rust-vmm/vm-device
