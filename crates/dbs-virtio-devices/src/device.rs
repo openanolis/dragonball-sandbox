@@ -9,10 +9,13 @@
 //! Traits and Structs to implement Virtio device backend drivers.
 
 use std::ops::Deref;
+use std::sync::Arc;
 
+use dbs_device::resources::DeviceResources;
 use dbs_interrupt::{InterruptNotifier, NoopNotifier};
+use kvm_ioctls::VmFd;
 use virtio_queue::{AvailIter, QueueState, QueueStateT};
-use vm_memory::GuestMemory;
+use vm_memory::{GuestAddressSpace, GuestMemory};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{Error, Result};
@@ -123,17 +126,112 @@ impl VirtioQueueConfig {
     }
 }
 
+/// Virtio device configuration information.
+///
+/// This structure maintains all configuration information for a virtio device. It will be passed
+/// to VirtioDevice::activate() and the virito device will take ownership of the configuration
+/// object. On VirtioDevice::reset(), the configuration object should be returned to the caller.
+pub struct VirtioDeviceConfig<AS: GuestAddressSpace> {
+    /// Guest memory accessor.
+    pub vm_as: AS,
+    /// VmFd associated with this virtio device.
+    pub vm_fd: Arc<VmFd>,
+    /// Resources this virtio device needs.
+    pub resources: DeviceResources,
+    /// Virtques for normal data requests.
+    pub queues: Vec<VirtioQueueConfig>,
+    /// Virtque for control requests.
+    pub ctrl_queue: Option<VirtioQueueConfig>,
+    /// Notifier to inject virtio device change interrupt to guest.
+    pub device_change_notifier: Box<dyn InterruptNotifier>,
+}
+
+impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
+    /// Creates a virtio device configuration instance.
+    pub fn new(
+        vm_as: AS,
+        vm_fd: Arc<VmFd>,
+        resources: DeviceResources,
+        queues: Vec<VirtioQueueConfig>,
+        ctrl_queue: Option<VirtioQueueConfig>,
+        device_change_notifier: Box<dyn InterruptNotifier>,
+    ) -> Self {
+        VirtioDeviceConfig {
+            vm_as,
+            vm_fd,
+            resources,
+            queues,
+            ctrl_queue,
+            device_change_notifier,
+        }
+    }
+
+    /// Injects a virtio device change notification to guest.
+    pub fn notify_device_changes(&self) -> Result<()> {
+        self.device_change_notifier.notify().map_err(Error::IOError)
+    }
+
+    /// Gets irq eventfd array for vritio vrings.
+    pub fn get_vring_notifier(&self) -> Vec<&EventFd> {
+        self.queues
+            .iter()
+            .map(|x| x.notifier.notifier().unwrap())
+            .collect()
+    }
+
+    /// Gets a shared reference to the guest memory object.
+    pub fn lock_guest_memory(&self) -> AS::T {
+        self.vm_as.memory()
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
+    use super::*;
+    use crate::{VIRTIO_INTR_CONFIG, VIRTIO_INTR_VRING};
 
     use dbs_interrupt::{
         InterruptManager, InterruptSourceType, InterruptStatusRegister32, LegacyNotifier,
     };
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
-    use super::*;
-    use crate::{VIRTIO_INTR_VRING};
+    pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
+        let (vmfd, irq_manager) = crate::tests::create_vm_and_irq_manager();
+        let group = irq_manager
+            .create_group(InterruptSourceType::LegacyIrq, 0, 1)
+            .unwrap();
+        let status = Arc::new(InterruptStatusRegister32::new());
+        let device_change_notifier = Box::new(LegacyNotifier::new(
+            group.clone(),
+            status.clone(),
+            VIRTIO_INTR_CONFIG,
+        ));
+
+        let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap());
+
+        let mut queues = Vec::new();
+        for idx in 0..8 {
+            queues.push(VirtioQueueConfig::new(
+                QueueState::new(512),
+                EventFd::new(0).unwrap(),
+                Box::new(LegacyNotifier::new(
+                    group.clone(),
+                    status.clone(),
+                    VIRTIO_INTR_VRING,
+                )),
+                idx,
+            ));
+        }
+
+        VirtioDeviceConfig::new(
+            mem,
+            vmfd,
+            DeviceResources::new(),
+            queues,
+            None,
+            device_change_notifier,
+        )
+    }
 
     #[test]
     fn test_create_virtio_queue_config() {
@@ -158,5 +256,13 @@ pub(crate) mod tests {
         assert_eq!(cfg.actual_size(), 1024);
         cfg.generate_event().unwrap();
         assert_eq!(cfg.comsume_event().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_create_virtio_device_config() {
+        let device_config = create_virtio_device_config();
+
+        device_config.notify_device_changes().unwrap();
+        assert_eq!(device_config.get_vring_notifier().len(), 8)
     }
 }
