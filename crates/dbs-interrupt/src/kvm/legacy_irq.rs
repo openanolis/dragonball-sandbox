@@ -222,6 +222,10 @@ mod test {
     use super::*;
     use crate::manager::tests::create_vm_fd;
 
+    const MASTER_PIC: usize = 7;
+    const SLAVE_PIC: usize = 8;
+    const IOAPIC: usize = 23;
+
     #[test]
     #[allow(unreachable_patterns)]
     fn test_legacy_interrupt_group() {
@@ -256,5 +260,93 @@ mod test {
 
         assert!(LegacyIrq::new(base, 2, vmfd.clone(), rounting.clone()).is_err());
         assert!(LegacyIrq::new(110, 1, vmfd, rounting).is_err());
+    }
+
+    #[test]
+    fn test_irq_routing_initialize_legacy() {
+        let vmfd = Arc::new(create_vm_fd());
+        let routing = KvmIrqRouting::new(vmfd.clone());
+
+        // this would ok on 4.9 kernel
+        assert!(routing.initialize().is_err());
+
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
+
+        let routes = &routing.routes.lock().unwrap();
+        assert_eq!(routes.len(), MASTER_PIC + SLAVE_PIC + IOAPIC);
+    }
+
+    #[test]
+    fn test_routing_opt() {
+        let vmfd = Arc::new(create_vm_fd());
+        let routing = KvmIrqRouting::new(vmfd.clone());
+
+        // this would ok on 4.9 kernel
+        assert!(routing.initialize().is_err());
+
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
+
+        let mut entry = kvm_irq_routing_entry {
+            gsi: 8,
+            type_: kvm_bindings::KVM_IRQ_ROUTING_IRQCHIP,
+            ..Default::default()
+        };
+
+        // Safe because we are initializing all fields of the `irqchip` struct.
+        entry.u.irqchip.irqchip = 0;
+        entry.u.irqchip.pin = 3;
+
+        let entrys = vec![entry];
+
+        assert!(routing.modify(&entry).is_err());
+        routing.add(&entrys).unwrap();
+        entry.u.irqchip.pin = 4;
+        routing.modify(&entry).unwrap();
+        routing.remove(&entrys).unwrap();
+        assert!(routing.modify(&entry).is_err());
+    }
+
+    #[test]
+    fn test_routing_set_routing() {
+        let vmfd = Arc::new(create_vm_fd());
+        let routing = KvmIrqRouting::new(vmfd.clone());
+
+        // this would ok on 4.9 kernel
+        assert!(routing.initialize().is_err());
+
+        vmfd.create_irq_chip().unwrap();
+        routing.initialize().unwrap();
+
+        let mut entry = kvm_irq_routing_entry {
+            gsi: 8,
+            type_: kvm_bindings::KVM_IRQ_ROUTING_IRQCHIP,
+            ..Default::default()
+        };
+        entry.u.irqchip.irqchip = 0;
+        entry.u.irqchip.pin = 3;
+
+        routing
+            .routes
+            .lock()
+            .unwrap()
+            .insert(hash_key(&entry), entry);
+        let routes = routing.routes.lock().unwrap();
+        routing.set_routing(&routes).unwrap();
+    }
+
+    #[test]
+    fn test_has_key() {
+        let gsi = 4;
+        let mut entry = kvm_irq_routing_entry {
+            gsi,
+            type_: kvm_bindings::KVM_IRQ_ROUTING_IRQCHIP,
+            ..Default::default()
+        };
+        // Safe because we are initializing all fields of the `irqchip` struct.
+        entry.u.irqchip.irqchip = kvm_bindings::KVM_IRQCHIP_PIC_MASTER;
+        entry.u.irqchip.pin = gsi;
+        assert_eq!(hash_key(&entry), 0x0001_0000_0004);
     }
 }
