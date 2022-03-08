@@ -8,8 +8,8 @@
 //!
 //! # Examples
 //! ```rust
-//! extern crate db_allocator;
-//! use db_allocator::{Constraint, IntervalTree, NodeState, Range};
+//! extern crate dbs_allocator;
+//! use dbs_allocator::{Constraint, IntervalTree, NodeState, Range};
 //!
 //! // Create an interval tree and add available resources.
 //! let mut tree = IntervalTree::<u64>::new();
@@ -130,8 +130,8 @@ impl Range {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::Range;
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::Range;
     ///
     /// let a = Range::new(2u32, 6u32);
     /// assert_eq!(a.align_to(0), Some(Range::new(2u32, 6u32)));
@@ -583,9 +583,9 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
+    /// extern crate dbs_allocator;
     ///
-    /// let tree = db_allocator::IntervalTree::<u64>::new();
+    /// let tree = dbs_allocator::IntervalTree::<u64>::new();
     /// ```
     pub fn new() -> Self {
         IntervalTree { root: None }
@@ -600,10 +600,10 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
-    /// let mut tree = db_allocator::IntervalTree::<u64>::new();
+    /// let mut tree = dbs_allocator::IntervalTree::<u64>::new();
     /// assert!(tree.is_empty());
     /// assert_eq!(tree.get(&Range::new(0x101u64, 0x101u64)), None);
     /// tree.insert(Range::new(0x100u64, 0x100u64), Some(1));
@@ -631,8 +631,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
@@ -663,8 +663,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
@@ -695,8 +695,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u32>::new();
     /// tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
@@ -725,8 +725,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u32>::new();
     /// tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
@@ -755,8 +755,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, NodeState, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, NodeState, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
@@ -781,8 +781,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{Constraint, IntervalTree, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{Constraint, IntervalTree, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u64, 0x100u64), None);
@@ -807,8 +807,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{IntervalTree, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{IntervalTree, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u64, 0x100u64), Some(1));
@@ -833,8 +833,8 @@ impl<T> IntervalTree<T> {
     ///
     /// # Examples
     /// ```rust
-    /// extern crate db_allocator;
-    /// use db_allocator::{Constraint, IntervalTree, Range};
+    /// extern crate dbs_allocator;
+    /// use dbs_allocator::{Constraint, IntervalTree, Range};
     ///
     /// let mut tree = IntervalTree::<u64>::new();
     /// tree.insert(Range::new(0x100u64, 0x100u64), None);

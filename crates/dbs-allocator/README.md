@@ -1,8 +1,8 @@
-# db-allocator
+# dbs-allocator
 
 ## Design
 
-db-allocator is designed as a resource allocator for Dragonball VMM. It provides allocation and release strategy of different kinds of resources that might be used by VM, such as memory-mapped I/O address space, port I/O address space, legacy IRQ numbers, MSI/MSI-X vectors, device instance id, etc. All these kinds of resource should be allocated and released by db-allocator in order to make VMM easier to construct and resource allocation easier to track and maintain.
+dbs-allocator is designed as a resource allocator for Dragonball VMM. It provides allocation and release strategy of different kinds of resources that might be used by VM, such as memory-mapped I/O address space, port I/O address space, legacy IRQ numbers, MSI/MSI-X vectors, device instance id, etc. All these kinds of resource should be allocated and released by dbs-allocator in order to make VMM easier to construct and resource allocation easier to track and maintain.
 Main components are:   
 Constraints: describe resource allocation constraints.
 IntervalTree: An VMM specified interval tree responsible for allocating and releasing resources.
@@ -71,7 +71,7 @@ Insert could be used to insert specific resource into some range if we know exac
 Delete could be used to remove the range from the tree and return the associated data.
 Get could be used to get the data item associated with the range, or return None if no match found.
 ## Usage
-The concept of Interval Tree may seem complicated, but using db-allocator to do resource allocation and release is simple and straightforward. 
+The concept of Interval Tree may seem complicated, but using dbs-allocator to do resource allocation and release is simple and straightforward. 
 You can following these steps to allocate your VMM resource.
 ```rust
 // 1. To start with, we should create an interval tree for some specific resouces and give maximum address/id range as root node. The range here could be address range, id range, etc.
@@ -88,11 +88,11 @@ let mut device = Device::create(resources_range, ..)
 ```
 
 ## Example
-We will show examples for allocating an unused PCI device ID from the PCI device ID pool and allocating memory address using db-allocator
+We will show examples for allocating an unused PCI device ID from the PCI device ID pool and allocating memory address using dbs-allocator
 ```rust
-use db_allocator::{Constraint, IntervalTree, Range};
+use dbs_allocator::{Constraint, IntervalTree, Range};
 ​
-// Init a db-allocator IntervalTree
+// Init a dbs-allocator IntervalTree
 let mut pci_device_pool = IntervalTree::new();
 ​
 // Init PCI device id pool with the range 0 to 255
@@ -104,15 +104,15 @@ let mut constraint = Constraint::new(1u64).align(1u64);
 // Get an ID from the pci_device_pool
 let mut id = pci_device_pool.allocate(&constraint).map(|e| e.min as u8); 
 ​
-// Pass the ID generated from db-allocator to vm-pci specified functions to create pci devices
+// Pass the ID generated from dbs-allocator to vm-pci specified functions to create pci devices
 let mut pci_device = PciDevice::new(id as u8, ..);
 
 ```
 
 ```rust
-use db_allocator::{Constraint, IntervalTree, Range};
+use dbs_allocator::{Constraint, IntervalTree, Range};
 ​
-// Init a db-allocator IntervalTree
+// Init a dbs-allocator IntervalTree
 let mut mem_pool = IntervalTree::new();
 ​
 // Init memory address from GUEST_MEM_START to GUEST_MEM_END
