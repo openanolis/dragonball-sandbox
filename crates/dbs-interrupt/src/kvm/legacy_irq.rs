@@ -6,20 +6,19 @@
 //! On x86 platforms, legacy interrupts are those managed by the Master PIC, the slave PIC and
 //! IOAPICs.
 
-#[cfg(target_arch = "aarch64")]
 use kvm_bindings::KVM_IRQ_ROUTING_IRQCHIP;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use kvm_bindings::{
-    KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE, KVM_IRQ_ROUTING_IRQCHIP,
-};
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::{KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE};
 use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
 use super::*;
 
+#[cfg(target_arch = "x86_64")]
 /// Maximum number of legacy interrupts supported.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub const MAX_LEGACY_IRQS: u32 = 24;
+
 #[cfg(target_arch = "aarch64")]
+/// Maximum number of legacy interrupts supported.
 pub const MAX_LEGACY_IRQS: u32 = 128;
 
 pub(super) struct LegacyIrq {
@@ -50,7 +49,7 @@ impl LegacyIrq {
         })
     }
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     fn add_legacy_entry(
         gsi: u32,
         chip: u32,
@@ -71,7 +70,7 @@ impl LegacyIrq {
     }
 
     /// Build routings for IRQs connected to the master PIC, the slave PIC or the first IOAPIC.
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     pub(super) fn initialize_legacy(
         routes: &mut HashMap<u64, kvm_irq_routing_entry>,
     ) -> Result<()> {
@@ -217,7 +216,7 @@ impl InterruptSourceGroup for LegacyIrq {
 }
 
 #[cfg(test)]
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 mod test {
     use super::*;
     use crate::manager::tests::create_vm_fd;

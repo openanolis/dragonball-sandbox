@@ -18,9 +18,9 @@ use super::LegacyIrqSourceConfig;
 use super::MsiIrqSourceConfig;
 use super::{InterruptManager, InterruptSourceConfig, InterruptSourceGroup, InterruptSourceType};
 
-#[cfg(target_arch = "aarch64")]
-/// Defines the offset when device_id is recorded to msi. For the origin of this value, please refer
-/// to the comment of set_msi_device_id function.
+/// Defines the offset when device_id is recorded to msi.
+///
+/// For the origin of this value, please refer to the comment of set_msi_device_id function.
 pub const MSI_DEVICE_ID_SHIFT: u8 = 3;
 
 #[cfg(feature = "legacy-irq")]
@@ -66,7 +66,6 @@ pub struct DeviceInterruptManager<T: InterruptManager> {
     #[cfg(feature = "msi-irq")]
     msi_config: Vec<InterruptSourceConfig>,
     /// Device id indicate the device who triggers msi irq.
-    #[cfg(target_arch = "aarch64")]
     device_id: Option<u32>,
 }
 
@@ -86,7 +85,6 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
             intr_groups: Vec::new(),
             #[cfg(feature = "msi-irq")]
             msi_config: Vec::new(),
-            #[cfg(target_arch = "aarch64")]
             device_id: None,
         };
 
@@ -135,7 +133,6 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
     }
 
     /// Set device_id for MSI routing
-    #[cfg(target_arch = "aarch64")]
     pub fn set_device_id(&mut self, device_id: Option<u32>) {
         self.device_id = device_id;
     }
@@ -382,16 +379,16 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
         Err(Error::from_raw_os_error(libc::EINVAL))
     }
 
-    /// Set the device id for a MSI irq
     #[cfg(target_arch = "aarch64")]
+    /// Set the device id for a MSI irq
     pub fn set_msi_device_id(&mut self, index: u32) -> Result<()> {
         if (index as usize) < self.msi_config.len() {
             if let InterruptSourceConfig::MsiIrq(ref mut msi) = self.msi_config[index as usize] {
                 msi.device_id = match self.device_id {
                     // An pci device attach to ITS will have a new device id which is use for msi
-                    // irq routing.  It is caculated according to kernel function PCI_DEVID(),
-                    // new_dev_id = (bus << 8) | devfn. In addition, devfn = device_id << 3, accord
-                    // to pci-host-ecam-generic's spec, and we implement bus = 0.
+                    // irq routing.  It is calculated according to kernel function PCI_DEVID(),
+                    // new_dev_id = (bus << 8) | devfn. In addition, devfn = device_id << 3,
+                    // according to pci-host-ecam-generic's spec, and we implement bus = 0.
                     Some(dev_id) => Some(dev_id << MSI_DEVICE_ID_SHIFT),
                     None => None,
                 };

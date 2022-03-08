@@ -53,9 +53,13 @@
 //! * the virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
+use std::io::Error;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use vmm_sys_util::eventfd::EventFd;
+
 mod manager;
-/// Defines the offset when device_id is recorded to msi.
-#[cfg(target_arch = "aarch64")]
 pub use manager::MSI_DEVICE_ID_SHIFT;
 pub use manager::{DeviceInterruptManager, DeviceInterruptMode, InterruptStatusRegister32};
 
@@ -66,12 +70,6 @@ pub use self::notifier::*;
 pub mod kvm;
 #[cfg(feature = "kvm-irq")]
 pub use self::kvm::KvmIrqManager;
-
-use std::io::Error;
-use std::ops::Deref;
-use std::sync::Arc;
-
-use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
 pub type Result<T> = std::io::Result<T>;
@@ -123,7 +121,6 @@ pub struct MsiIrqSourceConfig {
     /// Interrupt control state.
     pub msg_ctl: u32,
     /// Device id indicate the device who triggers this msi irq.
-    #[cfg(target_arch = "aarch64")]
     pub device_id: Option<u32>,
 }
 
