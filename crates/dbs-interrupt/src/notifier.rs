@@ -24,6 +24,10 @@ pub trait InterruptNotifier: Send + Sync {
     /// Get the optional `EventFd` object to inject interrupt to the virtual machine.
     fn notifier(&self) -> Option<&EventFd>;
 
+    /// Clone a boxed dyn trait object.
+    fn clone_boxed(&self) -> Box<dyn InterruptNotifier>;
+
+    /// Convert `self` to `std::any::Any`.
     fn as_any(&self) -> &dyn Any;
 }
 
@@ -62,6 +66,10 @@ mod legacy {
 
         fn notifier(&self) -> Option<&EventFd> {
             self.intr_group.notifier(0)
+        }
+
+        fn clone_boxed(&self) -> Box<dyn InterruptNotifier> {
+            Box::new(self.clone())
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -103,6 +111,10 @@ mod msi {
             self.intr_group.notifier(self.intr_index)
         }
 
+        fn clone_boxed(&self) -> Box<dyn InterruptNotifier> {
+            Box::new(self.clone())
+        }
+
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -129,6 +141,10 @@ impl InterruptNotifier for NoopNotifier {
         None
     }
 
+    fn clone_boxed(&self) -> Box<dyn InterruptNotifier> {
+        Box::new(*self)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -136,25 +152,7 @@ impl InterruptNotifier for NoopNotifier {
 
 /// Clone a boxed interrupt notifier object.
 pub fn clone_notifier(notifier: &dyn InterruptNotifier) -> Box<dyn InterruptNotifier> {
-    #[cfg(feature = "legacy-irq")]
-    if let Some(v) = notifier.as_any().downcast_ref::<LegacyNotifier>() {
-        return Box::new(LegacyNotifier::new(
-            v.intr_group.clone(),
-            v.intr_status.clone(),
-            v.status_bits,
-        ));
-    }
-
-    #[cfg(feature = "msi-irq")]
-    if let Some(v) = notifier.as_any().downcast_ref::<MsiNotifier>() {
-        return Box::new(MsiNotifier::new(v.intr_group.clone(), v.intr_index));
-    }
-
-    if let Some(_v) = notifier.as_any().downcast_ref::<NoopNotifier>() {
-        Box::new(NoopNotifier {})
-    } else {
-        panic!("failed to clone interrupt notifier.")
-    }
+    notifier.clone_boxed()
 }
 
 #[cfg(test)]
@@ -203,7 +201,7 @@ mod tests {
         assert_eq!(eventfd.read().unwrap(), 2);
 
         let clone = clone_notifier(&notifier);
-        assert_eq!(clone.type_id(), notifier.as_any().type_id());
+        assert_eq!(clone.as_any().type_id(), notifier.as_any().type_id());
     }
 
     #[cfg(feature = "kvm-msi-irq")]
@@ -227,6 +225,6 @@ mod tests {
         assert_eq!(notifier2.notifier().unwrap().read().unwrap(), 1);
 
         let clone = clone_notifier(&notifier1);
-        assert_eq!(clone.type_id(), notifier1.as_any().type_id());
+        assert_eq!(clone.as_any().type_id(), notifier1.as_any().type_id());
     }
 }
