@@ -1,11 +1,14 @@
 # dbs-interrupt
 
-Software indicating an event that needs immediate attention. An interrupt alerts the processor to a
-high-priority condition requiring the interruption of the current code the processor is executing.
-The processor responds by suspending its current activities, saving its state, and executing a
-function called an interrupt handler (or an interrupt service routine, ISR) to deal with the event.
-This interruption is temporary, and, after the interrupt handler finishes, unless handling the
-interrupt has emitted a fatal error, the processor resumes normal activities.
+Interrupts are used by hardware devices to indicate asynchronous events to the processor.
+The `dbs-interrupt` crate provides traits and data structures for the `Dragonball Sandbox` to manage
+interrupts for virtual and physical devices.
+
+An interrupt alerts the processor to a high-priority condition requiring the interruption of
+the current code the processor is executing. The processor responds by suspending its current activities,
+saving its state, and executing a function called an interrupt handler (or an interrupt service routine, ISR)
+to deal with the event. This interruption is temporary, and, after the interrupt handler finishes,
+unless handling the interrupt has emitted a fatal error, the processor resumes normal activities.
 
 Hardware interrupts are used by devices to communicate that they require attention from the
 operating system, or a bare-metal program running on the CPU if there are no OSes. The act of
@@ -51,20 +54,20 @@ The overall flow to deal with interrupts is:
 
 The dbs-device crate provides:
 
-- [InterruptManager] trait: manage interrupt sources for virtual device backends
-- [DeviceInterruptManager] struct: An implementation of [InterruptManager],  manage interrupts and interrupt modes for a device
-- [InterruptSourceGroup] trait: manage a group of interrupt sources for a device, provide methods to control the interrupts
-- [InterruptSourceType] enum: Type of interrupt source
-- [InterruptSourceConfig] enum, [LegacyIrqSourceConfig] struct and [MsiIrqSourceConfig] struct: Configuration data for an interrupt source
+- [trait InterruptManager]: manage interrupt sources for virtual device backends
+- [struct DeviceInterruptManager]: an implementation of [InterruptManager],  manage interrupts and interrupt modes for a device
+- [trait InterruptSourceGroup]: manage a group of interrupt sources for a device, provide methods to control the interrupts
+- [enum InterruptSourceType]: type of interrupt source
+- [enum InterruptSourceConfig], [struct LegacyIrqSourceConfig] and [struct MsiIrqSourceConfig]: configuration data for interrupt sources
 
 ## License
 
 This project is licensed under [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
 
-[InterruptManager]: src/lib.rs
-[DeviceInterruptManager]: src/manager.rs
-[InterruptSourceGroup]: src/lib.rs
-[InterruptSourceType]: src/lib.rs
-[InterruptSourceConfig]: src/lib.rs
-[LegacyIrqSourceConfig]: src/lib.rs
-[MsiIrqSourceConfig]: src/lib.rs
+[trait InterruptManager]: src/lib.rs
+[struct DeviceInterruptManager]: src/manager.rs
+[trait InterruptSourceGroup]: src/lib.rs
+[enum InterruptSourceType]: src/lib.rs
+[enum InterruptSourceConfig]: src/lib.rs
+[struct LegacyIrqSourceConfig]: src/lib.rs
+[struct MsiIrqSourceConfig]: src/lib.rs
