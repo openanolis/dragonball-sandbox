@@ -121,10 +121,7 @@ impl InterruptSourceGroup for MsiIrq {
                 msicfg.high_addr = cfg.high_addr;
                 msicfg.low_addr = cfg.low_addr;
                 msicfg.data = cfg.data;
-                #[cfg(target_arch = "aarch64")]
-                {
-                    msicfg.device_id = cfg.device_id;
-                }
+                msicfg.device_id = cfg.device_id;
                 new_msi_routing_entry(self.base + index, &*msicfg)
             };
             self.irq_routing.modify(&entry)
@@ -200,7 +197,7 @@ impl InterruptSourceGroup for MsiIrq {
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 mod test {
     use super::*;
@@ -240,6 +237,7 @@ mod test {
                 low_addr: 0x5678,
                 data: 0x9876,
                 msg_ctl: 0x6789,
+                device_id: None,
             };
             msi_fds.push(InterruptSourceConfig::MsiIrq(msi_source_config));
         }
@@ -254,6 +252,7 @@ mod test {
                 low_addr: i + 0x5678,
                 data: i + 0x9876,
                 msg_ctl: i + 0x6789,
+                device_id: None,
             };
             group.notifier(i).unwrap().write(1).unwrap();
             group.trigger(i).unwrap();

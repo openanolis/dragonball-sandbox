@@ -8,9 +8,6 @@ use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
 use super::*;
 
-#[cfg(target_arch = "aarch64")]
-use kvm_bindings::KVM_MSI_VALID_DEVID;
-
 pub(crate) struct MsiConfig {
     pub(super) irqfd: EventFd,
     pub(crate) config: Mutex<MsiIrqSourceConfig>,
@@ -32,19 +29,16 @@ pub(super) fn new_msi_routing_entry(
     let mut entry = kvm_irq_routing_entry {
         gsi,
         type_: KVM_IRQ_ROUTING_MSI,
-        #[cfg(target_arch = "x86_64")]
-        flags: 0,
-        #[cfg(any(target_arch = "aarch64"))]
-        flags: KVM_MSI_VALID_DEVID,
         ..Default::default()
     };
     entry.u.msi.address_hi = msicfg.high_addr;
     entry.u.msi.address_lo = msicfg.low_addr;
     entry.u.msi.data = msicfg.data;
-    #[cfg(target_arch = "aarch64")]
     if let Some(dev_id) = msicfg.device_id {
         entry.u.msi.__bindgen_anon_1.devid = dev_id;
+        entry.flags = kvm_bindings::KVM_MSI_VALID_DEVID;
     }
+
     entry
 }
 
@@ -65,6 +59,7 @@ pub(super) fn create_msi_routing_entries(
             return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
         }
     }
+
     Ok(entries)
 }
 
@@ -86,7 +81,6 @@ mod test {
             low_addr: 0x5678,
             data: 0x9876,
             msg_ctl: 0,
-            #[cfg(target_arch = "aarch64")]
             device_id: None,
         };
         let entry = new_msi_routing_entry(test_gsi, &msi_source_config);
@@ -99,10 +93,7 @@ mod test {
         }
     }
 
-    #[cfg(all(
-        feature = "legacy_irq",
-        any(target_arch = "x86", target_arch = "x86_64")
-    ))]
+    #[cfg(all(feature = "legacy_irq", target_arch = "x86_64"))]
     #[test]
     fn test_new_msi_routing_multi() {
         let mut msi_fds = Vec::with_capacity(16);
@@ -112,6 +103,7 @@ mod test {
                 low_addr: 0x5678,
                 data: 0x9876,
                 msg_ctl: 0,
+                device_id: None,
             }));
         }
         let mut legacy_fds = Vec::with_capacity(16);

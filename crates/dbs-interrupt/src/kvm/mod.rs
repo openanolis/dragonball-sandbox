@@ -21,25 +21,26 @@
 //! 4) device backend driver writes to the irqfd
 //! 5) an interurpt is injected into the guest
 
-#[cfg(feature = "kvm-legacy-irq")]
-mod legacy_irq;
-#[cfg(feature = "kvm-msi-generic")]
-mod msi_generic;
-#[cfg(feature = "kvm-msi-irq")]
-mod msi_irq;
-
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry};
 use kvm_ioctls::VmFd;
+
+use super::*;
+
 #[cfg(feature = "kvm-legacy-irq")]
 use legacy_irq::LegacyIrq;
 #[cfg(feature = "kvm-msi-irq")]
 use msi_irq::MsiIrq;
 
-use super::*;
+#[cfg(feature = "kvm-legacy-irq")]
+mod legacy_irq;
+#[cfg(feature = "kvm-msi-generic")]
+mod msi_generic;
+#[cfg(feature = "kvm-msi-irq")]
+mod msi_irq;
 
 /// Maximum number of global interrupt sources.
 pub const MAX_IRQS: InterruptIndex = 1024;
