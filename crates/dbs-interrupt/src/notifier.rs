@@ -1,12 +1,12 @@
 // Copyright 2019 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-//! Device event notifier to inject interrupt to guest.
+//! Event notifier to inject device interrupts to virtual machines.
 
+use std::any::Any;
 use std::io::Error;
 use std::sync::Arc;
 
-use downcast_rs::{impl_downcast, Downcast};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{InterruptIndex, InterruptSourceGroup, InterruptStatusRegister32};
@@ -16,19 +16,21 @@ pub use self::legacy::*;
 #[cfg(feature = "msi-irq")]
 pub use self::msi::*;
 
-/// Trait to inject interrupt for device.
-pub trait InterruptNotifier: Send + Sync + Downcast {
-    /// Inject an interrupt to guest.
+/// Trait to inject device interrupts to virtual machines.
+pub trait InterruptNotifier: Send + Sync {
+    /// Inject a device interrupt to the virtual machine.
     fn notify(&self) -> Result<(), Error>;
 
-    /// Get the optional eventfd to inject interrupt to guest.
+    /// Get the optional `EventFd` object to inject interrupt to the virtual machine.
     fn notifier(&self) -> Option<&EventFd>;
+
+    fn as_any(&self) -> &dyn Any;
 }
-impl_downcast!(InterruptNotifier);
 
 #[cfg(feature = "legacy-irq")]
 mod legacy {
     use super::*;
+
     /// Struct to inject legacy interrupt to guest.
     #[derive(Clone)]
     pub struct LegacyNotifier {
@@ -60,6 +62,10 @@ mod legacy {
 
         fn notifier(&self) -> Option<&EventFd> {
             self.intr_group.notifier(0)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
         }
     }
 }
@@ -96,6 +102,10 @@ mod msi {
         fn notifier(&self) -> Option<&EventFd> {
             self.intr_group.notifier(self.intr_index)
         }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
     }
 }
 
@@ -118,6 +128,10 @@ impl InterruptNotifier for NoopNotifier {
     fn notifier(&self) -> Option<&EventFd> {
         None
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 /// Clone a boxed interrupt notifier object.
@@ -130,10 +144,12 @@ pub fn clone_notifier(notifier: &dyn InterruptNotifier) -> Box<dyn InterruptNoti
             v.status_bits,
         ));
     }
+
     #[cfg(feature = "msi-irq")]
     if let Some(v) = notifier.as_any().downcast_ref::<MsiNotifier>() {
         return Box::new(MsiNotifier::new(v.intr_group.clone(), v.intr_index));
     }
+
     if let Some(_v) = notifier.as_any().downcast_ref::<NoopNotifier>() {
         Box::new(NoopNotifier {})
     } else {

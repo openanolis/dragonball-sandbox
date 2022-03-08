@@ -11,13 +11,11 @@ keywords = ["dragonball", "secure-sandbox", "device", "interrupt", "MSI", "MSI-x
 readme = "README.md"
 
 [dependencies]
-thiserror = "1"
-downcast-rs = "1.2.0"
-vmm-sys-util = ">=0.8.0"
-libc = "0.2"
+dbs-device = { path = "../dbs-device", version = "0.1.0" }
 kvm-bindings = { version = "0.5.0", optional = true }
 kvm-ioctls = { version = "0.11.0", optional = true }
-dbs-device = { path = "../dbs-device", version = "0.1.0" }
+libc = "0.2"
+vmm-sys-util = ">=0.8.0"
 
 [features]
 default = ["legacy-irq", "msi-irq"]
@@ -26,6 +24,6 @@ legacy-irq = []
 msi-irq = []
 
 kvm-irq = ["kvm-ioctls", "kvm-bindings"]
-kvm-msi-generic = ["msi-irq", "kvm-irq"]
 kvm-legacy-irq = ["legacy-irq", "kvm-irq"]
+kvm-msi-generic = ["msi-irq", "kvm-irq"]
 kvm-msi-irq = ["kvm-msi-generic"]
