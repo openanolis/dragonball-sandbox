@@ -86,6 +86,8 @@ mod test {
             low_addr: 0x5678,
             data: 0x9876,
             msg_ctl: 0,
+            #[cfg(target_arch = "aarch64")]
+            device_id: None,
         };
         let entry = new_msi_routing_entry(test_gsi, &msi_source_config);
         assert_eq!(entry.gsi, test_gsi);
