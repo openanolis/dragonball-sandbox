@@ -28,13 +28,17 @@ struct GuestMemoryHotplugManager {}
 ///   memory, the other contains only normal guest memory.
 /// - Second, it coordinates memory/DAX window hotplug events, so clients may register hooks
 ///   to receive hotplug notifications.
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct GuestMemoryManager {
+    default: GuestMemoryAtomic<GuestMemoryHybrid>,
     /// GuestMemory object hosts all guest memory.
     hybrid: GuestMemoryAtomic<GuestMemoryHybrid>,
+    /// GuestMemory object for vIOMMU.
+    iommu: GuestMemoryAtomic<GuestMemoryHybrid>,
     /// GuestMemory object hosts normal guest memory.
     normal: GuestMemoryAtomic<GuestMemoryMmap>,
-    _hotplug: Arc<GuestMemoryHotplugManager>,
+    hotplug: Arc<GuestMemoryHotplugManager>,
 }
 
 impl GuestMemoryManager {
@@ -57,12 +61,17 @@ impl GuestMemoryManager {
 impl Default for GuestMemoryManager {
     fn default() -> Self {
         let hybrid = GuestMemoryAtomic::new(GuestMemoryHybrid::new());
+        let iommu = GuestMemoryAtomic::new(GuestMemoryHybrid::new());
         let normal = GuestMemoryAtomic::new(GuestMemoryMmap::new());
+        // By default, it provides to the `GuestMemoryHybrid` object containing all guest memory.
+        let default = hybrid.clone();
 
         GuestMemoryManager {
+            default,
             hybrid,
+            iommu,
             normal,
-            _hotplug: Arc::new(GuestMemoryHotplugManager::default()),
+            hotplug: Arc::new(GuestMemoryHotplugManager::default()),
         }
     }
 }
@@ -72,7 +81,6 @@ impl GuestAddressSpace for GuestMemoryManager {
     type T = GuestMemoryLoadGuard<GuestMemoryHybrid>;
 
     fn memory(&self) -> Self::T {
-        // By default, it provides to the `GuestMemoryHybrid` object containing all guest memory.
-        self.hybrid.memory()
+        self.default.memory()
     }
 }
