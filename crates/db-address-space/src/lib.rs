@@ -18,6 +18,8 @@ pub use self::numa::{NumaIdTable, NumaNode, NumaNodeInfo, MPOL_MF_MOVE, MPOL_PRE
 
 pub mod address_space;
 pub use self::address_space::{
-    AddressSpace, AddressSpaceBase, AddressSpaceError, AddressSpaceLayout, AddressSpaceRegion,
-    AddressSpaceRegionType,
+    AddressSpace, AddressSpaceBase, AddressSpaceError, AddressSpaceRegion, AddressSpaceRegionType,
 };
+
+mod layout;
+pub use layout::AddressSpaceLayout;
