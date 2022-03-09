@@ -15,14 +15,14 @@
 
 use vm_memory::GuestUsize;
 
-mod numa;
-pub use self::numa::{NumaIdTable, NumaNode, NumaNodeInfo, MPOL_MF_MOVE, MPOL_PREFERRED};
-
 mod address_space;
 pub use self::address_space::{AddressSpace, AddressSpaceBase};
 
 mod layout;
 pub use layout::AddressSpaceLayout;
+
+mod numa;
+pub use self::numa::{NumaIdTable, NumaNode, NumaNodeInfo, MPOL_MF_MOVE, MPOL_PREFERRED};
 
 mod region;
 pub use region::{AddressSpaceRegion, AddressSpaceRegionType};
