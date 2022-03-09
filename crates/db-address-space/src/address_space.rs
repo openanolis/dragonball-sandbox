@@ -16,6 +16,8 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize, MemoryRegionAddress,
 };
 
+use crate::AddressSpaceLayout;
+
 #[cfg(not(feature = "region-hotplug"))]
 /// Concrete type to implement address space manager.
 pub type AddressSpace = AddressSpaceBase;
@@ -74,11 +76,11 @@ pub enum AddressSpaceRegionType {
 #[derive(Debug, Clone)]
 pub struct AddressSpaceRegion {
     /// Type of address space regions.
-    ty: AddressSpaceRegionType,
+    pub ty: AddressSpaceRegionType,
     /// Base address of the region in virtual machine's physical address space.
-    base: GuestAddress,
+    pub base: GuestAddress,
     /// Size of the address space region.
-    size: GuestUsize,
+    pub size: GuestUsize,
     /// File/offset tuple to back the memory allocation.
     file_offset: Option<FileOffset>,
     /// Mmap permission flags.
@@ -497,54 +499,6 @@ impl GuestMemoryRegion for AddressSpaceRegion {
     }
 }
 
-/// Address space layout configuration.
-///
-/// The layout configuration must guarantee that `mem_start` <= `mem_end` <= `phys_end`.
-/// Non-memory region should be arranged into the range [mem_end, phys_end).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AddressSpaceLayout {
-    /// end of guest physical address
-    pub phys_end: u64,
-    /// start of guest memory address
-    pub mem_start: u64,
-    /// end of guest memory address
-    pub mem_end: u64,
-}
-
-impl AddressSpaceLayout {
-    /// Create a new instance of `AddressSpaceLayout`.
-    pub fn new(phys_end: u64, mem_start: u64, mem_end: u64) -> Self {
-        AddressSpaceLayout {
-            phys_end,
-            mem_start,
-            mem_end,
-        }
-    }
-
-    /// Check whether an region is valid with the constraints of the layout.
-    pub fn is_region_valid(&self, region: &AddressSpaceRegion) -> bool {
-        let region_end = match region.base.0.checked_add(region.size) {
-            None => return false,
-            Some(v) => v,
-        };
-
-        match region.ty {
-            AddressSpaceRegionType::DefaultMemory => {
-                if region.base.0 < self.mem_start || region_end > self.mem_end {
-                    return false;
-                }
-            }
-            AddressSpaceRegionType::DeviceMemory | AddressSpaceRegionType::DAXMemory => {
-                if region.base.0 < self.mem_end || region_end > self.phys_end {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-}
-
 /// Base implementation to manage guest physical address space, without support of region hotplug.
 #[derive(Clone)]
 pub struct AddressSpaceBase {
@@ -775,7 +729,7 @@ mod hotplug {
 }
 
 impl AddressSpace {
-    #[cfg(feature == "memory-hotplug")]
+    #[cfg(feature = "memory-hotplug")]
     /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
     pub fn convert_into_vm_as(
         gm: GuestMemoryMmap,
@@ -783,7 +737,7 @@ impl AddressSpace {
         GuestMemoryAtomic::from(Arc::new(gm))
     }
 
-    #[cfg(not(feature == "memory-hotplug"))]
+    #[cfg(not(feature = "memory-hotplug"))]
     /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
     pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
         Arc::new(gm)
