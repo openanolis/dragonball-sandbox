@@ -13,13 +13,44 @@
 //! space for virtual machines, and mechanisms to coordinate all the devices resident in the
 //! guest physical address space.
 
-pub mod numa;
+use vm_memory::GuestUsize;
+
+mod numa;
 pub use self::numa::{NumaIdTable, NumaNode, NumaNodeInfo, MPOL_MF_MOVE, MPOL_PREFERRED};
 
-pub mod address_space;
-pub use self::address_space::{
-    AddressSpace, AddressSpaceBase, AddressSpaceError, AddressSpaceRegion, AddressSpaceRegionType,
-};
+mod address_space;
+pub use self::address_space::{AddressSpace, AddressSpaceBase};
 
 mod layout;
 pub use layout::AddressSpaceLayout;
+
+mod region;
+pub use region::{AddressSpaceRegion, AddressSpaceRegionType};
+
+/// Errors associated with virtual machine address space management.
+#[derive(Debug, thiserror::Error)]
+pub enum AddressSpaceError {
+    /// Invalid address space region type.
+    #[error("invalid address space region type")]
+    InvalidRegionType,
+
+    /// Invalid address range.
+    #[error("invalid address space region (0x{0:x}, 0x{1:x})")]
+    InvalidAddressRange(u64, GuestUsize),
+
+    /// Failed to create memfd to map anonymous memory.
+    #[error("can not create memfd to map anonymous memory")]
+    CreateMemFd(#[source] nix::Error),
+
+    /// Failed to open memory file.
+    #[error("can not open memory file")]
+    OpenFile(#[source] std::io::Error),
+
+    /// Failed to set size for memory file.
+    #[error("can not set size for memory file")]
+    SetFileSize(#[source] std::io::Error),
+
+    /// Failed to unlink memory file.
+    #[error("can not unlink memory file")]
+    UnlinkFile(#[source] nix::Error),
+}
