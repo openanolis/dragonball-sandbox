@@ -21,6 +21,9 @@ pub use self::address_space::{AddressSpace, AddressSpaceBase};
 mod layout;
 pub use layout::AddressSpaceLayout;
 
+mod memory;
+pub use memory::{GuestMemoryHybrid, GuestRegionHybrid};
+
 mod numa;
 pub use self::numa::{NumaIdTable, NumaNode, NumaNodeInfo, MPOL_MF_MOVE, MPOL_PREFERRED};
 
