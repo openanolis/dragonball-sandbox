@@ -13,10 +13,13 @@ This repository contains the following crates:
 | [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | TBD |
 | [db-arch](crates/db-arch) | collections of CPU architecture related modules | TBD |
 | [db-boot](crates/db-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |
-| [dbs-device](crates/dbs-device) | virtual machine's device model | TBD |
+| [dbs-device](crates/dbs-device) | virtual machine's device model | [![Crates.io](https://img.shields.io/crates/v/dbs-device)](https://crates.io/crates/dbs-device) |
 | [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | TBD |
+| [dbs-legacy-devices](crates/dbs-legacy-devices) | emulation for legacy devices | TBD |
+| [dbs-utils](crates/dbs-utils) | helpers and utilities used by multiple `dragonball-sandbox` components | TBD |
+| [dbs-virtio-devices](crates/dbs-virtio-devices) | emulation for virtio devices | TBD |
 
-(Dragonball is a virtual machine monitor developed by Alibaba and db is the abbreviation for Dragonball.)
+(Dragonball is a virtual machine monitor developed by Alibaba and dbs is the abbreviation for Dragonball.)
 
 ## How to build
 ```bash
