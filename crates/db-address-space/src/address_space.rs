@@ -25,6 +25,11 @@ pub struct AddressSpaceBase {
 }
 
 impl AddressSpaceBase {
+    /// Convert a [GuestMemoryMmap] object into `Arc<GuestMemoryMmap>`.
+    pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
+        Arc::new(gm)
+    }
+
     /// Create an instance of `AddressSpaceBase` from an `AddressSpaceRegion` array.
     ///
     /// To achieve better performance by using binary search algorithm, the `regions` vector
@@ -164,6 +169,13 @@ mod hotplug {
     }
 
     impl AddressSpaceAtomic {
+        /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
+        pub fn convert_into_vm_as(
+            gm: GuestMemoryMmap,
+        ) -> vm_memory::atomic::GuestMemoryAtomic<GuestMemoryMmap> {
+            vm_memory::atomic::GuestMemoryAtomic::from(Arc::new(gm))
+        }
+
         /// Create an instance of `AddressSpaceAtomic` from an `AddressSpaceRegion` array.
         ///
         /// To achieve better performance by using binary search algorithm, the `regions` vector
@@ -246,22 +258,6 @@ mod hotplug {
     }
 }
 
-impl AddressSpace {
-    #[cfg(feature = "memory-hotplug")]
-    /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
-    pub fn convert_into_vm_as(
-        gm: GuestMemoryMmap,
-    ) -> vm_memory::atomic::GuestMemoryAtomic<GuestMemoryMmap> {
-        vm_memory::atomic::GuestMemoryAtomic::from(Arc::new(gm))
-    }
-
-    #[cfg(not(feature = "memory-hotplug"))]
-    /// Convert a [GuestMemoryMmap] object into `Arc<GuestMemoryMmap>`.
-    pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
-        Arc::new(gm)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +269,7 @@ mod tests {
     const GUEST_PHYS_END: u64 = (1 << 46) - 1;
     const GUEST_MEM_START: u64 = 0;
     const GUEST_MEM_END: u64 = GUEST_PHYS_END >> 1;
+    const GUEST_DEVICE_START: u64 = GUEST_MEM_END + 1;
 
     #[test]
     fn test_is_reserved_region() {
@@ -290,7 +287,7 @@ mod tests {
             )),
             Arc::new(AddressSpaceRegion::new(
                 AddressSpaceRegionType::DAXMemory,
-                GuestAddress(page_size * 3),
+                GuestAddress(GUEST_DEVICE_START),
                 page_size as GuestUsize,
             )),
         ];
@@ -299,10 +296,10 @@ mod tests {
 
         assert!(!address_space.is_dax_region(GuestAddress(page_size)));
         assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
-        assert!(address_space.is_dax_region(GuestAddress(page_size * 3)));
-        assert!(address_space.is_dax_region(GuestAddress(page_size * 3 + 1)));
-        assert!(!address_space.is_dax_region(GuestAddress(page_size * 3 + page_size)));
-        assert!(address_space.is_dax_region(GuestAddress(page_size * 3 + page_size - 1)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size - 1)));
     }
 
     #[test]
@@ -313,7 +310,8 @@ mod tests {
         file.set_len(0x10000).unwrap();
 
         let reg = Arc::new(
-            AddressSpaceRegion::create_device_region(GuestAddress(0x100000), 0x1000).unwrap(),
+            AddressSpaceRegion::create_device_region(GuestAddress(GUEST_DEVICE_START), 0x1000)
+                .unwrap(),
         );
         let regions = vec![reg];
         let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
