@@ -5,17 +5,10 @@
 
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use vm_memory::{GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
 
 use crate::{AddressSpaceError, AddressSpaceLayout, AddressSpaceRegion, AddressSpaceRegionType};
-
-#[cfg(not(feature = "region-hotplug"))]
-/// Concrete type to implement address space manager.
-pub type AddressSpace = AddressSpaceBase;
-
-#[cfg(feature = "region-hotplug")]
-/// Concrete type to implement address space manager with region hotplug capability.
-pub type AddressSpace = self::hotplug::AddressSpaceAtomic;
 
 /// Base implementation to manage guest physical address space, without support of region hotplug.
 #[derive(Clone)]
@@ -25,11 +18,6 @@ pub struct AddressSpaceBase {
 }
 
 impl AddressSpaceBase {
-    /// Convert a [GuestMemoryMmap] object into `Arc<GuestMemoryMmap>`.
-    pub fn convert_into_vm_as(gm: GuestMemoryMmap) -> Arc<GuestMemoryMmap> {
-        Arc::new(gm)
-    }
-
     /// Create an instance of `AddressSpaceBase` from an `AddressSpaceRegion` array.
     ///
     /// To achieve better performance by using binary search algorithm, the `regions` vector
@@ -102,11 +90,6 @@ impl AddressSpaceBase {
         Ok(())
     }
 
-    /// Create a [GuestMemoryMmap] object from the address space object.
-    pub fn create_guest_memory() -> GuestMemoryMmap {
-        GuestMemoryMmap::new()
-    }
-
     /// Get address space layout associated with the address space.
     pub fn get_layout(&self) -> AddressSpaceLayout {
         self.layout.clone()
@@ -154,107 +137,96 @@ impl AddressSpaceBase {
     }
 }
 
-#[cfg(feature = "region-hotplug")]
-mod hotplug {
-    use super::*;
-    use arc_swap::ArcSwap;
+/// An address space implementation with region hotplug capability.
+///
+/// The `AddressSpaceAtomic` is a wrapper over [AddressSpaceInternal] to support hotplug of
+/// address space regions.
+#[derive(Clone)]
+pub struct AddressSpace {
+    state: Arc<ArcSwap<AddressSpaceBase>>,
+}
 
-    /// An address space implementation with region hotplug capability.
-    ///
-    /// The `AddressSpaceAtomic` is a wrapper over [AddressSpaceInternal] to support hotplug of
-    /// address space regions.
-    #[derive(Clone)]
-    pub struct AddressSpaceAtomic {
-        state: Arc<ArcSwap<AddressSpaceBase>>,
+impl AddressSpace {
+    /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
+    pub fn convert_into_vm_as(
+        gm: GuestMemoryMmap,
+    ) -> vm_memory::atomic::GuestMemoryAtomic<GuestMemoryMmap> {
+        vm_memory::atomic::GuestMemoryAtomic::from(Arc::new(gm))
     }
 
-    impl AddressSpaceAtomic {
-        /// Convert a [GuestMemoryMmap] object into `GuestMemoryAtomic<GuestMemoryMmap>`.
-        pub fn convert_into_vm_as(
-            gm: GuestMemoryMmap,
-        ) -> vm_memory::atomic::GuestMemoryAtomic<GuestMemoryMmap> {
-            vm_memory::atomic::GuestMemoryAtomic::from(Arc::new(gm))
+    /// Create an instance of `AddressSpaceAtomic` from an `AddressSpaceRegion` array.
+    ///
+    /// To achieve better performance by using binary search algorithm, the `regions` vector
+    /// will gotten sorted by guest physical address.
+    ///
+    /// Note, panicking if some regions intersects with each other.
+    ///
+    /// # Arguments
+    /// * `regions` - prepared regions to managed by the address space instance.
+    /// * `layout` - prepared address space layout configuration.
+    pub fn from_regions(
+        regions: Vec<Arc<AddressSpaceRegion>>,
+        boundary: AddressSpaceLayout,
+    ) -> Self {
+        let internal = AddressSpaceBase::from_regions(regions, boundary);
+
+        AddressSpace {
+            state: Arc::new(ArcSwap::new(Arc::new(internal))),
         }
+    }
 
-        /// Create an instance of `AddressSpaceAtomic` from an `AddressSpaceRegion` array.
-        ///
-        /// To achieve better performance by using binary search algorithm, the `regions` vector
-        /// will gotten sorted by guest physical address.
-        ///
-        /// Note, panicking if some regions intersects with each other.
-        ///
-        /// # Arguments
-        /// * `regions` - prepared regions to managed by the address space instance.
-        /// * `layout` - prepared address space layout configuration.
-        pub fn from_regions(
-            regions: Vec<Arc<AddressSpaceRegion>>,
-            boundary: AddressSpaceLayout,
-        ) -> Self {
-            let internal = AddressSpaceBase::from_regions(regions, boundary);
+    /// Insert a new address space region into the address space.
+    ///
+    /// # Arguments
+    /// * `region` - the new region to be inserted.
+    pub fn insert_region(
+        &mut self,
+        region: Arc<AddressSpaceRegion>,
+    ) -> Result<(), AddressSpaceError> {
+        let curr = self.state.load().regions.clone();
+        let boundary = self.state.load().layout.clone();
+        let mut internal = AddressSpaceBase::from_regions(curr, boundary);
+        internal.insert_region(region)?;
+        let _old = self.state.swap(Arc::new(internal));
 
-            AddressSpaceAtomic {
-                state: Arc::new(ArcSwap::new(Arc::new(internal))),
-            }
-        }
+        Ok(())
+    }
 
-        /// Insert a new address space region into the address space.
-        ///
-        /// # Arguments
-        /// * `region` - the new region to be inserted.
-        pub fn insert_region(
-            &mut self,
-            region: Arc<AddressSpaceRegion>,
-        ) -> Result<(), AddressSpaceError> {
-            let curr = self.state.load().regions.clone();
-            let boundary = self.state.load().layout.clone();
-            let mut internal = AddressSpaceBase::from_regions(curr, boundary);
-            internal.insert_region(region)?;
-            let _old = self.state.swap(Arc::new(internal));
+    /// Enumerate all regions in the address space.
+    ///
+    /// # Arguments
+    /// * `cb` - the callback function to apply to each region.
+    pub fn walk_regions<F>(&self, cb: F) -> Result<(), AddressSpaceError>
+    where
+        F: FnMut(&Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError>,
+    {
+        self.state.load().walk_regions(cb)
+    }
 
-            Ok(())
-        }
+    /// Get address space layout associated with the address space.
+    pub fn get_layout(&self) -> AddressSpaceLayout {
+        self.state.load().get_layout()
+    }
 
-        /// Enumerate all regions in the address space.
-        ///
-        /// # Arguments
-        /// * `cb` - the callback function to apply to each region.
-        pub fn walk_regions<F>(&self, cb: F) -> Result<(), AddressSpaceError>
-        where
-            F: FnMut(&Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError>,
-        {
-            self.state.load().walk_regions(cb)
-        }
+    /// Get maximum of guest physical address in the address space.
+    pub fn get_last_addr(&self) -> GuestAddress {
+        self.state.load().get_last_addr()
+    }
 
-        /// Create a [GuestMemoryMmap] object from the address space object.
-        pub fn create_guest_memory() -> GuestMemoryMmap {
-            AddressSpaceBase::create_guest_memory()
-        }
+    /// Check whether the guest physical address `guest_addr` belongs to a DAX memory region.
+    ///
+    /// # Arguments
+    /// * `guest_addr` - the guest physical address to inquire
+    pub fn is_dax_region(&self, guest_addr: GuestAddress) -> bool {
+        self.state.load().is_dax_region(guest_addr)
+    }
 
-        /// Get address space layout associated with the address space.
-        pub fn get_layout(&self) -> AddressSpaceLayout {
-            self.state.load().get_layout()
-        }
-
-        /// Get maximum of guest physical address in the address space.
-        pub fn get_last_addr(&self) -> GuestAddress {
-            self.state.load().get_last_addr()
-        }
-
-        /// Check whether the guest physical address `guest_addr` belongs to a DAX memory region.
-        ///
-        /// # Arguments
-        /// * `guest_addr` - the guest physical address to inquire
-        pub fn is_dax_region(&self, guest_addr: GuestAddress) -> bool {
-            self.state.load().is_dax_region(guest_addr)
-        }
-
-        /// Get optional NUMA node id associated with guest physical address `gpa`.
-        ///
-        /// # Arguments
-        /// * `gpa` - guest physical address to query.
-        pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
-            self.state.load().get_numa_node_id(gpa)
-        }
+    /// Get optional NUMA node id associated with guest physical address `gpa`.
+    ///
+    /// # Arguments
+    /// * `gpa` - guest physical address to query.
+    pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
+        self.state.load().get_numa_node_id(gpa)
     }
 }
 

@@ -10,15 +10,9 @@ keywords = ["dragonball", "address", "vmm", "secure-sandbox"]
 readme = "README.md"
 
 [dependencies]
+arc-swap = ">=0.4.8"
 libc = "0.2.39"
 nix = "0.15"
 thiserror = "1"
 vmm-sys-util = "0.8"
-vm-memory = { version = "0.7", features = ["backend-mmap"] }
-
-arc-swap = { version = ">=0.4.8", optional = true }
-
-[features]
-default = []
-memory-hotplug = ["region-hotplug"]
-region-hotplug = ["vm-memory/backend-atomic", "arc-swap"]
+vm-memory = { version = "0.7", features = ["backend-mmap", "backend-atomic"] }
