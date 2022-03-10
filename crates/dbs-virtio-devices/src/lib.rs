@@ -18,6 +18,9 @@ pub use self::device::*;
 mod notifier;
 pub use self::notifier::*;
 
+#[cfg(feature = "virtio-mmio")]
+pub mod mmio;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
