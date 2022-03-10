@@ -10,14 +10,12 @@ keywords = ["dragonball", "secure-sandbox", "devices", "legacy"]
 readme = "README.md"
 
 [dependencies]
-log = "0.4.14"
-serde = { version = "1.0.27", features = ["derive"] }
 dbs-device = { version = "0.1.0", path = "../dbs-device" }
 dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
+log = "0.4.14"
+serde = { version = "1.0.27", features = ["derive", "rc"] }
 vm-superio = "0.5.0"
 vmm-sys-util = "0.9.0"
-serde = { version = "1.0.27", features = ["derive", "rc"] }
-dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
 
 [dev-dependencies]
 libc = "0.2.39"
