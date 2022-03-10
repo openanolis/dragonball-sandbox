@@ -32,6 +32,20 @@ pub enum MemorySourceType {
     MemFdOnHugeTlbFs,
 }
 
+impl MemorySourceType {
+    /// Check whether the memory source is huge page.
+    pub fn is_hugepage(&self) -> bool {
+        *self == Self::FileOnHugeTlbFs
+            || *self == Self::MmapAnonymousHugeTlbFs
+            || *self == Self::MemFdOnHugeTlbFs
+    }
+
+    /// Check whether the memory source is anonymous memory.
+    pub fn is_mmap_anonymous(&self) -> bool {
+        *self == Self::MmapAnonymous || *self == Self::MmapAnonymousHugeTlbFs
+    }
+}
+
 impl FromStr for MemorySourceType {
     type Err = String;
 

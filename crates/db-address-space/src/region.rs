@@ -3,16 +3,14 @@
 
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
-use std::sync::atomic::Ordering;
+use std::str::FromStr;
 
 use nix::sys::memfd;
-use vm_memory::{
-    Address, AtomicAccess, Bytes, FileOffset, GuestAddress, GuestMemoryError, GuestMemoryRegion,
-    GuestUsize, MemoryRegionAddress,
-};
+use vm_memory::{Address, FileOffset, GuestAddress, GuestUsize};
 
+use crate::memory::MemorySourceType;
+use crate::memory::MemorySourceType::MemFdShared;
 use crate::AddressSpaceError;
 
 /// Type of address space regions.
@@ -42,6 +40,9 @@ pub struct AddressSpaceRegion {
     pub base: GuestAddress,
     /// Size of the address space region.
     pub size: GuestUsize,
+    /// Host NUMA node ids assigned to this region.
+    pub host_numa_node_id: Option<u32>,
+
     /// File/offset tuple to back the memory allocation.
     file_offset: Option<FileOffset>,
     /// Mmap permission flags.
@@ -56,8 +57,6 @@ pub struct AddressSpaceRegion {
     ///
     /// It should be true for regions with the MADV_DONTFORK flag enabled.
     is_anon: bool,
-    /// Host NUMA node ids assigned to this region.
-    pub(crate) host_numa_node_id: Option<u32>,
 }
 
 impl AddressSpaceRegion {
@@ -67,12 +66,12 @@ impl AddressSpaceRegion {
             ty,
             base,
             size,
+            host_numa_node_id: None,
             file_offset: None,
             perm_flags: libc::MAP_SHARED,
             is_hugepage: false,
             is_hotplug: false,
             is_anon: false,
-            host_numa_node_id: None,
         }
     }
 
@@ -82,24 +81,24 @@ impl AddressSpaceRegion {
     /// * `ty` - Type of the address region
     /// * `base` - Base address in VM to map content
     /// * `size` - Length of content to map
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `file_offset` - Optional file descriptor and offset to map content from
     /// * `perm_flags` - mmap permission flags
-    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn build(
         ty: AddressSpaceRegionType,
         base: GuestAddress,
         size: GuestUsize,
+        host_numa_node_id: Option<u32>,
         file_offset: Option<FileOffset>,
         perm_flags: i32,
-        host_numa_node_id: Option<u32>,
         is_hotplug: bool,
     ) -> Self {
         let mut region = Self::new(ty, base, size);
 
+        region.set_host_numa_node_id(host_numa_node_id);
         region.set_file_offset(file_offset);
         region.set_perm_flags(perm_flags);
-        region.set_host_numa_node_id(host_numa_node_id);
         if is_hotplug {
             region.set_hotplug();
         }
@@ -112,26 +111,26 @@ impl AddressSpaceRegion {
     /// # Arguments
     /// * `base` - Base address in VM to map content
     /// * `size` - Length of content to map
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `mem_type` - Memory mapping from, 'shmem' or 'hugetlbfs'
     /// * `mem_file_path` - Memory file path
-    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `mem_prealloc` - Whether to enable pre-allocation of guest memory
     /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn create_default_memory_region(
         base: GuestAddress,
         size: GuestUsize,
+        numa_node_id: Option<u32>,
         mem_type: &str,
         mem_file_path: &str,
-        numa_node_id: Option<u32>,
         mem_prealloc: bool,
         is_hotplug: bool,
     ) -> Result<AddressSpaceRegion, AddressSpaceError> {
         Self::create_memory_region(
             base,
             size,
+            numa_node_id,
             mem_type,
             mem_file_path,
-            numa_node_id,
             mem_prealloc,
             is_hotplug,
         )
@@ -150,9 +149,9 @@ impl AddressSpaceRegion {
     pub fn create_memory_region(
         base: GuestAddress,
         size: GuestUsize,
+        numa_node_id: Option<u32>,
         mem_type: &str,
         mem_file_path: &str,
-        numa_node_id: Option<u32>,
         mem_prealloc: bool,
         is_hotplug: bool,
     ) -> Result<AddressSpaceRegion, AddressSpaceError> {
@@ -161,74 +160,78 @@ impl AddressSpaceRegion {
         } else {
             libc::MAP_SHARED
         };
-        if Self::is_shmem(mem_type) || Self::is_hugeshmem(mem_type) {
-            let fn_str = if Self::is_shmem(mem_type) {
-                CString::new("shmem").expect("CString::new('shmem') failed")
-            } else {
-                CString::new("hugeshmem").expect("CString::new('hugeshmem') failed")
-            };
-            let filename = fn_str.as_c_str();
-            let fd = memfd::memfd_create(filename, memfd::MemFdCreateFlag::empty())
-                .map_err(AddressSpaceError::CreateMemFd)?;
-            // Safe because we have just created the fd.
-            let file: File = unsafe { File::from_raw_fd(fd) };
-            file.set_len(size as u64)
-                .map_err(AddressSpaceError::SetFileSize)?;
-            let mut reg = Self::build(
-                AddressSpaceRegionType::DefaultMemory,
-                base,
-                size,
-                Some(FileOffset::new(file, 0)),
-                perm_flags,
-                numa_node_id,
-                is_hotplug,
-            );
-            if Self::is_hugeshmem(mem_type) {
-                reg.set_hugepage();
+        let source_type = MemorySourceType::from_str(mem_type)
+            .map_err(|_e| AddressSpaceError::InvalidMemorySourceType(mem_type.to_string()))?;
+        let mut reg = match source_type {
+            MemorySourceType::MemFdShared | MemorySourceType::MemFdOnHugeTlbFs => {
+                let fn_str = if source_type == MemFdShared {
+                    CString::new("shmem").expect("CString::new('shmem') failed")
+                } else {
+                    CString::new("hugeshmem").expect("CString::new('hugeshmem') failed")
+                };
+                let filename = fn_str.as_c_str();
+                let fd = memfd::memfd_create(filename, memfd::MemFdCreateFlag::empty())
+                    .map_err(AddressSpaceError::CreateMemFd)?;
+                // Safe because we have just created the fd.
+                let file: File = unsafe { File::from_raw_fd(fd) };
+                file.set_len(size as u64)
+                    .map_err(AddressSpaceError::SetFileSize)?;
+                Self::build(
+                    AddressSpaceRegionType::DefaultMemory,
+                    base,
+                    size,
+                    numa_node_id,
+                    Some(FileOffset::new(file, 0)),
+                    perm_flags,
+                    is_hotplug,
+                )
             }
-            Ok(reg)
-        } else if Self::is_anon(mem_type) || Self::is_hugeanon(mem_type) {
-            let mut perm_flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
-            if mem_prealloc {
-                perm_flags |= libc::MAP_POPULATE
+            MemorySourceType::MmapAnonymous | MemorySourceType::MmapAnonymousHugeTlbFs => {
+                let mut perm_flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+                if mem_prealloc {
+                    perm_flags |= libc::MAP_POPULATE
+                }
+                Self::build(
+                    AddressSpaceRegionType::DefaultMemory,
+                    base,
+                    size,
+                    numa_node_id,
+                    None,
+                    perm_flags,
+                    is_hotplug,
+                )
             }
-            let mut reg = Self::build(
-                AddressSpaceRegionType::DefaultMemory,
-                base,
-                size,
-                None,
-                perm_flags,
-                numa_node_id,
-                is_hotplug,
-            );
-            if Self::is_hugeanon(mem_type) {
-                reg.set_hugepage();
+            MemorySourceType::FileOnHugeTlbFs => {
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .open(mem_file_path)
+                    .map_err(AddressSpaceError::OpenFile)?;
+                nix::unistd::unlink(mem_file_path).map_err(AddressSpaceError::UnlinkFile)?;
+                file.set_len(size as u64)
+                    .map_err(AddressSpaceError::SetFileSize)?;
+                let file_offset = FileOffset::new(file, 0);
+                Self::build(
+                    AddressSpaceRegionType::DefaultMemory,
+                    base,
+                    size,
+                    numa_node_id,
+                    Some(file_offset),
+                    perm_flags,
+                    is_hotplug,
+                )
             }
-            reg.set_anonpage();
-            Ok(reg)
-        } else if Self::is_hugetlbfs(mem_type) {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(mem_file_path)
-                .map_err(AddressSpaceError::OpenFile)?;
-            nix::unistd::unlink(mem_file_path).map_err(AddressSpaceError::UnlinkFile)?;
-            file.set_len(size as u64)
-                .map_err(AddressSpaceError::SetFileSize)?;
-            let file_offset = FileOffset::new(file, 0);
-            Ok(Self::build(
-                AddressSpaceRegionType::DefaultMemory,
-                base,
-                size,
-                Some(file_offset),
-                perm_flags,
-                numa_node_id,
-                is_hotplug,
-            ))
-        } else {
-            Err(AddressSpaceError::InvalidRegionType)
+        };
+
+        if source_type.is_hugepage() {
+            reg.set_hugepage();
         }
+        if source_type.is_mmap_anonymous() {
+            reg.set_anonpage();
+        }
+
+        Ok(reg)
     }
 
     /// Create an address region for device MMIO.
@@ -245,8 +248,8 @@ impl AddressSpaceRegion {
             base,
             size,
             None,
-            0,
             None,
+            0,
             false,
         ))
     }
@@ -254,6 +257,22 @@ impl AddressSpaceRegion {
     /// Get type of the address space region.
     pub fn region_type(&self) -> AddressSpaceRegionType {
         self.ty
+    }
+
+    /// Get size of region.
+    pub fn len(&self) -> GuestUsize {
+        self.size
+    }
+
+    /// Get the inclusive start physical address of the region.
+    pub fn start_addr(&self) -> GuestAddress {
+        self.base
+    }
+
+    /// Get the inclusive end physical address of the region.
+    pub fn last_addr(&self) -> GuestAddress {
+        debug_assert!(self.size > 0 && self.base.checked_add(self.size).is_some());
+        GuestAddress(self.base.raw_value() + self.size - 1)
     }
 
     /// Get mmap permission flags of the address space region.
@@ -266,16 +285,6 @@ impl AddressSpaceRegion {
         self.perm_flags = perm_flags;
     }
 
-    /// Check whether the address space region is backed by a memory file.
-    pub fn has_file(&self) -> bool {
-        self.file_offset.is_some()
-    }
-
-    /// Set associated file/offset pair for the region.
-    pub fn set_file_offset(&mut self, file_offset: Option<FileOffset>) {
-        self.file_offset = file_offset;
-    }
-
     /// Get host_numa_node_id flags
     pub fn host_numa_node_id(&self) -> Option<u32> {
         self.host_numa_node_id
@@ -284,6 +293,21 @@ impl AddressSpaceRegion {
     /// Set associated NUMA node ID to allocate memory from for this region.
     pub fn set_host_numa_node_id(&mut self, host_numa_node_id: Option<u32>) {
         self.host_numa_node_id = host_numa_node_id;
+    }
+
+    /// Check whether the address space region is backed by a memory file.
+    pub fn has_file(&self) -> bool {
+        self.file_offset.is_some()
+    }
+
+    /// Get optional file associated with the region.
+    pub fn file_offset(&self) -> Option<&FileOffset> {
+        self.file_offset.as_ref()
+    }
+
+    /// Set associated file/offset pair for the region.
+    pub fn set_file_offset(&mut self, file_offset: Option<FileOffset>) {
+        self.file_offset = file_offset;
     }
 
     /// Set the hotplug hint.
@@ -318,7 +342,7 @@ impl AddressSpaceRegion {
 
     /// Check whether the address space region is valid.
     pub fn is_valid(&self) -> bool {
-        self.base.checked_add(self.size).is_some()
+        self.size > 0 && self.base.checked_add(self.size).is_some()
     }
 
     /// Check whether the address space region intersects with another one.
@@ -335,134 +359,12 @@ impl AddressSpaceRegion {
 
         !(end1 <= other.base || self.base >= end2)
     }
-
-    fn is_shmem(mem_type: &str) -> bool {
-        mem_type == "shmem"
-    }
-
-    fn is_hugeshmem(mem_type: &str) -> bool {
-        mem_type == "hugeshmem"
-    }
-
-    fn is_hugetlbfs(mem_type: &str) -> bool {
-        mem_type == "hugetlbfs"
-    }
-
-    fn is_anon(mem_type: &str) -> bool {
-        mem_type == "anon"
-    }
-
-    fn is_hugeanon(mem_type: &str) -> bool {
-        mem_type == "hugeanon"
-    }
-}
-
-impl Bytes<MemoryRegionAddress> for AddressSpaceRegion {
-    type E = GuestMemoryError;
-
-    fn write(&self, _buf: &[u8], _addr: MemoryRegionAddress) -> Result<usize, Self::E> {
-        unimplemented!()
-    }
-
-    fn read(&self, _buf: &mut [u8], _addr: MemoryRegionAddress) -> Result<usize, Self::E> {
-        unimplemented!()
-    }
-
-    fn write_slice(&self, _buf: &[u8], _addr: MemoryRegionAddress) -> Result<(), Self::E> {
-        unimplemented!()
-    }
-
-    fn read_slice(&self, _buf: &mut [u8], _addr: MemoryRegionAddress) -> Result<(), Self::E> {
-        unimplemented!()
-    }
-
-    fn read_from<F>(
-        &self,
-        _addr: MemoryRegionAddress,
-        _src: &mut F,
-        _count: usize,
-    ) -> Result<usize, Self::E>
-    where
-        F: Read,
-    {
-        unimplemented!()
-    }
-
-    fn read_exact_from<F>(
-        &self,
-        _addr: MemoryRegionAddress,
-        _src: &mut F,
-        _count: usize,
-    ) -> Result<(), Self::E>
-    where
-        F: Read,
-    {
-        unimplemented!()
-    }
-
-    fn write_to<F>(
-        &self,
-        _addr: MemoryRegionAddress,
-        _dst: &mut F,
-        _count: usize,
-    ) -> Result<usize, Self::E>
-    where
-        F: Write,
-    {
-        unimplemented!()
-    }
-
-    fn write_all_to<F>(
-        &self,
-        _addr: MemoryRegionAddress,
-        _dst: &mut F,
-        _count: usize,
-    ) -> Result<(), Self::E>
-    where
-        F: Write,
-    {
-        unimplemented!()
-    }
-    fn store<T: AtomicAccess>(
-        &self,
-        _val: T,
-        _addr: MemoryRegionAddress,
-        _order: Ordering,
-    ) -> Result<(), Self::E> {
-        unimplemented!()
-    }
-    fn load<T: AtomicAccess>(
-        &self,
-        _addr: MemoryRegionAddress,
-        _order: Ordering,
-    ) -> Result<T, Self::E> {
-        unimplemented!()
-    }
-}
-
-impl GuestMemoryRegion for AddressSpaceRegion {
-    type B = ();
-
-    fn len(&self) -> GuestUsize {
-        self.size
-    }
-
-    fn start_addr(&self) -> GuestAddress {
-        self.base
-    }
-
-    fn bitmap(&self) -> &Self::B {
-        &()
-    }
-
-    fn file_offset(&self) -> Option<&FileOffset> {
-        self.file_offset.as_ref()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use vmm_sys_util::tempfile::TempFile;
 
     #[test]
@@ -500,9 +402,9 @@ mod tests {
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x1000),
             0x1000,
+            None,
             Some(FileOffset::new(f, 0x0)),
             0x5a,
-            None,
             false,
         );
         assert_eq!(reg2.region_type(), AddressSpaceRegionType::DefaultMemory);
@@ -570,9 +472,9 @@ mod tests {
         AddressSpaceRegion::create_default_memory_region(
             GuestAddress(0x100000),
             0x100000,
-            "invalid",
-            "invalid",
             None,
+            "invalid",
+            "invalid",
             false,
             false,
         )
@@ -581,17 +483,50 @@ mod tests {
         let reg = AddressSpaceRegion::create_default_memory_region(
             GuestAddress(0x100000),
             0x100000,
+            None,
             "shmem",
             "",
-            None,
             false,
             false,
         )
         .unwrap();
         assert_eq!(reg.region_type(), AddressSpaceRegionType::DefaultMemory);
         assert_eq!(reg.start_addr(), GuestAddress(0x100000));
+        assert_eq!(reg.last_addr(), GuestAddress(0x1fffff));
         assert_eq!(reg.len(), 0x100000);
         assert!(reg.file_offset().is_some());
+
+        let reg = AddressSpaceRegion::create_default_memory_region(
+            GuestAddress(0x100000),
+            0x100000,
+            None,
+            "hugeshmem",
+            "",
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(reg.region_type(), AddressSpaceRegionType::DefaultMemory);
+        assert_eq!(reg.start_addr(), GuestAddress(0x100000));
+        assert_eq!(reg.last_addr(), GuestAddress(0x1fffff));
+        assert_eq!(reg.len(), 0x100000);
+        assert!(reg.file_offset().is_some());
+
+        let reg = AddressSpaceRegion::create_default_memory_region(
+            GuestAddress(0x100000),
+            0x100000,
+            None,
+            "mmap",
+            "",
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(reg.region_type(), AddressSpaceRegionType::DefaultMemory);
+        assert_eq!(reg.start_addr(), GuestAddress(0x100000));
+        assert_eq!(reg.last_addr(), GuestAddress(0x1fffff));
+        assert_eq!(reg.len(), 0x100000);
+        assert!(reg.file_offset().is_none());
 
         // TODO: test hugetlbfs
     }
