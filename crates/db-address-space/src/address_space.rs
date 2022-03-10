@@ -91,12 +91,12 @@ impl AddressSpaceBase {
     }
 
     /// Get address space layout associated with the address space.
-    pub fn get_layout(&self) -> AddressSpaceLayout {
+    pub fn layout(&self) -> AddressSpaceLayout {
         self.layout.clone()
     }
 
     /// Get maximum of guest physical address in the address space.
-    pub fn get_last_addr(&self) -> GuestAddress {
+    pub fn last_addr(&self) -> GuestAddress {
         let mut last_addr = GuestAddress(self.layout.mem_start);
         for reg in self.regions.iter() {
             if reg.ty != AddressSpaceRegionType::DAXMemory && reg.last_addr() > last_addr {
@@ -127,7 +127,7 @@ impl AddressSpaceBase {
     ///
     /// # Arguments
     /// * `gpa` - guest physical address to query.
-    pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
+    pub fn numa_node_id(&self, gpa: u64) -> Option<u32> {
         for reg in self.regions.iter() {
             if gpa >= reg.base.0 && gpa < (reg.base.0 + reg.size) {
                 return reg.host_numa_node_id;
@@ -204,13 +204,13 @@ impl AddressSpace {
     }
 
     /// Get address space layout associated with the address space.
-    pub fn get_layout(&self) -> AddressSpaceLayout {
-        self.state.load().get_layout()
+    pub fn layout(&self) -> AddressSpaceLayout {
+        self.state.load().layout()
     }
 
     /// Get maximum of guest physical address in the address space.
-    pub fn get_last_addr(&self) -> GuestAddress {
-        self.state.load().get_last_addr()
+    pub fn last_addr(&self) -> GuestAddress {
+        self.state.load().last_addr()
     }
 
     /// Check whether the guest physical address `guest_addr` belongs to a DAX memory region.
@@ -225,8 +225,8 @@ impl AddressSpace {
     ///
     /// # Arguments
     /// * `gpa` - guest physical address to query.
-    pub fn get_numa_node_id(&self, gpa: u64) -> Option<u32> {
-        self.state.load().get_numa_node_id(gpa)
+    pub fn numa_node_id(&self, gpa: u64) -> Option<u32> {
+        self.state.load().numa_node_id(gpa)
     }
 }
 
@@ -288,7 +288,7 @@ mod tests {
         let regions = vec![reg];
         let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
         let address_space = AddressSpaceBase::from_regions(regions, boundary.clone());
-        assert_eq!(address_space.get_layout(), boundary);
+        assert_eq!(address_space.layout(), boundary);
     }
 
     #[should_panic]
