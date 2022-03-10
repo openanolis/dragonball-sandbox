@@ -13,5 +13,12 @@
 //! version 1 is called legacy mode, and the version 2 is preferred currently. The common parts
 //! of both versions are defined here.
 
+mod mmio_state;
+pub use self::mmio_state::*;
+
 mod dragonball;
 pub use self::dragonball::*;
+
+/// Offset from the base MMIO address of a virtio device used by the guest to notify the device of
+/// queue events.
+pub const MMIO_NOTIFY_REG_OFFSET: u32 = 0x50;
