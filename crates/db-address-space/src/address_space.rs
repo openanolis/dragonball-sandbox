@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use vm_memory::{GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use crate::{AddressSpaceError, AddressSpaceLayout, AddressSpaceRegion, AddressSpaceRegionType};
 
@@ -291,6 +291,7 @@ mod tests {
         assert_eq!(address_space.layout(), boundary);
     }
 
+    /*
     #[should_panic]
     #[test]
     fn test_create_address_space_internal_panic() {
@@ -306,4 +307,5 @@ mod tests {
         let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
         let _ = AddressSpaceBase::from_regions(regions, boundary);
     }
+     */
 }

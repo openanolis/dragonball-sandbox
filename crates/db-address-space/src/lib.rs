@@ -41,6 +41,10 @@ pub enum AddressSpaceError {
     #[error("invalid address space region (0x{0:x}, 0x{1:x})")]
     InvalidAddressRange(u64, GuestUsize),
 
+    /// Invalid guest memory source type.
+    #[error("invalid memory source type {0}")]
+    InvalidMemorySourceType(String),
+
     /// Failed to create memfd to map anonymous memory.
     #[error("can not create memfd to map anonymous memory")]
     CreateMemFd(#[source] nix::Error),
@@ -56,4 +60,24 @@ pub enum AddressSpaceError {
     /// Failed to unlink memory file.
     #[error("can not unlink memory file")]
     UnlinkFile(#[source] nix::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_code() {
+        let e = AddressSpaceError::InvalidRegionType;
+
+        assert_eq!(format!("{}", e), "invalid address space region type");
+        assert_eq!(format!("{:?}", e), "InvalidRegionType");
+        assert_eq!(
+            format!(
+                "{}",
+                AddressSpaceError::InvalidMemorySourceType("test".to_string())
+            ),
+            "invalid memory source type test"
+        );
+    }
 }
