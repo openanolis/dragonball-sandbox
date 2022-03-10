@@ -10,11 +10,46 @@
 //!
 //! It also provides interfaces to coordinate guest memory hotplug events.
 
+use std::str::FromStr;
 use std::sync::Arc;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
 
 mod hybrid;
 pub use hybrid::{GuestMemoryHybrid, GuestRegionHybrid};
+
+/// Type of source to allocate memory for virtual machines.
+#[derive(Debug, Eq, PartialEq)]
+pub enum MemorySourceType {
+    /// File on HugeTlbFs.
+    FileOnHugeTlbFs,
+    /// mmap() without flag `MAP_HUGETLB`.
+    MmapAnonymous,
+    /// mmap() with flag `MAP_HUGETLB`.
+    MmapAnonymousHugeTlbFs,
+    /// memfd() without flag `MFD_HUGETLB`.
+    MemFdShared,
+    /// memfd() with flag `MFD_HUGETLB`.
+    MemFdOnHugeTlbFs,
+}
+
+impl FromStr for MemorySourceType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "hugetlbfs" => Ok(MemorySourceType::FileOnHugeTlbFs),
+            "memfd" => Ok(MemorySourceType::MemFdShared),
+            "shmem" => Ok(MemorySourceType::MemFdShared),
+            "hugememfd" => Ok(MemorySourceType::MemFdOnHugeTlbFs),
+            "hugeshmem" => Ok(MemorySourceType::MemFdOnHugeTlbFs),
+            "anon" => Ok(MemorySourceType::MmapAnonymous),
+            "mmap" => Ok(MemorySourceType::MmapAnonymous),
+            "hugeanon" => Ok(MemorySourceType::MmapAnonymousHugeTlbFs),
+            "hugemmap" => Ok(MemorySourceType::MmapAnonymousHugeTlbFs),
+            _ => Err(format!("unknown memory source type {}", s)),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct GuestMemoryHotplugManager {}
@@ -82,5 +117,60 @@ impl GuestAddressSpace for GuestMemoryManager {
 
     fn memory(&self) -> Self::T {
         self.default.memory()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_source_type() {
+        assert_eq!(
+            MemorySourceType::from_str("hugetlbfs").unwrap(),
+            MemorySourceType::FileOnHugeTlbFs
+        );
+        assert_eq!(
+            MemorySourceType::from_str("memfd").unwrap(),
+            MemorySourceType::MemFdShared
+        );
+        assert_eq!(
+            MemorySourceType::from_str("shmem").unwrap(),
+            MemorySourceType::MemFdShared
+        );
+        assert_eq!(
+            MemorySourceType::from_str("hugememfd").unwrap(),
+            MemorySourceType::MemFdOnHugeTlbFs
+        );
+        assert_eq!(
+            MemorySourceType::from_str("hugeshmem").unwrap(),
+            MemorySourceType::MemFdOnHugeTlbFs
+        );
+        assert_eq!(
+            MemorySourceType::from_str("anon").unwrap(),
+            MemorySourceType::MmapAnonymous
+        );
+        assert_eq!(
+            MemorySourceType::from_str("mmap").unwrap(),
+            MemorySourceType::MmapAnonymous
+        );
+        assert_eq!(
+            MemorySourceType::from_str("hugeanon").unwrap(),
+            MemorySourceType::MmapAnonymousHugeTlbFs
+        );
+        assert_eq!(
+            MemorySourceType::from_str("hugemmap").unwrap(),
+            MemorySourceType::MmapAnonymousHugeTlbFs
+        );
+        assert!(MemorySourceType::from_str("test").is_err());
+    }
+
+    #[ignore]
+    #[test]
+    fn test_to_manager() {
+        let manager = GuestMemoryManager::new();
+        let mgr = GuestMemoryManager::to_manager(&manager).unwrap();
+
+        assert_eq!(&manager as *const _, mgr as *const _);
     }
 }
