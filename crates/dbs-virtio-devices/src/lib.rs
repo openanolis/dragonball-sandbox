@@ -39,6 +39,10 @@ pub enum ActivateError {
     InvalidParam,
     #[error("Internal error.")]
     InternalError,
+    #[error("Invalid queue config.")]
+    InvalidQueueConfig,
+    #[error("IO: {0}.")]
+    IOError(#[from] IOError),
 }
 
 /// Specialized std::result::Result for VirtioDevice::activate().
@@ -53,6 +57,12 @@ pub enum Error {
     /// Error from virtio_queue
     #[error("virtio queue error: {0}")]
     VirtioQueueError(#[from] VqError),
+    /// Error from Device activate.
+    #[error("Device activate error: {0}")]
+    ActivateError(#[from] ActivateError),
+    /// Error from Interrupt.
+    #[error("Interrupt error: {0}")]
+    InterruptError(IOError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
