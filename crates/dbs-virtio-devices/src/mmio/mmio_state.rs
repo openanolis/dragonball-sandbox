@@ -9,7 +9,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use dbs_device::resources::DeviceResources;
-use dbs_interrupt::{DeviceInterruptManager, KvmIrqManager};
+use dbs_interrupt::{DeviceInterruptManager, DeviceInterruptMode, InterruptIndex, KvmIrqManager};
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::{IoEventAddress, NoDatamatch, VmFd};
 use log::{debug, error, info, warn};
@@ -17,8 +17,8 @@ use virtio_queue::QueueStateT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
 use crate::{
-    mmio::*, Error, Result, VirtioDevice, VirtioQueueConfig, VirtioSharedMemory,
-    VirtioSharedMemoryList,
+    mmio::*, ActivateError, Error, Result, VirtioDevice, VirtioDeviceConfig, VirtioQueueConfig,
+    VirtioSharedMemory, VirtioSharedMemoryList, DEVICE_DRIVER_OK, DEVICE_FAILED,
 };
 
 /// The state of Virtio Mmio device.
@@ -49,7 +49,7 @@ pub struct MmioV2DeviceState<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: G
 impl<AS, Q, R> MmioV2DeviceState<AS, Q, R>
 where
     AS: GuestAddressSpace + Clone,
-    Q: QueueStateT,
+    Q: QueueStateT + Clone,
     R: GuestMemoryRegion,
 {
     /// Returns a reference to the internal device object.
@@ -116,6 +116,32 @@ where
         })
     }
 
+    pub(crate) fn activate(&mut self, device: &MmioV2Device<AS, Q, R>) -> Result<()> {
+        if self.device_activated {
+            return Ok(());
+        }
+
+        // If the driver incorrectly sets up the queues, the following check will fail and take
+        // the device into an unusable state.
+        if !self.check_queues_valid() {
+            return Err(Error::ActivateError(ActivateError::InvalidQueueConfig));
+        }
+
+        self.register_ioevent()?;
+
+        self.intr_mgr.enable()?;
+
+        let config = self.create_device_config(device)?;
+
+        self.device
+            .activate(config)
+            .map(|_| self.device_activated = true)
+            .map_err(|e| {
+                error!("device activate error: {:?}", e);
+                Error::ActivateError(e)
+            })
+    }
+
     fn create_queues(
         device: &dyn VirtioDevice<AS, Q, R>,
     ) -> Result<(Vec<VirtioQueueConfig<Q>>, bool)> {
@@ -135,6 +161,60 @@ where
         }
 
         Ok((queues, has_ctrl_queue))
+    }
+
+    fn create_queue_config(
+        &mut self,
+        device: &MmioV2Device<AS, Q, R>,
+    ) -> Result<Vec<VirtioQueueConfig<Q>>> {
+        // Safe because we have just called self.intr_mgr.enable().
+        let group = self.intr_mgr.get_group().unwrap();
+        let mut queues = Vec::new();
+        for queue in self.queues.iter() {
+            //The first interrupt index is device config change.
+            let queue_notifier = crate::notifier::create_queue_notifier(
+                group.clone(),
+                device.interrupt_status(),
+                queue.index() as InterruptIndex + 1,
+            );
+            queues.push(VirtioQueueConfig::new(
+                queue.queue.clone(),
+                queue.eventfd.clone(),
+                queue_notifier,
+                queue.index(),
+            ));
+        }
+        Ok(queues)
+    }
+
+    fn create_device_config(
+        &mut self,
+        device: &MmioV2Device<AS, Q, R>,
+    ) -> Result<VirtioDeviceConfig<AS, Q, R>> {
+        let mut queues = self.create_queue_config(device)?;
+        let ctrl_queue = if self.has_ctrl_queue {
+            queues.pop()
+        } else {
+            None
+        };
+
+        // Safe because we have just called self.intr_mgr.enable().
+        let group = self.intr_mgr.get_group().unwrap();
+        //The first interrupt index is device config change.
+        let notifier = crate::notifier::create_device_notifier(group, device.interrupt_status(), 0);
+
+        let mut config = VirtioDeviceConfig::new(
+            self.vm_as.clone(),
+            self.vm_fd.clone(),
+            self.device_resources.clone(),
+            queues,
+            ctrl_queue,
+            notifier,
+        );
+        if let Some(shm_regions) = self.shm_regions.as_ref() {
+            config.set_shm_regions((*shm_regions).clone());
+        }
+        Ok(config)
     }
 
     fn register_ioevent(&mut self) -> Result<()> {
@@ -337,8 +417,52 @@ where
         }
     }
 
-    fn update_msi_cfg(&mut self) -> Result<()> {
-        if let Some(msi) = self.msi.as_ref() {
+    pub(crate) fn update_msi_enable(&mut self, v: u16, device: &MmioV2Device<AS, Q, R>) {
+        // Can't switch interrupt mode once the device has been activated.
+        if device.driver_status() & DEVICE_DRIVER_OK != 0 {
+            if device.driver_status() & DEVICE_FAILED == 0 {
+                debug!("mmio_v2: can not switch interrupt mode for active device");
+                device.set_driver_failed();
+            }
+            return;
+        }
+
+        if v & MMIO_MSI_CSR_ENABLED != 0 {
+            // Guest enable msi interrupt
+            if self.msi.is_none() {
+                debug!("mmio_v2: switch to MSI interrupt mode");
+                match self
+                    .intr_mgr
+                    .set_working_mode(DeviceInterruptMode::GenericMsiIrq)
+                {
+                    Ok(_) => self.msi = Some(Msi::default()),
+                    Err(e) => {
+                        warn!("mmio_v2: failed to switch to MSI interrupt mode: {:?}", e);
+                        device.set_driver_failed();
+                    }
+                }
+            }
+        } else if self.msi.is_some() {
+            // Guest disable msi interrupt
+            match self
+                .intr_mgr
+                .set_working_mode(DeviceInterruptMode::LegacyIrq)
+            {
+                Ok(_) => self.msi = None,
+                Err(e) => {
+                    warn!(
+                        "mmio_v2: failed to switch to legacy interrupt mode: {:?}",
+                        e
+                    );
+                    device.set_driver_failed();
+                }
+            }
+        }
+    }
+
+    fn update_msi_cfg(&mut self, v: u16) -> Result<()> {
+        if let Some(msi) = self.msi.as_mut() {
+            msi.index_select = v as u32;
             self.intr_mgr
                 .set_msi_low_address(msi.index_select, msi.address_low)
                 .map_err(Error::InterruptError)?;
@@ -382,6 +506,33 @@ where
         }
 
         Ok(())
+    }
+
+    pub(crate) fn handle_msi_cmd(&mut self, v: u16, device: &MmioV2Device<AS, Q, R>) {
+        let arg = v & MMIO_MSI_CMD_ARG_MASK;
+        match v & MMIO_MSI_CMD_CODE_MASK {
+            MMIO_MSI_CMD_CODE_UPDATE => {
+                if arg > self.device.queue_max_sizes().len() as u16 {
+                    info!("mmio_v2: configure interrupt for invalid vector {}", v,);
+                } else if let Err(e) = self.update_msi_cfg(arg) {
+                    warn!("mmio_v2: failed to configure vector {}, {:?}", v, e);
+                }
+            }
+            MMIO_MSI_CMD_CODE_INT_MASK => {
+                if let Err(e) = self.mask_msi_int(arg as u32, true) {
+                    warn!("mmio_v2: failed to mask {}, {:?}", v, e);
+                }
+            }
+            MMIO_MSI_CMD_CODE_INT_UNMASK => {
+                if let Err(e) = self.mask_msi_int(arg as u32, false) {
+                    warn!("mmio_v2: failed to unmask {}, {:?}", v, e);
+                }
+            }
+            _ => {
+                warn!("mmio_v2: unknown msi command: 0x{:x}", v);
+                device.set_driver_failed();
+            }
+        }
     }
 }
 

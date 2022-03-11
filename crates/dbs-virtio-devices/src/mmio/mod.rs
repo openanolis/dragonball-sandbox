@@ -16,6 +16,9 @@
 mod mmio_state;
 pub use self::mmio_state::*;
 
+mod mmio_v2;
+pub use self::mmio_v2::*;
+
 mod dragonball;
 pub use self::dragonball::*;
 
