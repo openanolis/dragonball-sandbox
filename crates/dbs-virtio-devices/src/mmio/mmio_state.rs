@@ -12,7 +12,7 @@ use dbs_device::resources::DeviceResources;
 use dbs_interrupt::{DeviceInterruptManager, KvmIrqManager};
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::{IoEventAddress, NoDatamatch, VmFd};
-use log::{debug, error};
+use log::{debug, error, info, warn};
 use virtio_queue::QueueStateT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
@@ -165,9 +165,97 @@ where
         Ok(())
     }
 
-    fn deactivate(&mut self) {
+    #[inline]
+    pub(crate) fn features_select(&self) -> u32 {
+        self.features_select
+    }
+
+    #[inline]
+    pub(crate) fn set_features_select(&mut self, v: u32) {
+        self.features_select = v;
+    }
+
+    #[inline]
+    pub(crate) fn set_acked_features_select(&mut self, v: u32) {
+        self.acked_features_select = v;
+    }
+
+    #[inline]
+    pub(crate) fn set_queue_select(&mut self, v: u32) {
+        self.queue_select = v;
+    }
+
+    #[inline]
+    pub(crate) fn set_acked_features(&mut self, v: u32) {
+        self.device
+            .set_acked_features(self.acked_features_select, v)
+    }
+
+    #[inline]
+    pub(crate) fn set_shm_region_id(&mut self, v: u32) {
+        self.shm_region_id = v;
+    }
+
+    #[inline]
+    pub(crate) fn set_msi_address_low(&mut self, v: u32) {
+        if let Some(m) = self.msi.as_mut() {
+            m.set_address_low(v)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_msi_address_high(&mut self, v: u32) {
+        if let Some(m) = self.msi.as_mut() {
+            m.set_address_high(v)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_msi_data(&mut self, v: u32) {
+        if let Some(m) = self.msi.as_mut() {
+            m.set_data(v)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn shm_regions(&self) -> Option<&VirtioSharedMemoryList<R>> {
+        self.shm_regions.as_ref()
+    }
+
+    #[inline]
+    pub(crate) fn device_activated(&self) -> bool {
+        self.device_activated
+    }
+
+    #[inline]
+    pub(crate) fn doorbell(&self) -> Option<&DoorBell> {
+        self.doorbell.as_ref()
+    }
+
+    pub(crate) fn deactivate(&mut self) {
         if self.device_activated {
             self.device_activated = false;
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        if self.device_activated {
+            warn!("reset device while it's still in active state");
+        } else {
+            // . Keep interrupt_evt and queue_evts as is. There may be pending
+            //   notifications in those eventfds, but nothing will happen other
+            //   than supurious wakeups.
+            // . Do not reset config_generation and keep it monotonically increasing
+            for queue in self.queues.iter_mut() {
+                queue.queue = Q::new(queue.queue.max_size());
+            }
+            let _ = self.intr_mgr.reset();
+            self.unregister_ioevent();
+            self.features_select = 0;
+            self.acked_features_select = 0;
+            self.queue_select = 0;
+            self.msi = None;
+            self.doorbell = None;
         }
     }
 
@@ -216,7 +304,7 @@ where
         self.queues.iter().all(|c| c.queue.is_valid(mem.deref()))
     }
 
-    fn with_queue<U, F>(&self, d: U, f: F) -> U
+    pub(crate) fn with_queue<U, F>(&self, d: U, f: F) -> U
     where
         F: FnOnce(&Q) -> U,
     {
@@ -226,7 +314,7 @@ where
         }
     }
 
-    fn with_queue_mut<F: FnOnce(&mut Q)>(&mut self, f: F) -> bool {
+    pub(crate) fn with_queue_mut<F: FnOnce(&mut Q)>(&mut self, f: F) -> bool {
         if let Some(config) = self.queues.get_mut(self.queue_select as usize) {
             f(&mut config.queue);
             true
@@ -235,7 +323,7 @@ where
         }
     }
 
-    fn get_shm_field<U, F>(&mut self, d: U, f: F) -> U
+    pub(crate) fn get_shm_field<U, F>(&mut self, d: U, f: F) -> U
     where
         F: FnOnce(&VirtioSharedMemory) -> U,
     {
