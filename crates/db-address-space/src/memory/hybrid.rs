@@ -13,17 +13,26 @@ use vm_memory::{
     GuestRegionMmap, GuestUsize, MemoryRegionAddress, VolatileSlice,
 };
 
+use crate::GuestRegionRaw;
+
 /// An adapter for different concrete implementations of `GuestMemoryRegion`.
 #[derive(Debug)]
 pub enum GuestRegionHybrid<B = ()> {
     /// Region of type `GuestRegionMmap`.
     Mmap(GuestRegionMmap<B>),
+    /// Region of type `GuestRegionRaw`.
+    Raw(GuestRegionRaw<B>),
 }
 
 impl<B: Bitmap> GuestRegionHybrid<B> {
     /// Create a `GuestRegionHybrid` object from `GuestRegionMmap` object.
     pub fn from_mmap_region(region: GuestRegionMmap<B>) -> Self {
         GuestRegionHybrid::Mmap(region)
+    }
+
+    /// Create a `GuestRegionHybrid` object from `GuestRegionRaw` object.
+    pub fn from_raw_region(region: GuestRegionRaw<B>) -> Self {
+        GuestRegionHybrid::Raw(region)
     }
 }
 
@@ -33,24 +42,28 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     fn write(&self, buf: &[u8], addr: MemoryRegionAddress) -> guest_memory::Result<usize> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.write(buf, addr),
+            GuestRegionHybrid::Raw(region) => region.write(buf, addr),
         }
     }
 
     fn read(&self, buf: &mut [u8], addr: MemoryRegionAddress) -> guest_memory::Result<usize> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.read(buf, addr),
+            GuestRegionHybrid::Raw(region) => region.read(buf, addr),
         }
     }
 
     fn write_slice(&self, buf: &[u8], addr: MemoryRegionAddress) -> guest_memory::Result<()> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.write_slice(buf, addr),
+            GuestRegionHybrid::Raw(region) => region.write_slice(buf, addr),
         }
     }
 
     fn read_slice(&self, buf: &mut [u8], addr: MemoryRegionAddress) -> guest_memory::Result<()> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.read_slice(buf, addr),
+            GuestRegionHybrid::Raw(region) => region.read_slice(buf, addr),
         }
     }
 
@@ -65,6 +78,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     {
         match self {
             GuestRegionHybrid::Mmap(region) => region.read_from(addr, src, count),
+            GuestRegionHybrid::Raw(region) => region.read_from(addr, src, count),
         }
     }
 
@@ -79,6 +93,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     {
         match self {
             GuestRegionHybrid::Mmap(region) => region.read_exact_from(addr, src, count),
+            GuestRegionHybrid::Raw(region) => region.read_exact_from(addr, src, count),
         }
     }
 
@@ -93,6 +108,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     {
         match self {
             GuestRegionHybrid::Mmap(region) => region.write_to(addr, dst, count),
+            GuestRegionHybrid::Raw(region) => region.write_to(addr, dst, count),
         }
     }
 
@@ -107,6 +123,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     {
         match self {
             GuestRegionHybrid::Mmap(region) => region.write_all_to(addr, dst, count),
+            GuestRegionHybrid::Raw(region) => region.write_all_to(addr, dst, count),
         }
     }
 
@@ -118,6 +135,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     ) -> guest_memory::Result<()> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.store(val, addr, order),
+            GuestRegionHybrid::Raw(region) => region.store(val, addr, order),
         }
     }
 
@@ -128,6 +146,7 @@ impl<B: Bitmap> Bytes<MemoryRegionAddress> for GuestRegionHybrid<B> {
     ) -> guest_memory::Result<T> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.load(addr, order),
+            GuestRegionHybrid::Raw(region) => region.load(addr, order),
         }
     }
 }
@@ -138,42 +157,49 @@ impl<B: Bitmap> GuestMemoryRegion for GuestRegionHybrid<B> {
     fn len(&self) -> GuestUsize {
         match self {
             GuestRegionHybrid::Mmap(region) => region.len(),
+            GuestRegionHybrid::Raw(region) => region.len(),
         }
     }
 
     fn start_addr(&self) -> GuestAddress {
         match self {
             GuestRegionHybrid::Mmap(region) => region.start_addr(),
+            GuestRegionHybrid::Raw(region) => region.start_addr(),
         }
     }
 
     fn bitmap(&self) -> &Self::B {
         match self {
             GuestRegionHybrid::Mmap(region) => region.bitmap(),
+            GuestRegionHybrid::Raw(region) => region.bitmap(),
         }
     }
 
     fn get_host_address(&self, addr: MemoryRegionAddress) -> guest_memory::Result<*mut u8> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.get_host_address(addr),
+            GuestRegionHybrid::Raw(region) => region.get_host_address(addr),
         }
     }
 
     fn file_offset(&self) -> Option<&FileOffset> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.file_offset(),
+            GuestRegionHybrid::Raw(region) => region.file_offset(),
         }
     }
 
     unsafe fn as_slice(&self) -> Option<&[u8]> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.as_slice(),
+            GuestRegionHybrid::Raw(region) => region.as_slice(),
         }
     }
 
     unsafe fn as_mut_slice(&self) -> Option<&mut [u8]> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.as_mut_slice(),
+            GuestRegionHybrid::Raw(region) => region.as_mut_slice(),
         }
     }
 
@@ -184,6 +210,7 @@ impl<B: Bitmap> GuestMemoryRegion for GuestRegionHybrid<B> {
     ) -> guest_memory::Result<VolatileSlice<BS<B>>> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.get_slice(offset, count),
+            GuestRegionHybrid::Raw(region) => region.get_slice(offset, count),
         }
     }
 
@@ -191,6 +218,7 @@ impl<B: Bitmap> GuestMemoryRegion for GuestRegionHybrid<B> {
     fn is_hugetlbfs(&self) -> Option<bool> {
         match self {
             GuestRegionHybrid::Mmap(region) => region.is_hugetlbfs(),
+            GuestRegionHybrid::Raw(region) => region.is_hugetlbfs(),
         }
     }
 }
@@ -202,7 +230,7 @@ impl<B: Bitmap> GuestMemoryRegion for GuestRegionHybrid<B> {
 /// Each region is an instance of `GuestRegionHybrid`.
 #[derive(Clone, Debug, Default)]
 pub struct GuestMemoryHybrid<B = ()> {
-    regions: Vec<Arc<GuestRegionHybrid<B>>>,
+    pub(crate) regions: Vec<Arc<GuestRegionHybrid<B>>>,
 }
 
 impl<B: NewBitmap> GuestMemoryHybrid<B> {
