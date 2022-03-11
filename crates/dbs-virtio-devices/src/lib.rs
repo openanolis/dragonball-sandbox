@@ -25,6 +25,56 @@ use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
 
+/// Version of virtio specifications supported by PCI virtio devices.
+#[allow(non_camel_case_types)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum VirtioVersion {
+    /// Unknown/non-virtio VFIO device.
+    VIRTIO_VERSION_UNKNOWN,
+    /// Virtio specification 0.95(Legacy).
+    VIRTIO_VERSION_0_95,
+    /// Virtio specification 1.0/1.1.
+    VIRTIO_VERSION_1_X,
+}
+
+/// Page size for legacy PCI virtio devices. Assume it's 4K.
+pub const VIRTIO_LEGACY_PAGE_SIZE: u32 = 0x1000;
+
+/// Initial state after device initialization/reset.
+pub const DEVICE_INIT: u32 = 0x0;
+/// Indicates that the guest OS has found the device and recognized it as a valid virtio device.
+pub const DEVICE_ACKNOWLEDGE: u32 = 0x01;
+/// Indicates that the guest OS knows how to drive the device.
+pub const DEVICE_DRIVER: u32 = 0x02;
+/// Indicates that the driver is set up and ready to drive the device.
+pub const DEVICE_DRIVER_OK: u32 = 0x04;
+/// Indicates that the driver has acknowledged all the features it understands, and feature
+/// negotiation is complete.
+pub const DEVICE_FEATURES_OK: u32 = 0x08;
+/// Indicates that the device has experienced an error from which it can’t recover.
+pub const DEVICE_NEEDS_RESET: u32 = 0x40;
+/// Indicates that something went wrong in the guest, and it has given up on the device.
+/// This could be an internal error, or the driver didn’t like the device for some reason, or even
+/// a fatal error during device operation.
+pub const DEVICE_FAILED: u32 = 0x80;
+
+/// Virtio network card device.
+pub const TYPE_NET: u32 = 1;
+/// Virtio block device.
+pub const TYPE_BLOCK: u32 = 2;
+/// Virtio-rng device.
+pub const TYPE_RNG: u32 = 4;
+/// Virtio balloon device.
+pub const TYPE_BALLOON: u32 = 5;
+/// Virtio vsock device.
+pub const TYPE_VSOCK: u32 = 19;
+/// Virtio mem device.
+pub const TYPE_MEM: u32 = 24;
+/// Virtio-fs virtual device.
+pub const TYPE_VIRTIO_FS: u32 = 26;
+/// Virtio-pmem device.
+pub const TYPE_PMEM: u32 = 27;
+
 // Interrupt status flags for legacy interrupts. It happens to be the same for both PCI and MMIO
 // virtio devices.
 /// Data available in used queue.
