@@ -3,6 +3,31 @@
 
 //! Related to Dragonball MMIO extension.
 
+/// Device Vendor ID for virtio devices emulated by Dragonball.
+/// The upper 24 bits are used as vendor id, and the lower 8 bits are used as features.
+pub const MMIO_VENDOR_ID_DRAGONBALL: u32 = 0xdbfcdb00;
+
+/// Mask for feature flags in the vendor id field
+pub const DRAGONBALL_FEATURE_MASK: u32 = 0xff;
+
+/// Assume `MMIO_INT_VRING` is always set in the interrupt status register when handling interrupts.
+/// With this feature available, the device driver may optimize the way to handle interrupts.
+pub const DRAGONBALL_FEATURE_INTR_USED: u32 = 0x1;
+
+/// The device supports Message Signaled Interrupt.
+pub const DRAGONBALL_FEATURE_MSI_INTR: u32 = 0x2;
+
+/// The device implements per-queue notification register.
+/// If this feature bit is set, the VIRTIO_MMIO_QUEUE_NOTIFY register becomes read-write.
+/// On reading, the lower 16-bit contains doorbell base offset starting from the MMIO window base,
+/// and the upper 16-bit contains scale for the offset. The notification register address for
+/// virtque is:
+///     offset = base + doorbell_base + doorbell_scale * queue_idx
+pub const DRAGONBALL_FEATURE_PER_QUEUE_NOTIFY: u32 = 0x4;
+
+/// PVDMA feature enabled
+pub const DRAGONBALL_FEATURE_PVDMA: u32 = 0x08;
+
 /// Default size resrved for virtio-mmio doorbell address space.
 ///
 /// This represents the size of the mmio device reserved for doorbell which used to per queue notify,
@@ -23,28 +48,59 @@ pub const DRAGONBALL_MMIO_DOORBELL_SCALE: u64 = 0x04;
 /// to its configuration space.
 pub const MMIO_CFG_SPACE_OFF: u64 = 0x100;
 
+// The format of the 16-bit MSI Control and Status register.
+// On read:
+// - bit 15: 1 if MSI is supported, 0 if MSI is not supported.
+// - bit 0-14: reserved, read as zero.
+// On write:
+// - bit 15: 1 to enable MSI, 0 to disable MSI.
+// - bit 0-14: ignored.
+
+/// Message Signaled Interrupt is supported when reading from the CSR.
+pub const MMIO_MSI_CSR_SUPPORTED: u16 = 0x8000;
+
+/// Enable MSI if this bit is set when writing to the CSR, otherwise disable MSI.
+pub const MMIO_MSI_CSR_ENABLED: u16 = 0x8000;
+
+// The format of the 16-bit write-only MSI Command register.
+// - bit 12-15: command code
+// - bit 0-11: command parameter
+
+/// Mask for the command code in the MSI command register.
+pub const MMIO_MSI_CMD_CODE_MASK: u16 = 0xf000;
+
+/// Mask for the command argument in the MSI command register.
+pub const MMIO_MSI_CMD_ARG_MASK: u16 = 0x0fff;
+
+/// Command code to update MSI entry configuration.
+/// The argument is the MSI vector number to update.
+pub const MMIO_MSI_CMD_CODE_UPDATE: u16 = 0x1000;
+/// Comamnd to mask and unmask msi interrupt
+pub const MMIO_MSI_CMD_CODE_INT_MASK: u16 = 0x2000;
+pub const MMIO_MSI_CMD_CODE_INT_UNMASK: u16 = 0x3000;
+
+
 // Define a 16-byte area to control MMIO MSI
 
 // MSI control/status register offset
-pub const VIRTIO_MMIO_MSI_CSR: u64 = 0x0c0;
+pub const REG_MMIO_MSI_CSR: u64 = 0x0c0;
 // MSI command register offset
-pub const VIRTIO_MMIO_MSI_COMMAND: u64 = 0x0c2;
+pub const REG_MMIO_MSI_COMMAND: u64 = 0x0c2;
 // MSI address_lo register offset
-pub const VIRTIO_MMIO_MSI_ADDRESS_L: u64 = 0x0c4;
+pub const REG_MMIO_MSI_ADDRESS_L: u64 = 0x0c4;
 // MSI address_hi register offset
-pub const VIRTIO_MMIO_MSI_ADDRESS_H: u64 = 0x0c8;
+pub const REG_MMIO_MSI_ADDRESS_H: u64 = 0x0c8;
 // MSI data register offset
-pub const VIRTIO_MMIO_MSI_DATA: u64 = 0x0cc;
+pub const REG_MMIO_MSI_DATA: u64 = 0x0cc;
 
 // RW: MSI feature enabled
-pub const VIRTIO_MMIO_MSI_CSR_ENABL: u64 = 0x8000;
+pub const REG_MMIO_MSI_CSR_ENABLE: u64 = 0x8000;
 // RO: Maximum queue size available
-pub const VIRTIO_MMIO_MSI_CSR_QMAS: u64 = 0x07ff;
+pub const REG_MMIO_MSI_CSR_QMASK: u64 = 0x07ff;
 // Reserved
-pub const VIRTIO_MMIO_MSI_CSR_RESERV: u64 = 0x7800;
+pub const REG_MMIO_MSI_CSR_RESERVED: u64 = 0x7800;
 
-pub const VIRTIO_MMIO_MSI_CMD_UPDAT: u64 = 0x1;
-pub const VIRTIO_MMIO_MSI_CMD_CODE_MA: u64 = 0xf000;
+pub const REG_MMIO_MSI_CMD_UPDATE: u64 = 0x1;
 
 /// Defines the offset and scale of the mmio doorbell.
 ///
