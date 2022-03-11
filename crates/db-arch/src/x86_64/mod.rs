@@ -11,3 +11,5 @@ pub mod gdt;
 pub mod msr;
 /// Definitions for x86 Registers
 pub mod regs;
+/// Definitions for x86 interrupts
+pub mod interrupts;
