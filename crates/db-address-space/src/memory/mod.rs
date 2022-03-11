@@ -14,6 +14,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
 
+mod raw_region;
+pub use raw_region::GuestRegionRaw;
+
 mod hybrid;
 pub use hybrid::{GuestMemoryHybrid, GuestRegionHybrid};
 
