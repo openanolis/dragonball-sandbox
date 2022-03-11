@@ -4,7 +4,7 @@
 //! VM boot related constants and utilities for `x86_64` architecture.
 
 use dbs_arch::gdt::gdt_entry;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory};
 
 use self::layout::{BOOT_GDT_ADDRESS, BOOT_GDT_MAX, BOOT_IDT_ADDRESS};
 
@@ -16,6 +16,25 @@ pub mod mpspec;
 
 /// MP Table configurations used for defining VM boot status.
 pub mod mptable;
+
+/// Guest boot parameters used for config guest information.
+pub mod bootparam;
+
+/// Default (smallest) memory page size for the supported architectures.
+pub const PAGE_SIZE: usize = 4096;
+
+/// Boot parameters wrapper for ByteValue trait
+// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
+// trait (in this case `ByteValued`) where:
+// *    the type that is implementing the trait is foreign or
+// *    all of the parameters being passed to the trait (if there are any) are also foreign
+// is prohibited.
+#[repr(transparent)]
+#[derive(Copy, Clone, Default)]
+pub struct BootParamsWrapper(bootparam::boot_params);
+
+// It is safe to initialize BootParamsWrap which is a wrapper over `boot_params` (a series of ints).
+unsafe impl ByteValued for BootParamsWrapper {}
 
 /// Initialize the 1:1 identity mapping table for guest memory range [0..1G).
 pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<(), vm_memory::GuestMemoryError> {
