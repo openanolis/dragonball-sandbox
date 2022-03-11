@@ -101,6 +101,9 @@ pub type ActivateResult = std::result::Result<(), ActivateError>;
 /// Error for virtio devices to handle requests from guests.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Invalid input parameter or status.
+    #[error("invalid input parameter or status.")]
+    InvalidInput,
     /// Generic IO error
     #[error("IO: {0}.")]
     IOError(#[from] IOError),

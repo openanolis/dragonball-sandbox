@@ -196,7 +196,7 @@ pub struct VirtioDeviceConfig<
     /// Virtio queue for device control requests.
     pub ctrl_queue: Option<VirtioQueueConfig<Q>>,
     /// Interrupt notifier to inject Virtio device change interrupt to the guest.
-    pub device_change_notifier: Box<dyn InterruptNotifier>,
+    pub device_change_notifier: Arc<dyn InterruptNotifier>,
     /// Shared memory region for Virtio-fs etc.
     pub shm_regions: Option<VirtioSharedMemoryList<R>>,
 }
@@ -214,7 +214,7 @@ where
         resources: DeviceResources,
         queues: Vec<VirtioQueueConfig<Q>>,
         ctrl_queue: Option<VirtioQueueConfig<Q>>,
-        device_change_notifier: Box<dyn InterruptNotifier>,
+        device_change_notifier: Arc<dyn InterruptNotifier>,
     ) -> Self {
         VirtioDeviceConfig {
             vm_as,
@@ -269,7 +269,7 @@ pub struct VirtioSharedMemory {
 }
 
 /// A list of Shared Memory regions
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct VirtioSharedMemoryList<R: GuestMemoryRegion> {
     /// Host address
     pub host_addr: u64,
@@ -296,6 +296,20 @@ pub struct VirtioSharedMemoryList<R: GuestMemoryRegion> {
     /// of MmapRegion. This problem does not exist with GuestRegionMmap because
     /// vm_as and VirtioSharedMemoryList can share GuestRegionMmap through Arc.
     pub mmap_region: Arc<R>,
+}
+
+impl<R: GuestMemoryRegion> Clone for VirtioSharedMemoryList<R> {
+    fn clone(&self) -> Self {
+        Self {
+            host_addr: self.host_addr,
+            guest_addr: self.guest_addr,
+            len: self.len,
+            kvm_userspace_memory_region_slot: self.kvm_userspace_memory_region_slot,
+            kvm_userspace_memory_region_flags: self.kvm_userspace_memory_region_flags,
+            region_list: self.region_list.clone(),
+            mmap_region: self.mmap_region.clone(),
+        }
+    }
 }
 
 /// Trait for Virtio transport layer to manage virtio devices.
@@ -540,7 +554,7 @@ pub(crate) mod tests {
             .create_group(InterruptSourceType::LegacyIrq, 0, 1)
             .unwrap();
         let status = Arc::new(InterruptStatusRegister32::new());
-        let device_change_notifier = Box::new(LegacyNotifier::new(
+        let device_change_notifier = Arc::new(LegacyNotifier::new(
             group.clone(),
             status.clone(),
             VIRTIO_INTR_CONFIG,
@@ -819,7 +833,7 @@ pub(crate) mod tests {
             resources,
             queues,
             None,
-            Box::new(NoopNotifier::new()),
+            Arc::new(NoopNotifier::new()),
         );
         device.activate(device_config).unwrap();
     }
