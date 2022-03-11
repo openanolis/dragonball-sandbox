@@ -145,7 +145,7 @@ where
                     .vm_fd
                     .register_ioevent(&queue.eventfd, &io_addr, NoDatamatch)
                 {
-                    self.revert_ioevent(i, &io_addr);
+                    self.revert_ioevent(i, &io_addr, true);
                     return Err(Error::IOError(std::io::Error::from_raw_os_error(e.errno())));
                 }
             }
@@ -156,7 +156,7 @@ where
                 .register_ioevent(&queue.eventfd, &io_addr, i as u32)
             {
                 self.unregister_ioevent_doorbell();
-                self.revert_ioevent(i, &io_addr);
+                self.revert_ioevent(i, &io_addr, false);
                 return Err(Error::IOError(std::io::Error::from_raw_os_error(e.errno())));
             }
         }
@@ -183,14 +183,19 @@ where
         }
     }
 
-    fn revert_ioevent(&mut self, num: usize, io_addr: &IoEventAddress) {
+    fn revert_ioevent(&mut self, num: usize, io_addr: &IoEventAddress, wildcard: bool) {
         assert!(num < self.queues.len());
         let mut idx = num;
         while idx > 0 {
+            let datamatch = if wildcard {
+                NoDatamatch.into()
+            } else {
+                idx as u64
+            };
             idx -= 1;
             let _ = self
                 .vm_fd
-                .unregister_ioevent(&self.queues[idx].eventfd, &io_addr, idx as u32);
+                .unregister_ioevent(&self.queues[idx].eventfd, io_addr, datamatch);
         }
     }
 
