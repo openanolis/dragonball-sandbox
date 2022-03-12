@@ -14,6 +14,7 @@
 
 mod device;
 pub use self::device::*;
+
 mod notifier;
 pub use self::notifier::*;
 
