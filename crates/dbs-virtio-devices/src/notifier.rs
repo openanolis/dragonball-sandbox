@@ -1,7 +1,7 @@
 // Copyright 2019 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-//! Some helpers for `InterruptNotifier`.
+//! Wrappers over `InterruptNotifier` to support virtio device interrupt management.
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use dbs_interrupt::{
 
 use crate::{VIRTIO_INTR_CONFIG, VIRTIO_INTR_VRING};
 
-/// Create a notifier for device change events.
+/// Create an interrupt notifier for virtio device change events.
 pub fn create_device_notifier(
     group: Arc<Box<dyn InterruptSourceGroup>>,
     intr_status: Arc<InterruptStatusRegister32>,
@@ -26,7 +26,7 @@ pub fn create_device_notifier(
     }
 }
 
-/// Create a notifier for queue notification events.
+/// Create an interrupt notifier for virtio queue notification events.
 pub fn create_queue_notifier(
     group: Arc<Box<dyn InterruptSourceGroup>>,
     intr_status: Arc<InterruptStatusRegister32>,

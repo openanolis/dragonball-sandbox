@@ -23,23 +23,21 @@ use virtio_queue::{AvailIter, QueueState, QueueStateT};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestRegionMmap, GuestUsize,
 };
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::{ActivateError, ActivateResult, Error, Result};
 
-/// Configuration information for a virtio queue.
+/// Configuration information for virtio queues.
 ///
-/// This structure maintain all configuration information associated with a virtio queue.
-/// It could be sent to a IO worker thread to process requests from the virtio queue,
-/// to support multi-queue multi-worker-thread mode,
+/// This structure maintains configuration information associated with the virtio queue.
 pub struct VirtioQueueConfig {
-    /// Virtque object
+    /// Virtio queue object to access the associated queue.
     pub queue: QueueState,
     /// EventFd to receive queue notification from guest.
     pub eventfd: EventFd,
     /// Notifier to inject interrupt to guest.
     notifier: Box<dyn InterruptNotifier>,
-    /// Queue index in the queue array.
+    /// Queue index into the queue array.
     index: u16,
 }
 
@@ -61,7 +59,7 @@ impl VirtioQueueConfig {
 
     /// Creates a VirtioQueueConfig with the specified queue size and index.
     pub fn create(queue_size: u16, index: u16) -> Result<Self> {
-        let eventfd = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::IOError)?;
+        let eventfd = EventFd::new(EFD_NONBLOCK).map_err(Error::IOError)?;
 
         Ok(VirtioQueueConfig {
             queue: QueueState::new(queue_size),
@@ -207,10 +205,11 @@ impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
     }
 }
 
-/// Shared Memory between device and guest
+/// Device memory shared between guest and the device backend driver, defined by the virtio
+/// specification for virtio-fs devices.
 #[derive(Clone, PartialEq, Debug)]
 pub struct VirtioSharedMemory {
-    /// offset from the base
+    /// offset from the bar base
     pub offset: u64,
     /// len of this shared memory region
     pub len: u64,
@@ -246,8 +245,14 @@ pub struct VirtioSharedMemoryList {
     pub mmap_region: Arc<GuestRegionMmap>,
 }
 
-/// Trait for virtio devices to be driven by a virtio transport.
+/// Trait for virtio transport layer to manage virtio devices.
 ///
+/// The virtio transport driver takes the responsibility to manage lifecycle of virtio devices.
+/// The device manager registers virtio devices to the transport driver, which will then manage
+/// the device by:
+/// - query device's resource requirement and allocate resources for it.
+/// - handle guest register access by forwarding requests to the device.
+/// - call activate()/reset() when the device is activated/reset by the guest.
 /// The lifecycle of a virtio device is to be moved to a virtio transport, which will then query the
 /// device. Once the guest driver has configured the device, `VirtioDevice::activate` will be called
 /// and all the events, memory, and queues for device operation will be moved into the device.
@@ -288,6 +293,9 @@ pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
         Err(ActivateError::InternalError)
     }
 
+    /// Removes this devices.
+    fn remove(&mut self) {}
+
     /// every new device object has its resource requirements
     fn get_resource_requirements(
         &self,
@@ -303,9 +311,6 @@ pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
     ) -> Result<Option<VirtioSharedMemoryList>> {
         Ok(None)
     }
-
-    /// Removes this devices.
-    fn remove(&mut self) {}
 
     /// Used to downcast to the specific type.
     fn as_any(&self) -> &dyn Any;
