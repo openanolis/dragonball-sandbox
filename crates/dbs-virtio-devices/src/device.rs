@@ -1,4 +1,5 @@
-// Copyright 2019-2020 Alibaba Cloud. All rights reserved.
+// Copyright 2019-2022 Alibaba Cloud. All rights reserved.
+//
 // Portions Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -6,7 +7,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-//! Traits and Structs to implement Virtio device backend drivers.
+//! Vritio Device Model.
+//!
+//! The Virtio specification defines a group of Virtio devices and transport layers.
+//! The Virtio device model defines traits and structs for Virtio transport layers to
+//! manage Virtio device backend drivers.
 
 use std::any::Any;
 use std::cmp;
@@ -19,20 +24,22 @@ use dbs_interrupt::{InterruptNotifier, NoopNotifier};
 use dbs_utils::epoll_manager::{EpollManager, EpollSubscriber, SubscriberId};
 use kvm_ioctls::VmFd;
 use log::{error, warn};
-use virtio_queue::{AvailIter, QueueState, QueueStateT};
+use virtio_queue::{DescriptorChain, QueueState, QueueStateSync, QueueStateT};
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestRegionMmap, GuestUsize,
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
+    GuestUsize,
 };
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::{ActivateError, ActivateResult, Error, Result};
 
-/// Configuration information for virtio queues.
+/// Virtio queue configuration information.
 ///
-/// This structure maintains configuration information associated with the virtio queue.
-pub struct VirtioQueueConfig {
+/// The `VirtioQueueConfig` maintains configuration information for a Virtio queue.
+/// It also provides methods to access the queue and associated interrupt/event notifiers.
+pub struct VirtioQueueConfig<Q: QueueStateT = QueueState> {
     /// Virtio queue object to access the associated queue.
-    pub queue: QueueState,
+    pub queue: Q,
     /// EventFd to receive queue notification from guest.
     pub eventfd: EventFd,
     /// Notifier to inject interrupt to guest.
@@ -41,10 +48,10 @@ pub struct VirtioQueueConfig {
     index: u16,
 }
 
-impl VirtioQueueConfig {
-    /// Create a configuration object for a virtio queue.
+impl<Q: QueueStateT> VirtioQueueConfig<Q> {
+    /// Create a `VirtioQueueConfig` object.
     pub fn new(
-        queue: QueueState,
+        queue: Q,
         eventfd: EventFd,
         notifier: Box<dyn InterruptNotifier>,
         index: u16,
@@ -57,22 +64,32 @@ impl VirtioQueueConfig {
         }
     }
 
-    /// Creates a VirtioQueueConfig with the specified queue size and index.
+    /// Create a `VirtioQueueConfig` object with the specified queue size and index.
     pub fn create(queue_size: u16, index: u16) -> Result<Self> {
         let eventfd = EventFd::new(EFD_NONBLOCK).map_err(Error::IOError)?;
 
         Ok(VirtioQueueConfig {
-            queue: QueueState::new(queue_size),
+            queue: Q::new(queue_size),
             eventfd,
             notifier: Box::new(NoopNotifier::new()),
             index,
         })
     }
 
-    /// Get index of the queue.
+    /// Get queue index.
     #[inline]
     pub fn index(&self) -> u16 {
         self.index
+    }
+
+    /// Get immutable reference to the associated Virtio queue.
+    pub fn queue(&self) -> &Q {
+        &self.queue
+    }
+
+    /// Get mutable reference to the associated Virtio queue.
+    pub fn queue_mut(&mut self) -> &mut Q {
+        &mut self.queue
     }
 
     /// Get the maximum queue size.
@@ -81,24 +98,18 @@ impl VirtioQueueConfig {
         self.queue.max_size()
     }
 
-    /// Return the actual size of the queue, as the driver may not set up a
-    /// queue as big as the device allows.
-    #[inline]
-    pub fn actual_size(&self) -> u16 {
-        std::cmp::min(self.queue.size, self.queue.max_size)
-    }
-
-    /// A consuming iterator over all available descriptor chain heads offered by the driver.
-    #[inline]
-    pub fn iter<M>(&mut self, mem: M) -> Result<AvailIter<'_, M>>
+    /// Get the next available descriptor.
+    pub fn get_next_descriptor<M>(&mut self, mem: M) -> Result<Option<DescriptorChain<M>>>
     where
-        M: Deref,
+        M: Deref + Clone,
         M::Target: GuestMemory + Sized,
     {
-        self.queue.iter(mem).map_err(Error::VirtioQueueError)
+        let mut guard = self.queue.lock();
+        let mut iter = guard.iter(mem)?;
+        Ok(iter.next())
     }
 
-    /// Puts an available descriptor head into the used ring for use by the guest.
+    /// Put a used descriptor into the used ring.
     #[inline]
     pub fn add_used<M: GuestMemory>(&mut self, mem: &M, desc_index: u16, len: u32) {
         self.queue
@@ -106,61 +117,92 @@ impl VirtioQueueConfig {
             .unwrap_or_else(|_| panic!("Failed to add used. index: {}", desc_index))
     }
 
-    /// Consumes a notification event.
+    /// Consume a queue notification event.
     #[inline]
-    pub fn comsume_event(&self) -> Result<u64> {
+    pub fn consume_event(&self) -> Result<u64> {
         self.eventfd.read().map_err(Error::IOError)
     }
 
-    /// Produces a queue notification.
+    /// Produce a queue notification event.
     #[inline]
     pub fn generate_event(&self) -> Result<()> {
         self.eventfd.write(1).map_err(Error::IOError)
     }
 
-    /// Injects an interrupt to guest to notify queue change events.
+    /// Inject an interrupt to the guest for queue change events.
     #[inline]
     pub fn notify(&self) -> Result<()> {
         self.notifier.notify().map_err(Error::IOError)
     }
 
-    /// Sets event notifier to inject intterupt.
+    /// Set interrupt notifier to inject interrupts to the guest.
     #[inline]
-    pub fn set_notifier(&mut self, notifier: Box<dyn InterruptNotifier>) {
+    pub fn set_interrupt_notifier(&mut self, notifier: Box<dyn InterruptNotifier>) {
         self.notifier = notifier;
+    }
+}
+
+impl VirtioQueueConfig<QueueState> {
+    /// Return the actual size of the queue, as the driver may not set up a
+    /// queue as big as the device allows.
+    #[inline]
+    pub fn actual_size(&self) -> u16 {
+        // TODO: rework once https://github.com/rust-vmm/vm-virtio/pull/153 get merged.
+        //self.queue.size()
+        std::cmp::min(self.queue.size, self.queue.max_size)
+    }
+}
+
+impl VirtioQueueConfig<QueueStateSync> {
+    /// Return the actual size of the queue, as the driver may not set up a
+    /// queue as big as the device allows.
+    #[inline]
+    pub fn actual_size(&self) -> u16 {
+        // TODO: rework once https://github.com/rust-vmm/vm-virtio/pull/153 get merged.
+        //self.queue.size()
+        self.queue.max_size()
     }
 }
 
 /// Virtio device configuration information.
 ///
-/// This structure maintains all configuration information for a virtio device. It will be passed
-/// to VirtioDevice::activate() and the virito device will take ownership of the configuration
+/// This structure maintains all configuration information for a Virtio device. It will be passed
+/// to VirtioDevice::activate() and the Virtio device will take ownership of the configuration
 /// object. On VirtioDevice::reset(), the configuration object should be returned to the caller.
-pub struct VirtioDeviceConfig<AS: GuestAddressSpace> {
-    /// Guest memory accessor.
+pub struct VirtioDeviceConfig<
+    AS: GuestAddressSpace,
+    Q: QueueStateT = QueueState,
+    R: GuestMemoryRegion = GuestRegionMmap,
+> {
+    /// `GustMemoryAddress` object to access the guest memory.
     pub vm_as: AS,
-    /// VmFd associated with this virtio device.
+    /// `VmFd` object for the device to access the hypervisor, such as KVM/HyperV etc.
     pub vm_fd: Arc<VmFd>,
-    /// Resources this virtio device needs.
+    /// Resources assigned to the Virtio device.
     pub resources: DeviceResources,
-    /// Virtques for normal data requests.
-    pub queues: Vec<VirtioQueueConfig>,
-    /// Virtque for control requests.
-    pub ctrl_queue: Option<VirtioQueueConfig>,
-    /// Notifier to inject virtio device change interrupt to guest.
+    /// Virtio queues for normal data stream.
+    pub queues: Vec<VirtioQueueConfig<Q>>,
+    /// Virtio queue for device control requests.
+    pub ctrl_queue: Option<VirtioQueueConfig<Q>>,
+    /// Interrupt notifier to inject Virtio device change interrupt to the guest.
     pub device_change_notifier: Box<dyn InterruptNotifier>,
-    /// Shared memory regions
-    pub shm_regions: Option<VirtioSharedMemoryList>,
+    /// Shared memory region for Virtio-fs etc.
+    pub shm_regions: Option<VirtioSharedMemoryList<R>>,
 }
 
-impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
-    /// Creates a virtio device configuration instance.
+impl<AS, Q, R> VirtioDeviceConfig<AS, Q, R>
+where
+    AS: GuestAddressSpace,
+    Q: QueueStateT,
+    R: GuestMemoryRegion,
+{
+    /// Creates a new `VirtioDeviceConfig` object.
     pub fn new(
         vm_as: AS,
         vm_fd: Arc<VmFd>,
         resources: DeviceResources,
-        queues: Vec<VirtioQueueConfig>,
-        ctrl_queue: Option<VirtioQueueConfig>,
+        queues: Vec<VirtioQueueConfig<Q>>,
+        ctrl_queue: Option<VirtioQueueConfig<Q>>,
         device_change_notifier: Box<dyn InterruptNotifier>,
     ) -> Self {
         VirtioDeviceConfig {
@@ -174,25 +216,25 @@ impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
         }
     }
 
-    /// Injects a virtio device change notification to guest.
+    /// Inject a Virtio device change notification to the guest.
     pub fn notify_device_changes(&self) -> Result<()> {
         self.device_change_notifier.notify().map_err(Error::IOError)
     }
 
-    /// Gets irq eventfd array for vritio vrings.
-    pub fn get_vring_notifier(&self) -> Vec<&EventFd> {
+    /// Get interrupt eventfds for normal Vritio queues.
+    pub fn get_queue_interrupt_eventfds(&self) -> Vec<&EventFd> {
         self.queues
             .iter()
             .map(|x| x.notifier.notifier().unwrap())
             .collect()
     }
 
-    /// Sets shm regions to `VirtioDeviceConfig`
-    pub fn set_shm_regions(&mut self, shm_regions: VirtioSharedMemoryList) {
+    /// Set shared memory region for Virtio-fs.
+    pub fn set_shm_regions(&mut self, shm_regions: VirtioSharedMemoryList<R>) {
         self.shm_regions = Some(shm_regions);
     }
 
-    /// Gets host addr and guest addr of shm region base
+    /// Get host address and guest address of the shared memory region.
     pub fn get_shm_region_addr(&self) -> Option<(u64, u64)> {
         self.shm_regions
             .as_ref()
@@ -205,8 +247,8 @@ impl<AS: GuestAddressSpace> VirtioDeviceConfig<AS> {
     }
 }
 
-/// Device memory shared between guest and the device backend driver, defined by the virtio
-/// specification for virtio-fs devices.
+/// Device memory shared between guest and the device backend driver, defined by the Virtio
+/// specification for Virtio-fs devices.
 #[derive(Clone, PartialEq, Debug)]
 pub struct VirtioSharedMemory {
     /// offset from the bar base
@@ -217,7 +259,7 @@ pub struct VirtioSharedMemory {
 
 /// A list of Shared Memory regions
 #[derive(Clone, Debug)]
-pub struct VirtioSharedMemoryList {
+pub struct VirtioSharedMemoryList<R: GuestMemoryRegion> {
     /// Host address
     pub host_addr: u64,
     /// Guest address
@@ -242,10 +284,10 @@ pub struct VirtioSharedMemoryList {
     /// duplicate unmap during automatic drop, so we should try to avoid the clone
     /// of MmapRegion. This problem does not exist with GuestRegionMmap because
     /// vm_as and VirtioSharedMemoryList can share GuestRegionMmap through Arc.
-    pub mmap_region: Arc<GuestRegionMmap>,
+    pub mmap_region: Arc<R>,
 }
 
-/// Trait for virtio transport layer to manage virtio devices.
+/// Trait for Virtio transport layer to manage virtio devices.
 ///
 /// The virtio transport driver takes the responsibility to manage lifecycle of virtio devices.
 /// The device manager registers virtio devices to the transport driver, which will then manage
@@ -258,7 +300,7 @@ pub struct VirtioSharedMemoryList {
 /// and all the events, memory, and queues for device operation will be moved into the device.
 /// Optionally, a virtio device can implement device reset in which it returns said resources and
 /// resets its internal.
-pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
+pub trait VirtioDevice<AS: GuestAddressSpace, Q: QueueStateT, R: GuestMemoryRegion>: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
 
@@ -286,7 +328,7 @@ pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
     fn write_config(&mut self, offset: u64, data: &[u8]);
 
     /// Activates this device for real usage.
-    fn activate(&mut self, config: VirtioDeviceConfig<AS>) -> ActivateResult;
+    fn activate(&mut self, config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult;
 
     /// Deactivates this device.
     fn reset(&mut self) -> ActivateResult {
@@ -308,7 +350,7 @@ pub trait VirtioDevice<AS: GuestAddressSpace>: Send {
         &mut self,
         _vm_fd: Arc<VmFd>,
         _resource: DeviceResources,
-    ) -> Result<Option<VirtioSharedMemoryList>> {
+    ) -> Result<Option<VirtioSharedMemoryList<R>>> {
         Ok(None)
     }
 
@@ -527,20 +569,20 @@ pub(crate) mod tests {
         let status = Arc::new(InterruptStatusRegister32::new());
         let notifier = Box::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
 
-        let mut cfg = VirtioQueueConfig::create(1024, 1).unwrap();
-        cfg.set_notifier(notifier);
+        let mut cfg = VirtioQueueConfig::<QueueState>::create(1024, 1).unwrap();
+        cfg.set_interrupt_notifier(notifier);
 
         let mem =
             Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap());
-        let mut iter = cfg.iter(mem).unwrap();
-        assert!(matches!(iter.next(), None));
+        let desc = cfg.get_next_descriptor(mem.memory()).unwrap();
+        assert!(matches!(desc, None));
 
         cfg.notify().unwrap();
         assert_eq!(cfg.index(), 1);
         assert_eq!(cfg.max_size(), 1024);
         assert_eq!(cfg.actual_size(), 1024);
         cfg.generate_event().unwrap();
-        assert_eq!(cfg.comsume_event().unwrap(), 1);
+        assert_eq!(cfg.consume_event().unwrap(), 1);
     }
 
     #[test]
@@ -548,7 +590,7 @@ pub(crate) mod tests {
         let mut device_config = create_virtio_device_config();
 
         device_config.notify_device_changes().unwrap();
-        assert_eq!(device_config.get_vring_notifier().len(), 8);
+        assert_eq!(device_config.get_queue_interrupt_eventfds().len(), 8);
 
         let shared_mem =
             GuestRegionMmap::new(MmapRegion::new(4096).unwrap(), GuestAddress(0)).unwrap();
@@ -581,7 +623,7 @@ pub(crate) mod tests {
         device_info: VirtioDeviceInfo,
     }
 
-    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>> for DummyDevice {
+    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueState, GuestRegionMmap> for DummyDevice {
         fn device_type(&self) -> u32 {
             0xffff
         }
