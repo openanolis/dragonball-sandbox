@@ -164,6 +164,17 @@ impl VirtioQueueConfig<QueueStateSync> {
     }
 }
 
+impl<Q: QueueStateT + Clone> Clone for VirtioQueueConfig<Q> {
+    fn clone(&self) -> Self {
+        VirtioQueueConfig {
+            queue: self.queue.clone(),
+            eventfd: self.eventfd.clone(),
+            notifier: self.notifier.clone(),
+            index: self.index,
+        }
+    }
+}
+
 /// Virtio device configuration information.
 ///
 /// This structure maintains all configuration information for a Virtio device. It will be passed
@@ -520,6 +531,7 @@ pub(crate) mod tests {
     };
     use dbs_utils::epoll_manager::{EventOps, Events, MutEventSubscriber};
     use kvm_ioctls::Kvm;
+    use virtio_queue::QueueStateSync;
     use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
 
     pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
@@ -581,6 +593,39 @@ pub(crate) mod tests {
         assert_eq!(cfg.index(), 1);
         assert_eq!(cfg.max_size(), 1024);
         assert_eq!(cfg.actual_size(), 1024);
+        cfg.generate_event().unwrap();
+        assert_eq!(cfg.consume_event().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_clone_virtio_queue_config() {
+        let (_vmfd, irq_manager) = crate::tests::create_vm_and_irq_manager();
+        let group = irq_manager
+            .create_group(InterruptSourceType::LegacyIrq, 0, 1)
+            .unwrap();
+        let status = Arc::new(InterruptStatusRegister32::new());
+        let notifier = Arc::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
+
+        let mut cfg = VirtioQueueConfig::<QueueStateSync>::create(1024, 1).unwrap();
+        cfg.set_interrupt_notifier(notifier);
+        let mut cfg = cfg.clone();
+
+        let mem =
+            Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap());
+        let desc = cfg.get_next_descriptor(mem.memory()).unwrap();
+        assert!(matches!(desc, None));
+
+        {
+            let mut guard = cfg.queue_mut().lock();
+            let mut iter = guard.iter(mem.memory()).unwrap();
+            assert!(matches!(iter.next(), None));
+        }
+
+        cfg.notify().unwrap();
+        assert_eq!(cfg.index(), 1);
+        assert_eq!(cfg.max_size(), 1024);
+        assert_eq!(cfg.actual_size(), 1024);
+        assert_eq!(cfg.queue.max_size(), 1024);
         cfg.generate_event().unwrap();
         assert_eq!(cfg.consume_event().unwrap(), 1);
     }
