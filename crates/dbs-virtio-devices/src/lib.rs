@@ -49,7 +49,7 @@ pub enum Error {
     IOError(#[from] IOError),
     /// Error from virtio_queue
     #[error("virtio queue error: {0}")]
-    VirtioQueueError(VqError),
+    VirtioQueueError(#[from] VqError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
