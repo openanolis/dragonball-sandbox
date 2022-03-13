@@ -41,7 +41,7 @@ pub struct VirtioQueueConfig<Q: QueueStateT = QueueState> {
     /// Virtio queue object to access the associated queue.
     pub queue: Q,
     /// EventFd to receive queue notification from guest.
-    pub eventfd: EventFd,
+    pub eventfd: Arc<EventFd>,
     /// Notifier to inject interrupt to guest.
     notifier: Arc<dyn InterruptNotifier>,
     /// Queue index into the queue array.
@@ -52,7 +52,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
     /// Create a `VirtioQueueConfig` object.
     pub fn new(
         queue: Q,
-        eventfd: EventFd,
+        eventfd: Arc<EventFd>,
         notifier: Arc<dyn InterruptNotifier>,
         index: u16,
     ) -> Self {
@@ -70,7 +70,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
 
         Ok(VirtioQueueConfig {
             queue: Q::new(queue_size),
-            eventfd,
+            eventfd: Arc::new(eventfd),
             notifier: Arc::new(NoopNotifier::new()),
             index,
         })
@@ -540,7 +540,7 @@ pub(crate) mod tests {
         for idx in 0..8 {
             queues.push(VirtioQueueConfig::new(
                 QueueState::new(512),
-                EventFd::new(0).unwrap(),
+                Arc::new(EventFd::new(0).unwrap()),
                 Arc::new(LegacyNotifier::new(
                     group.clone(),
                     status.clone(),
