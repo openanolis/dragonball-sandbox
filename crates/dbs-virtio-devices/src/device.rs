@@ -43,7 +43,7 @@ pub struct VirtioQueueConfig<Q: QueueStateT = QueueState> {
     /// EventFd to receive queue notification from guest.
     pub eventfd: EventFd,
     /// Notifier to inject interrupt to guest.
-    notifier: Box<dyn InterruptNotifier>,
+    notifier: Arc<dyn InterruptNotifier>,
     /// Queue index into the queue array.
     index: u16,
 }
@@ -53,7 +53,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
     pub fn new(
         queue: Q,
         eventfd: EventFd,
-        notifier: Box<dyn InterruptNotifier>,
+        notifier: Arc<dyn InterruptNotifier>,
         index: u16,
     ) -> Self {
         VirtioQueueConfig {
@@ -71,7 +71,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
         Ok(VirtioQueueConfig {
             queue: Q::new(queue_size),
             eventfd,
-            notifier: Box::new(NoopNotifier::new()),
+            notifier: Arc::new(NoopNotifier::new()),
             index,
         })
     }
@@ -137,7 +137,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
 
     /// Set interrupt notifier to inject interrupts to the guest.
     #[inline]
-    pub fn set_interrupt_notifier(&mut self, notifier: Box<dyn InterruptNotifier>) {
+    pub fn set_interrupt_notifier(&mut self, notifier: Arc<dyn InterruptNotifier>) {
         self.notifier = notifier;
     }
 }
@@ -541,7 +541,7 @@ pub(crate) mod tests {
             queues.push(VirtioQueueConfig::new(
                 QueueState::new(512),
                 EventFd::new(0).unwrap(),
-                Box::new(LegacyNotifier::new(
+                Arc::new(LegacyNotifier::new(
                     group.clone(),
                     status.clone(),
                     VIRTIO_INTR_VRING,
@@ -567,7 +567,7 @@ pub(crate) mod tests {
             .create_group(InterruptSourceType::LegacyIrq, 0, 1)
             .unwrap();
         let status = Arc::new(InterruptStatusRegister32::new());
-        let notifier = Box::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
+        let notifier = Arc::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
 
         let mut cfg = VirtioQueueConfig::<QueueState>::create(1024, 1).unwrap();
         cfg.set_interrupt_notifier(notifier);

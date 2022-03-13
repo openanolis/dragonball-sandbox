@@ -17,12 +17,12 @@ pub fn create_device_notifier(
     group: Arc<Box<dyn InterruptSourceGroup>>,
     intr_status: Arc<InterruptStatusRegister32>,
     intr_index: InterruptIndex,
-) -> Box<dyn InterruptNotifier> {
+) -> Arc<dyn InterruptNotifier> {
     match group.interrupt_type() {
         InterruptSourceType::LegacyIrq => {
-            Box::new(LegacyNotifier::new(group, intr_status, VIRTIO_INTR_CONFIG))
+            Arc::new(LegacyNotifier::new(group, intr_status, VIRTIO_INTR_CONFIG))
         }
-        InterruptSourceType::MsiIrq => Box::new(MsiNotifier::new(group, intr_index)),
+        InterruptSourceType::MsiIrq => Arc::new(MsiNotifier::new(group, intr_index)),
     }
 }
 
@@ -31,12 +31,12 @@ pub fn create_queue_notifier(
     group: Arc<Box<dyn InterruptSourceGroup>>,
     intr_status: Arc<InterruptStatusRegister32>,
     intr_index: InterruptIndex,
-) -> Box<dyn InterruptNotifier> {
+) -> Arc<dyn InterruptNotifier> {
     match group.interrupt_type() {
         InterruptSourceType::LegacyIrq => {
-            Box::new(LegacyNotifier::new(group, intr_status, VIRTIO_INTR_VRING))
+            Arc::new(LegacyNotifier::new(group, intr_status, VIRTIO_INTR_VRING))
         }
-        InterruptSourceType::MsiIrq => Box::new(MsiNotifier::new(group, intr_index)),
+        InterruptSourceType::MsiIrq => Arc::new(MsiNotifier::new(group, intr_index)),
     }
 }
 
