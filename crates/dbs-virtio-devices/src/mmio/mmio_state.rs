@@ -246,6 +246,12 @@ where
     }
 
     #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn queues(&self) -> &Vec<VirtioQueueConfig<Q>> {
+        &self.queues
+    }
+
+    #[inline]
     pub(crate) fn features_select(&self) -> u32 {
         self.features_select
     }
@@ -256,8 +262,20 @@ where
     }
 
     #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn acked_features_select(&mut self) -> u32 {
+        self.acked_features_select
+    }
+
+    #[inline]
     pub(crate) fn set_acked_features_select(&mut self, v: u32) {
         self.acked_features_select = v;
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn queue_select(&mut self) -> u32 {
+        self.queue_select
     }
 
     #[inline]
@@ -378,7 +396,7 @@ where
         }
     }
 
-    fn check_queues_valid(&self) -> bool {
+    pub(crate) fn check_queues_valid(&self) -> bool {
         let mem = self.vm_as.memory();
         // All queues must have been enabled, we doesn't allow disabled queues.
         self.queues.iter().all(|c| c.queue.is_valid(mem.deref()))
@@ -560,5 +578,72 @@ where
                 self.vm_fd.set_user_memory_region(kvm_mem_region).unwrap();
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use kvm_ioctls::Kvm;
+    use virtio_queue::QueueState;
+    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
+
+    use super::*;
+    use crate::mmio::mmio_v2::tests::*;
+
+    pub fn get_mmio_state(
+        have_msi: bool,
+        doorbell: bool,
+        ctrl_queue_size: u16,
+    ) -> MmioV2DeviceState<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> {
+        let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
+
+        let mmio_base = 0;
+        let device_resources = get_device_resource(have_msi, false);
+
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        vm_fd.create_irq_chip().unwrap();
+
+        let irq_manager = Arc::new(KvmIrqManager::new(vm_fd.clone()));
+        irq_manager.initialize().unwrap();
+
+        let device = MmioDevice::new(ctrl_queue_size);
+
+        MmioV2DeviceState::new(
+            Box::new(device),
+            vm_fd,
+            mem,
+            irq_manager,
+            device_resources,
+            mmio_base,
+            doorbell,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_virtio_mmio_state_new() {
+        let mut state = get_mmio_state(false, false, 1);
+
+        assert_eq!(state.queues.len(), 3);
+        assert!(!state.check_queues_valid());
+
+        state.queue_select = 0;
+        assert_eq!(state.with_queue(0, |q| q.max_size()), 16);
+        assert!(state.with_queue_mut(|q| q.size = 16));
+        assert_eq!(state.queues[state.queue_select as usize].queue.size, 16);
+
+        state.queue_select = 1;
+        assert_eq!(state.with_queue(0, |q| q.max_size()), 32);
+        assert!(state.with_queue_mut(|q| q.size = 8));
+        assert_eq!(state.queues[state.queue_select as usize].queue.size, 8);
+
+        state.queue_select = 3;
+        assert_eq!(state.with_queue(0xff, |q| q.max_size()), 0xff);
+        assert!(!state.with_queue_mut(|q| q.size = 16));
+
+        assert!(!state.check_queues_valid());
+
+        drop(state);
     }
 }
