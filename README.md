@@ -9,7 +9,7 @@ Dragonball-sandbox is a collection of Rust crates to help build custom Virtual M
 This repository contains the following crates:
 | Name | Description | Links |
 | --- | --- | --- |
-| [db-address-space](crates/db-address-space) | manager for memory and MMIO resources resident in the guest physical address space | TBD |
+| [dbs-address-space](crates/dbs-address-space) | manager for memory and MMIO resources resident in the guest physical address space | TBD |
 | [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | TBD |
 | [db-arch](crates/db-arch) | collections of CPU architecture related modules | TBD |
 | [db-boot](crates/db-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |

@@ -1,8 +1,8 @@
-# db-address-space
+# dbs-address-space
 
 ## Design
 
-The db-address-space crate is an address space manager for virtual machines, which manages memory and MMIO resources resident in the guest physical address space.
+The dbs-address-space crate is an address space manager for virtual machines, which manages memory and MMIO resources resident in the guest physical address space.
 
 ```rust
 pub struct AddressSpaceRegion {
