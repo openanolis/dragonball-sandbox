@@ -79,7 +79,6 @@ pub const MMIO_MSI_CMD_CODE_UPDATE: u16 = 0x1000;
 pub const MMIO_MSI_CMD_CODE_INT_MASK: u16 = 0x2000;
 pub const MMIO_MSI_CMD_CODE_INT_UNMASK: u16 = 0x3000;
 
-
 // Define a 16-byte area to control MMIO MSI
 
 // MSI control/status register offset
