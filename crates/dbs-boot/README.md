@@ -1,8 +1,8 @@
-# db-boot
+# dbs-boot
 
 ## Design
 
-The `db-boot` crate is a collection of constants, structs and utilities used to boot virtual machines.
+The `dbs-boot` crate is a collection of constants, structs and utilities used to boot virtual machines.
 
 ## Submodule List
 
