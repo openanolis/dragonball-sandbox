@@ -9,7 +9,7 @@
 //! guest memory resident in guest physical address space. In addition to guest memory, there may
 //! be other type of devices resident in the same guest physical address space.
 //!
-//! The `db-address-space` crate provides traits and structs to manage the guest physical address
+//! The `dbs-address-space` crate provides traits and structs to manage the guest physical address
 //! space for virtual machines, and mechanisms to coordinate all the devices resident in the
 //! guest physical address space.
 
