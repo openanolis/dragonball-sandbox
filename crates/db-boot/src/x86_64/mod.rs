@@ -3,7 +3,7 @@
 
 //! VM boot related constants and utilities for `x86_64` architecture.
 
-use db_arch::gdt::gdt_entry;
+use dbs_arch::gdt::gdt_entry;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
 use self::layout::{BOOT_GDT_ADDRESS, BOOT_GDT_MAX, BOOT_IDT_ADDRESS};

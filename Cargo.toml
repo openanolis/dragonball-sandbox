@@ -3,7 +3,7 @@
 members = [
     "crates/db-address-space",
     "crates/dbs-allocator",
-    "crates/db-arch",
+    "crates/dbs-arch",
     "crates/db-boot",
     "crates/dbs-device",
     "crates/dbs-legacy-devices",

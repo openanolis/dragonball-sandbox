@@ -14,5 +14,5 @@ arc-swap = ">=0.4.8"
 libc = "0.2.39"
 nix = "0.15"
 thiserror = "1"
-vmm-sys-util = "0.8"
+vmm-sys-util = "0.9.0"
 vm-memory = { version = "0.7", features = ["backend-mmap", "backend-atomic"] }
