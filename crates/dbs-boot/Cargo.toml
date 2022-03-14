@@ -1,5 +1,5 @@
 [package]
-name = "db-boot"
+name = "dbs-boot"
 version = "0.1.0"
 authors = ["Alibaba Dragonball Team"]
 license = "Apache-2.0"

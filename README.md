@@ -12,7 +12,7 @@ This repository contains the following crates:
 | [db-address-space](crates/db-address-space) | manager for memory and MMIO resources resident in the guest physical address space | TBD |
 | [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | TBD |
 | [db-arch](crates/db-arch) | collections of CPU architecture related modules | TBD |
-| [db-boot](crates/db-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |
+| [dbs-boot](crates/dbs-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |
 | [dbs-device](crates/dbs-device) | virtual machine's device model | [![Crates.io](https://img.shields.io/crates/v/dbs-device)](https://crates.io/crates/dbs-device) |
 | [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | TBD |
 | [dbs-legacy-devices](crates/dbs-legacy-devices) | emulation for legacy devices | TBD |
