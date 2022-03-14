@@ -1,8 +1,8 @@
-# db-arch
+# dbs-arch
 
 ## Design
 
-The `db-arch` crate is a collection of CPU architecture specific constants and utilities to hide CPU architecture details
+The `dbs-arch` crate is a collection of CPU architecture specific constants and utilities to hide CPU architecture details
 away from the Dragonball Sandbox or other VMMs.
 
 ## Supported Architectures

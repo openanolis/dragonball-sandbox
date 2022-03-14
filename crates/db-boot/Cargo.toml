@@ -10,7 +10,7 @@ keywords = ["dragonball", "boot", "VMM"]
 readme = "README.md"
 
 [dependencies]
-db-arch = { path = "../db-arch", version = "0.1" }
+dbs-arch = { path = "../dbs-arch", version = "0.1" }
 lazy_static = "1"
 libc = "0.2.39"
 thiserror = "1"

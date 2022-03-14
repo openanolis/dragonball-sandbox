@@ -29,7 +29,7 @@ type CpuIdEntry = kvm_bindings::kvm_cpuid_entry2;
 ///
 /// # Example
 /// ```ignore
-/// use db_arch::cpuid::{process_cpuid, VmSpec, VpmuFeatureLevel};
+/// use dbs_arch::cpuid::{process_cpuid, VmSpec, VpmuFeatureLevel};
 /// use kvm_bindings::{CpuId, KVM_MAX_CPUID_ENTRIES};
 /// use kvm_ioctls::Kvm;
 ///
