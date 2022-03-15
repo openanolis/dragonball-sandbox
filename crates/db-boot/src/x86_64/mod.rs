@@ -4,7 +4,7 @@
 //! VM boot related constants and utilities for `x86_64` architecture.
 
 use dbs_arch::gdt::gdt_entry;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryRegion};
 
 use self::layout::{BOOT_GDT_ADDRESS, BOOT_GDT_MAX, BOOT_IDT_ADDRESS};
 
@@ -35,6 +35,38 @@ pub struct BootParamsWrapper(bootparam::boot_params);
 
 // It is safe to initialize BootParamsWrap which is a wrapper over `boot_params` (a series of ints).
 unsafe impl ByteValued for BootParamsWrapper {}
+
+/// Errors thrown while configuring x86_64 system.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum Error {
+    /// Invalid e820 setup params.
+    #[error("invalid e820 setup parameters")]
+    E820Configuration,
+
+    /// Error writing MP table to memory.
+    #[error("failed to write MP table to guest memory")]
+    MpTableSetup(#[source] mptable::Error),
+
+    /// The zero page extends past the end of guest_mem.
+    #[error("the guest zero page extends past the end of guest memory")]
+    ZeroPagePastRamEnd,
+
+    /// Error writing the zero page of guest memory.
+    #[error("failed to write to guest zero page")]
+    ZeroPageSetup,
+
+    /// Failed to compute initrd address.
+    #[error("invalid guest memory address for Initrd")]
+    InitrdAddress,
+
+    /// boot parameter setup fail.
+    #[error("write  boot parameter fail")]
+    BootParamSetup,
+
+    /// Empty AddressSpace from parameters.
+    #[error("Empty AddressSpace from parameters")]
+    AddressSpace,
+}
 
 /// Initialize the 1:1 identity mapping table for guest memory range [0..1G).
 pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<(), vm_memory::GuestMemoryError> {
@@ -68,6 +100,22 @@ pub fn get_descriptor_config_info() -> ([u64; BOOT_GDT_MAX], u64, u64) {
     ];
 
     (gdt_table, BOOT_GDT_ADDRESS, BOOT_IDT_ADDRESS)
+}
+
+/// Returns the memory address where the initrd could be loaded.
+pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> Result<u64, Error> {
+    let lowmem_size = guest_mem
+        .find_region(GuestAddress(0))
+        .ok_or(Error::InitrdAddress)
+        .map(|r| r.len())?;
+
+    // For safety to avoid overlap, reserve 32M for kernel and boot params in low end.
+    if lowmem_size < initrd_size + (32 << 20) {
+        return Err(Error::InitrdAddress);
+    }
+
+    let align_to_pagesize = |address| address & !(PAGE_SIZE as u64 - 1);
+    Ok(align_to_pagesize(lowmem_size - initrd_size))
 }
 
 #[cfg(test)]
