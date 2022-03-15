@@ -1,5 +1,4 @@
 // Copyright 2021-2022 Alibaba Cloud. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
