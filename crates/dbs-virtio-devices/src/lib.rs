@@ -121,6 +121,17 @@ pub enum Error {
 /// Specialized std::result::Result for Virtio device operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
+macro_rules! warn_or_panic {
+    ($($arg:tt)*) => {
+        if cfg!(test) {
+            panic!($($arg)*)
+        } else {
+            log::warn!($($arg)*)
+        }
+    }
+}
+pub(crate) use warn_or_panic;
+
 #[cfg(test)]
 pub mod tests {
     use std::sync::Arc;
