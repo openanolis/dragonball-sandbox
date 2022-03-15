@@ -17,8 +17,8 @@ use virtio_queue::QueueStateT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
 use crate::{
-    mmio::*, ActivateError, Error, Result, VirtioDevice, VirtioDeviceConfig, VirtioQueueConfig,
-    VirtioSharedMemory, VirtioSharedMemoryList, DEVICE_DRIVER_OK, DEVICE_FAILED,
+    mmio::*, warn_or_panic, ActivateError, Error, Result, VirtioDevice, VirtioDeviceConfig,
+    VirtioQueueConfig, VirtioSharedMemory, VirtioSharedMemoryList, DEVICE_DRIVER_OK, DEVICE_FAILED,
 };
 
 /// The state of Virtio Mmio device.
@@ -533,17 +533,17 @@ where
                 if arg > self.device.queue_max_sizes().len() as u16 {
                     info!("mmio_v2: configure interrupt for invalid vector {}", v,);
                 } else if let Err(e) = self.update_msi_cfg(arg) {
-                    warn!("mmio_v2: failed to configure vector {}, {:?}", v, e);
+                    warn_or_panic!("mmio_v2: failed to configure vector {}, {:?}", v, e);
                 }
             }
             MMIO_MSI_CMD_CODE_INT_MASK => {
                 if let Err(e) = self.mask_msi_int(arg as u32, true) {
-                    warn!("mmio_v2: failed to mask {}, {:?}", v, e);
+                    warn_or_panic!("mmio_v2: failed to mask {}, {:?}", v, e);
                 }
             }
             MMIO_MSI_CMD_CODE_INT_UNMASK => {
                 if let Err(e) = self.mask_msi_int(arg as u32, false) {
-                    warn!("mmio_v2: failed to unmask {}, {:?}", v, e);
+                    warn_or_panic!("mmio_v2: failed to unmask {}, {:?}", v, e);
                 }
             }
             _ => {
