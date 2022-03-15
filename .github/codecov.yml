@@ -1,0 +1,2 @@
+ignore:
+  - "/crates/db-boot/src/x86_64/bootparam.rs"
