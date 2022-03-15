@@ -315,6 +315,24 @@ where
             info!("can not write to device config data area before driver is ready");
         }
     }
+
+    fn get_shm_base_low(&self) -> u32 {
+        let mut state = self.state();
+        let guest_addr: u64 = match state.shm_regions() {
+            Some(regions) => regions.guest_addr.0,
+            None => 0,
+        };
+        state.get_shm_field(0xffff_ffff, |s| (s.offset + guest_addr) as u32)
+    }
+
+    fn get_shm_base_high(&self) -> u32 {
+        let mut state = self.state();
+        let guest_addr: u64 = match state.shm_regions() {
+            Some(regions) => regions.guest_addr.0,
+            None => 0,
+        };
+        state.get_shm_field(0xffff_ffff, |s| ((s.offset + guest_addr) >> 32) as u32)
+    }
 }
 
 impl<AS, Q, R> DeviceIo for MmioV2Device<AS, Q, R>
@@ -325,10 +343,6 @@ where
 {
     fn read(&self, _base: IoAddress, offset: IoAddress, data: &mut [u8]) {
         let offset = offset.raw_value();
-        let guest_addr: u64 = match self.state().shm_regions() {
-            Some(regions) => regions.guest_addr.0,
-            None => 0,
-        };
 
         if offset >= MMIO_CFG_SPACE_OFF {
             self.get_device_config(offset - MMIO_CFG_SPACE_OFF, data);
@@ -354,12 +368,8 @@ where
                 REG_MMIO_SHM_LEN_HIGH => self
                     .state()
                     .get_shm_field(0xffff_ffff, |s| (s.len >> 32) as u32),
-                REG_MMIO_SHM_BASE_LOW => self
-                    .state()
-                    .get_shm_field(0xffff_ffff, |s| (s.offset + guest_addr) as u32),
-                REG_MMIO_SHM_BASE_HIGH => self
-                    .state()
-                    .get_shm_field(0xffff_ffff, |s| ((s.offset + guest_addr) >> 32) as u32),
+                REG_MMIO_SHM_BASE_LOW => self.get_shm_base_low(),
+                REG_MMIO_SHM_BASE_HIGH => self.get_shm_base_high(),
                 REG_MMIO_CONFIG_GENERATI => self.config_generation.load(Ordering::SeqCst),
                 _ => {
                     info!("unknown virtio mmio readl at 0x{:x}", offset);
