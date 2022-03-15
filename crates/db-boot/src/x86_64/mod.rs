@@ -148,4 +148,32 @@ mod tests {
             assert_eq!((i << 21) + 0x83u64, read_u64(&gm, PDE_START + (i * 8)));
         }
     }
+
+    #[test]
+    fn test_write_boot_param() {
+        const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
+        const KERNEL_HDR_MAGIC: u32 = 0x5372_6448;
+        const KERNEL_LOADER_OTHER: u8 = 0xff;
+        const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x0100_0000; // Must be non-zero.
+        let mut params: BootParamsWrapper = BootParamsWrapper(bootparam::boot_params::default());
+
+        params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
+        params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
+        params.0.hdr.header = KERNEL_HDR_MAGIC;
+        params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
+
+        assert_eq!(params.0.hdr.type_of_loader, KERNEL_LOADER_OTHER);
+        assert_eq!(
+            unsafe { std::ptr::addr_of!(params.0.hdr.boot_flag).read_unaligned() },
+            KERNEL_BOOT_FLAG_MAGIC
+        );
+        assert_eq!(
+            unsafe { std::ptr::addr_of!(params.0.hdr.header).read_unaligned() },
+            KERNEL_HDR_MAGIC
+        );
+        assert_eq!(
+            unsafe { std::ptr::addr_of!(params.0.hdr.kernel_alignment).read_unaligned() },
+            KERNEL_MIN_ALIGNMENT_BYTES
+        );
+    }
 }
