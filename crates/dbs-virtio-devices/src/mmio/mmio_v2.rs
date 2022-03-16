@@ -295,6 +295,26 @@ where
             );
         }
     }
+
+    fn get_device_config(&self, offset: u64, data: &mut [u8]) {
+        // Use mutex for state to protect device.write_config()
+        let mut state = self.state();
+        if self.check_driver_status(DEVICE_DRIVER, DEVICE_FAILED) {
+            state.get_inner_device_mut().read_config(offset, data);
+        } else {
+            info!("can not read from device config data area before driver is ready");
+        }
+    }
+
+    fn set_device_config(&self, offset: u64, data: &[u8]) {
+        // Use mutex for state to protect device.write_config()
+        let mut state = self.state();
+        if self.check_driver_status(DEVICE_DRIVER, DEVICE_FAILED) {
+            state.get_inner_device_mut().write_config(offset, data);
+        } else {
+            info!("can not write to device config data area before driver is ready");
+        }
+    }
 }
 
 impl<AS, Q, R> DeviceIo for MmioV2Device<AS, Q, R>
@@ -311,6 +331,7 @@ where
         };
 
         if offset >= MMIO_CFG_SPACE_OFF {
+            self.get_device_config(offset - MMIO_CFG_SPACE_OFF, data);
         } else if data.len() == 4 {
             let v = match offset {
                 REG_MMIO_MAGIC_VALUE => MMIO_MAGIC_VALUE,
@@ -374,6 +395,7 @@ where
         let offset = offset.raw_value();
         // Write to the device configuration area.
         if (MMIO_CFG_SPACE_OFF..DRAGONBALL_MMIO_DOORBELL_OFFSET).contains(&offset) {
+            self.set_device_config(offset - MMIO_CFG_SPACE_OFF, data);
         } else if data.len() == 4 {
             let v = LittleEndian::read_u32(data);
             match offset {
