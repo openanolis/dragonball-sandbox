@@ -1,2 +1,86 @@
+coverage:
+  status:
+    patch:
+      default:
+        target: 85%
+    project:
+      default:
+        target: auto
+        threshold: 2%
+      dbs-address-space:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-address-space
+      dbs-allocator:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-allocator
+      dbs-arch:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-arch
+      dbs-boot:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-boot
+      dbs-device:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-device
+      dbs-interrupt:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-interrupt
+      dbs-legacy-devices:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-legacy-devices
+      dbs-utils:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-utils
+      dbs-virtio-devices:
+        target: auto
+        threshold: 2%
+        flags:
+          - dbs-virtio-devices
+
+flags:
+  dbs-address-space:
+    paths:
+      - crates/dbs-address-space
+  dbs-allocator:
+    paths:
+      - crates/dbs-allocator
+  dbs-arch:
+    paths:
+      - crates/dbs-arch
+  dbs-boot:
+    paths:
+      - crates/dbs-boot
+  dbs-device:
+    paths:
+      - crates/dbs-device
+  dbs-interrupt:
+    paths:
+      - crates/dbs-interrupt
+  dbs-legacy-devices:
+    paths:
+      - crates/dbs-legacy-devices
+  dbs-utils:
+    paths:
+      - crates/dbs-utils
+  dbs-virtio-devices:
+    paths:
+      - crates/dbs-virtio-devices
+
 ignore:
-  - "/crates/dbs-boot/src/x86_64/bootparam.rs"
+  - "crates/dbs-boot/src/x86_64/bootparam.rs"
