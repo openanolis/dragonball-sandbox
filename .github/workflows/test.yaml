@@ -52,4 +52,5 @@ jobs:
           # required for private repositories:
           # token: ${{ secrets.CODECOV_TOKEN }}
           files: ./lcov.info
+          flags: dbs-address-space,dbs-allocator,dbs-arch,dbs-boot,dbs-device,dbs-interrupt,dbs-legacy-devices,dbs-utils,dbs-virtio-devices
           fail_ci_if_error: true
