@@ -141,9 +141,9 @@ impl AddressSpaceRegion {
     /// # Arguments
     /// * `base` - Base address in VM to map content
     /// * `size` - Length of content to map
+    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `mem_type` - Memory mapping from, 'shmem' or 'hugetlbfs'
     /// * `mem_file_path` - Memory file path
-    /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `mem_prealloc` - Whether to enable pre-allocation of guest memory
     /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn create_memory_region(
