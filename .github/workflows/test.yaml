@@ -30,7 +30,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin
           key: ${{ runner.os }}-build-${{ env.cache-name }}
 
       - name: Run vagrant up
@@ -41,10 +40,48 @@ jobs:
         working-directory: .github
         run: vagrant ssh -c 'export CARGO_INCREMENTAL=0; export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"; export RUSTDOCFLAGS=-Cpanic=abort; cd /vagrant; cargo clean; sudo -E cargo test --all-features $CARGO_OPTIONS -- -Z unstable-options --test-threads 1'
 
-      - name: Coverage
-        uses: actions-rs/grcov@v0.1
+      - name: Save coverage
+        uses: actions/upload-artifact@v3
         with:
-          config: .github/grcov.yml
+          name: coverage
+          path: target/**/dbs_*.gc*
+          if-no-files-found: error
+
+  upload_codecov:
+    runs-on: macos-10.15
+    needs: vagrant
+    strategy:
+      matrix:
+        crate: [dbs-address-space, dbs-allocator, dbs-arch, dbs-boot, dbs-device, dbs-interrupt, dbs-legacy-devices, dbs-utils, dbs-virtio-devices]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Download coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: coverage
+
+      - name: Cache dependencies
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-cargo-dependencies
+        with:
+          path: |
+            ~/.cargo/.crates2.json
+            ~/.cargo/.crates.toml
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.cargo/bin/
+          key: ${{ runner.os }}-build-${{ env.cache-name }}
+
+      - name: Collection Coverage
+        run: |
+          cargo install grcov
+          CRATE=${{matrix.crate}}
+          zip -0 ccov.zip `find . \( -name "${CRATE//-/_}*.gc*" \) -print`
+          grcov ccov.zip -s . -t lcov --llvm --ignore-not-existing -p "/vagrant/" --ignore "/*" --ignore "tests/*" -o lcov.info
+        shell: bash
+
 
       - name: Upload to CodeCov
         uses: codecov/codecov-action@v2
@@ -52,5 +89,5 @@ jobs:
           # required for private repositories:
           # token: ${{ secrets.CODECOV_TOKEN }}
           files: ./lcov.info
-          flags: dbs-address-space,dbs-allocator,dbs-arch,dbs-boot,dbs-device,dbs-interrupt,dbs-legacy-devices,dbs-utils,dbs-virtio-devices
+          flags: ${{matrix.crate}}
           fail_ci_if_error: true
