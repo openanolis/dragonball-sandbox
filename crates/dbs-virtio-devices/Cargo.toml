@@ -22,8 +22,8 @@ libc = "0.2.39"
 log = "0.4.14"
 serde = { version = "1.0.27", features = ["derive", "rc"] }
 thiserror = "1"
+virtio-bindings = "0.1.0"
 virtio-queue = "0.1.0"
-virtio-bindings = "~0"
 vmm-sys-util = "0.9.0"
 vm-memory = "0.7.0"
 
@@ -34,3 +34,4 @@ vm-memory = { version = "0.7.0", features = [ "backend-mmap", "backend-atomic" ]
 virtio-mmio = []
 virtio-vsock = ["virtio-mmio"]
 virtio-net = ["virtio-mmio"]
+virtio-blk = ["virtio-mmio"]
