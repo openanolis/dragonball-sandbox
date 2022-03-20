@@ -27,10 +27,13 @@ pub mod vsock;
 #[cfg(feature = "virtio-net")]
 pub mod net;
 
+#[cfg(feature = "virtio-blk")]
+pub mod block;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
-use vm_memory::GuestAddressSpace;
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryError};
 
 pub trait DbsGuestAddressSpace: GuestAddressSpace + 'static + Clone + Send + Sync {}
 
@@ -112,6 +115,21 @@ pub type ActivateResult = std::result::Result<(), ActivateError>;
 /// Error for virtio devices to handle requests from guests.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Guest gave us too few descriptors in a descriptor chain.
+    #[error("not enough descriptors for request.")]
+    DescriptorChainTooShort,
+    /// Guest gave us a descriptor that was too short to use.
+    #[error("descriptor length too small.")]
+    DescriptorLengthTooSmall,
+    /// Guest gave us a descriptor that was too big to use.
+    #[error("descriptor length too big.")]
+    DescriptorLengthTooBig,
+    /// Guest gave us a write only descriptor that protocol says to read from.
+    #[error("unexpected write only descriptor.")]
+    UnexpectedWriteOnlyDescriptor,
+    /// Guest gave us a read only descriptor that protocol says to write to.
+    #[error("unexpected read only descriptor.")]
+    UnexpectedReadOnlyDescriptor,
     /// Invalid input parameter or status.
     #[error("invalid input parameter or status.")]
     InvalidInput,
@@ -130,6 +148,12 @@ pub enum Error {
     /// Error from Interrupt.
     #[error("Interrupt error: {0}")]
     InterruptError(IOError),
+    /// Guest gave us bad memory addresses.
+    #[error("failed to access guest memory. {0}")]
+    GuestMemory(GuestMemoryError),
+    /// Guest gave us an invalid guest memory address.
+    #[error("invalid guest memory address. {0:?}")]
+    InvalidGuestAddress(GuestAddress),
 
     #[cfg(feature = "virtio-vsock")]
     #[error("virtio-vsock error: {0}")]
