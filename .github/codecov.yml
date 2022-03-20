@@ -84,3 +84,4 @@ flags:
 
 ignore:
   - "crates/dbs-boot/src/x86_64/bootparam.rs"
+  - "crates/dbs-utils/src/net/net_gen"
