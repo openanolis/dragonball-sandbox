@@ -94,13 +94,18 @@ pub enum BucketReduction {
 pub struct TokenBucket {
     // Bucket defining traits.
     size: u64,
-    // Initial burst size (number of free initial tokens, that can be consumed at no cost)
-    one_time_burst: u64,
+    // Initial burst size.
+    initial_one_time_burst: u64,
     // Complete refill time in milliseconds.
     refill_time: u64,
 
     // Internal state descriptors.
+
+    // Number of free initial tokens, that can be consumed at no cost.
+    one_time_burst: u64,
+    // Current token budget.
     budget: u64,
+    // Last time this token bucket saw activity.
     last_update: Instant,
 
     // Fields used for pre-processing optimizations.
@@ -109,11 +114,18 @@ pub struct TokenBucket {
 }
 
 impl TokenBucket {
-    /// Creates a TokenBucket of `size` total capacity that takes `complete_refill_time_ms`
+    /// Creates a `TokenBucket` wrapped in an `Option`.
+    ///
+    /// TokenBucket created is of `size` total capacity and takes `complete_refill_time_ms`
     /// milliseconds to go from zero tokens to total capacity. The `one_time_burst` is initial
     /// extra credit on top of total capacity, that does not replenish and which can be used
     /// for an initial burst of data.
+    ///
+    /// If the `size` or the `complete refill time` are zero, then `None` is returned.
     pub fn new(size: u64, one_time_burst: u64, complete_refill_time_ms: u64) -> Self {
+        // If either token bucket capacity or refill time is 0, disable limiting.
+        debug_assert!(size != 0 && complete_refill_time_ms != 0);
+
         // Formula for computing current refill amount:
         // refill_token_count = (delta_time * size) / (complete_refill_time_ms * 1_000_000)
         // In order to avoid overflows, simplify the fractions by computing greatest common divisor.
@@ -129,6 +141,7 @@ impl TokenBucket {
         TokenBucket {
             size,
             one_time_burst,
+            initial_one_time_burst: one_time_burst,
             refill_time: complete_refill_time_ms,
             // Start off full.
             budget: size,
@@ -137,6 +150,20 @@ impl TokenBucket {
             processed_capacity,
             processed_refill_time,
         }
+    }
+
+    // Replenishes token bucket based on elapsed time. Should only be called internally by `Self`.
+    fn auto_replenish(&mut self) {
+        // Compute time passed since last refill/update.
+        let time_delta = self.last_update.elapsed().as_nanos() as u64;
+        self.last_update = Instant::now();
+
+        // At each 'time_delta' nanoseconds the bucket should refill with:
+        // refill_amount = (time_delta * size) / (complete_refill_time_ms * 1_000_000)
+        // `processed_capacity` and `processed_refill_time` are the result of simplifying above
+        // fraction formula with their greatest-common-factor.
+        let tokens = (time_delta * self.processed_capacity) / self.processed_refill_time;
+        self.budget = std::cmp::min(self.budget + tokens, self.size);
     }
 
     /// Attempts to consume `tokens` from the bucket and returns whether the action succeeded.
@@ -157,21 +184,10 @@ impl TokenBucket {
             }
         }
 
-        // Compute time passed since last refill/update.
-        let time_delta = self.last_update.elapsed().as_nanos() as u64;
-        self.last_update = Instant::now();
-
-        // At each 'time_delta' nanoseconds the bucket should refill with:
-        // refill_amount = (time_delta * size) / (complete_refill_time_ms * 1_000_000)
-        // `processed_capacity` and `processed_refill_time` are the result of simplifying above
-        // fraction formula with their greatest-common-factor.
-        self.budget += (time_delta * self.processed_capacity) / self.processed_refill_time;
-
-        if self.budget >= self.size {
-            self.budget = self.size;
-        }
-
         if tokens > self.budget {
+            // Hit the bucket bottom, let's auto-replenish and try again.
+            self.auto_replenish();
+
             // This operation requests a bandwidth higher than the bucket size
             if tokens > self.size {
                 error!(
@@ -184,8 +200,11 @@ impl TokenBucket {
                 self.budget = 0;
                 return BucketReduction::OverConsumption(tokens as f64 / self.size as f64);
             }
-            // If not enough tokens consume() fails, return false.
-            return BucketReduction::Failure;
+
+            if tokens > self.budget {
+                // Still not enough tokens, consume() fails, return false.
+                return BucketReduction::Failure;
+            }
         }
 
         self.budget -= tokens;
@@ -193,7 +212,7 @@ impl TokenBucket {
     }
 
     /// "Manually" adds tokens to bucket.
-    pub fn replenish(&mut self, tokens: u64) {
+    pub fn force_replenish(&mut self, tokens: u64) {
         // This means we are still during the burst interval.
         // Of course there is a very small chance  that the last reduce() also used up burst
         // budget which should now be replenished, but for performance and code-complexity
@@ -223,6 +242,11 @@ impl TokenBucket {
     /// Returns the current budget (one time burst allowance notwithstanding).
     pub fn budget(&self) -> u64 {
         self.budget
+    }
+
+    /// Returns the initially configured one time burst budget.
+    pub fn initial_one_time_burst(&self) -> u64 {
+        self.initial_one_time_burst
     }
 }
 
@@ -431,7 +455,7 @@ impl RateLimiter {
         };
         // Add tokens to the token bucket.
         if let Some(bucket) = token_bucket {
-            bucket.replenish(tokens);
+            bucket.force_replenish(tokens);
         }
     }
 
@@ -556,6 +580,7 @@ mod tests {
         let tb = TokenBucket::new(1000, 0, 1000);
         assert_eq!(tb.capacity(), 1000);
         assert_eq!(tb.budget(), 1000);
+        assert_eq!(tb.initial_one_time_burst(), 0);
         assert!(*tb.get_last_update() >= before);
         let after = Instant::now();
         assert!(*tb.get_last_update() <= after);
@@ -588,10 +613,10 @@ mod tests {
 
         assert_eq!(tb.reduce(123), BucketReduction::Success);
         assert_eq!(tb.budget(), capacity - 123);
+        assert_eq!(tb.reduce(capacity), BucketReduction::Failure);
 
         thread::sleep(Duration::from_millis(123));
         assert_eq!(tb.reduce(1), BucketReduction::Success);
-        assert_eq!(tb.budget(), capacity - 1);
         assert_eq!(tb.reduce(100), BucketReduction::Success);
         assert_eq!(tb.reduce(capacity), BucketReduction::Failure);
 
@@ -643,12 +668,14 @@ mod tests {
         let bw = l.bandwidth.unwrap();
         assert_eq!(bw.capacity(), 1000);
         assert_eq!(bw.one_time_burst(), 1001);
+        assert_eq!(bw.initial_one_time_burst(), 1001);
         assert_eq!(bw.refill_time_ms(), 1002);
         assert_eq!(bw.budget(), 1000);
 
         let ops = l.ops.unwrap();
         assert_eq!(ops.capacity(), 1003);
         assert_eq!(ops.one_time_burst(), 1004);
+        assert_eq!(ops.initial_one_time_burst(), 1004);
         assert_eq!(ops.refill_time_ms(), 1005);
         assert_eq!(ops.budget(), 1003);
     }
