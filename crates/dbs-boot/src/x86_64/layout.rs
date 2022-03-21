@@ -54,6 +54,14 @@ pub const IRQ_MAX: u32 = 15;
 /// Address for the TSS setup.
 pub const KVM_TSS_ADDRESS: u64 = 0xfffb_d000;
 
+/// Global Descriptor Table Offset
+pub const BOOT_GDT_OFFSET: u64 = 0x500;
+/// Interrupt Descriptor Table Offset
+pub const BOOT_IDT_OFFSET: u64 = 0x520;
+
+/// Where BIOS/VGA magic would live on a real PC.
+pub const EBDA_START: u64 = 0x9fc00;
+
 /// Start address of the lower MMIO window.
 pub const MMIO_LOW_START: u64 = 3u64 << 30;
 /// End address (inclusive) of the lower MMIO window.
