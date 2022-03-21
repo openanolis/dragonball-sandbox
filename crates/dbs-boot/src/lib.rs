@@ -8,6 +8,7 @@
 //! This crate provides CPU architecture specific constants and utilities to abstract away CPU
 //! architecture specific details from the Dragonball Sandbox or other VMMs.
 
+use std::result;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 #[cfg(target_arch = "x86_64")]
@@ -25,3 +26,6 @@ pub struct InitrdConfig {
     /// Size of initrd in guest memory
     pub size: usize,
 }
+
+/// Type for returning public functions outcome.
+pub type Result<T> = result::Result<T, Error>;

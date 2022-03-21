@@ -31,7 +31,7 @@ pub const PAGE_SIZE: usize = 4096;
 // is prohibited.
 #[repr(transparent)]
 #[derive(Copy, Clone, Default)]
-pub struct BootParamsWrapper(bootparam::boot_params);
+pub struct BootParamsWrapper(pub bootparam::boot_params);
 
 // It is safe to initialize BootParamsWrap which is a wrapper over `boot_params` (a series of ints).
 unsafe impl ByteValued for BootParamsWrapper {}
@@ -60,7 +60,7 @@ pub enum Error {
     InitrdAddress,
 
     /// boot parameter setup fail.
-    #[error("write  boot parameter fail")]
+    #[error("write boot parameter fail")]
     BootParamSetup,
 
     /// Empty AddressSpace from parameters.
@@ -156,9 +156,35 @@ pub fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<GuestAddress, Err
     Ok(boot_pml4_addr)
 }
 
+/// Returns the memory address where the kernel could be loaded.
+pub fn get_kernel_start() -> u64 {
+    layout::HIMEM_START
+}
+
+/// Add an e820 region to the e820 map.
+/// Returns Ok(()) if successful, or an error if there is no space left in the map.
+pub fn add_e820_entry(
+    params: &mut bootparam::boot_params,
+    addr: u64,
+    size: u64,
+    mem_type: u32,
+) -> super::Result<()> {
+    if params.e820_entries >= params.e820_table.len() as u8 {
+        return Err(Error::E820Configuration);
+    }
+
+    params.e820_table[params.e820_entries as usize].addr = addr;
+    params.e820_table[params.e820_entries as usize].size = size;
+    params.e820_table[params.e820_entries as usize].type_ = mem_type;
+    params.e820_entries += 1;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bootparam::{boot_e820_entry, boot_params};
     use crate::layout::{PDE_START, PDPTE_START, PML4_START};
     use kvm_bindings::kvm_sregs;
     use kvm_ioctls::Kvm;
@@ -269,5 +295,45 @@ mod tests {
         .unwrap();
         let sregs: kvm_sregs = vcpu.get_sregs().unwrap();
         validate_page_tables(&gm, &sregs, Some(page_address));
+    }
+
+    #[test]
+    fn test_add_e820_entry() {
+        let e820_table = [(boot_e820_entry {
+            addr: 0x1,
+            size: 4,
+            type_: 1,
+        }); 128];
+
+        let expected_params = boot_params {
+            e820_table,
+            e820_entries: 1,
+            ..Default::default()
+        };
+
+        let mut params: boot_params = Default::default();
+        add_e820_entry(
+            &mut params,
+            e820_table[0].addr,
+            e820_table[0].size,
+            e820_table[0].type_,
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{:?}", params.e820_table[0]),
+            format!("{:?}", expected_params.e820_table[0])
+        );
+        assert_eq!(params.e820_entries, expected_params.e820_entries);
+
+        // Exercise the scenario where the field storing the length of the e820 entry table is
+        // is bigger than the allocated memory.
+        params.e820_entries = params.e820_table.len() as u8 + 1;
+        assert!(add_e820_entry(
+            &mut params,
+            e820_table[0].addr,
+            e820_table[0].size,
+            e820_table[0].type_
+        )
+        .is_err());
     }
 }
