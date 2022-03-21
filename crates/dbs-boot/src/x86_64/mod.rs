@@ -66,6 +66,18 @@ pub enum Error {
     /// Empty AddressSpace from parameters.
     #[error("Empty AddressSpace from parameters")]
     AddressSpace,
+
+    /// Writing PDPTE to RAM failed.
+    #[error("Writing PDPTE to RAM failed.")]
+    WritePDPTEAddress,
+
+    /// Writing PDE to RAM failed.
+    #[error("Writing PDE to RAM failed.")]
+    WritePDEAddress,
+
+    #[error("Writing PML4 to RAM failed.")]
+    /// Writing PML4 to RAM failed.
+    WritePML4Address,
 }
 
 /// Initialize the 1:1 identity mapping table for guest memory range [0..1G).
@@ -118,11 +130,42 @@ pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> Resu
     Ok(align_to_pagesize(lowmem_size - initrd_size))
 }
 
+/// Helps to initialize BP page table information for vcpu.
+/// Also, return the pml4 address for sregs setting and AP boot
+pub fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<GuestAddress, Error> {
+    // Puts PML4 right after zero page but aligned to 4k.
+    let boot_pml4_addr = GuestAddress(layout::PML4_START);
+    let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
+    let boot_pde_addr = GuestAddress(layout::PDE_START);
+
+    // Entry covering VA [0..512GB)
+    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
+        .map_err(|_| Error::WritePML4Address)?;
+
+    // Entry covering VA [0..1GB)
+    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
+        .map_err(|_| Error::WritePDPTEAddress)?;
+    // 512 2MB entries together covering VA [0..1GB). Note we are assuming
+    // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
+    for i in 0..512 {
+        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
+            .map_err(|_| Error::WritePDEAddress)?;
+    }
+
+    // return the pml4 address that could be used for AP boot up and later sreg setting process.
+    Ok(boot_pml4_addr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::layout::{PDE_START, PDPTE_START, PML4_START};
+    use kvm_bindings::kvm_sregs;
+    use kvm_ioctls::Kvm;
     use vm_memory::GuestMemoryMmap;
+
+    const BOOT_GDT_OFFSET: u64 = 0x500;
+    const BOOT_IDT_OFFSET: u64 = 0x520;
 
     fn read_u64(gm: &GuestMemoryMmap, offset: u64) -> u64 {
         let read_addr = GuestAddress(offset as u64);
@@ -175,5 +218,56 @@ mod tests {
             unsafe { std::ptr::addr_of!(params.0.hdr.kernel_alignment).read_unaligned() },
             KERNEL_MIN_ALIGNMENT_BYTES
         );
+    }
+
+    fn validate_page_tables(
+        gm: &GuestMemoryMmap,
+        sregs: &kvm_sregs,
+        existing_pgtable: Option<GuestAddress>,
+    ) {
+        assert_eq!(0xa003, read_u64(gm, PML4_START));
+        assert_eq!(0xb003, read_u64(gm, PDPTE_START));
+        for i in 0..512 {
+            assert_eq!((i << 21) + 0x83u64, read_u64(gm, PDE_START + (i * 8)));
+        }
+
+        if let Some(pgtable_base) = existing_pgtable {
+            assert_eq!(pgtable_base.raw_value(), sregs.cr3);
+        } else {
+            assert_eq!(PML4_START as u64, sregs.cr3);
+        }
+        assert!(sregs.cr4 & dbs_arch::regs::X86_CR4_PAE != 0);
+        assert!(sregs.cr0 & dbs_arch::regs::X86_CR0_PG != 0);
+    }
+
+    fn create_guest_mem() -> GuestMemoryMmap {
+        GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
+    }
+
+    #[test]
+    fn test_setup_page_tables() {
+        let kvm = Kvm::new().unwrap();
+        let vm = kvm.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let gm = create_guest_mem();
+        let gdt_table: [u64; layout::BOOT_GDT_MAX as usize] = [
+            gdt_entry(0, 0, 0),            // NULL
+            gdt_entry(0xa09b, 0, 0xfffff), // CODE
+            gdt_entry(0xc093, 0, 0xfffff), // DATA
+            gdt_entry(0x808b, 0, 0xfffff), // TSS
+        ];
+
+        let page_address = setup_bp_page_tables(&gm).unwrap();
+        dbs_arch::regs::setup_sregs(
+            &gm,
+            &vcpu,
+            page_address,
+            &gdt_table,
+            BOOT_GDT_OFFSET,
+            BOOT_IDT_OFFSET,
+        )
+        .unwrap();
+        let sregs: kvm_sregs = vcpu.get_sregs().unwrap();
+        validate_page_tables(&gm, &sregs, Some(page_address));
     }
 }
