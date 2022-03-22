@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-mod request;
+pub(crate) mod request;
+pub(crate) mod ufile;
 
 const BLK_DRIVER_NAME: &str = "virtio-blk";
