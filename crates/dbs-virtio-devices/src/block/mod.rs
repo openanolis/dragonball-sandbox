@@ -10,3 +10,7 @@ pub(crate) mod request;
 pub(crate) mod ufile;
 
 const BLK_DRIVER_NAME: &str = "virtio-blk";
+
+pub(crate) const SECTOR_SHIFT: u8 = 9;
+/// The size of sector
+pub const SECTOR_SIZE: u64 = (0x01u64) << (SECTOR_SHIFT as u64);
