@@ -2,14 +2,31 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io::{self, Seek, SeekFrom, Write};
 use std::ops::Deref;
+use std::result;
 
 use log::error;
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_queue::{Descriptor, DescriptorChain};
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
-use crate::{Error, Result};
+use crate::{
+    block::{ufile::Ufile, SECTOR_SHIFT, SECTOR_SIZE},
+    Error, Result,
+};
+
+/// Error executing request.
+#[derive(Debug)]
+pub(crate) enum ExecuteError {
+    BadRequest(Error),
+    Flush(io::Error),
+    Read(GuestMemoryError),
+    Seek(io::Error),
+    Write(GuestMemoryError),
+    GetDeviceID(GuestMemoryError),
+    Unsupported(u32),
+}
 
 /// Type of request from driver to device.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -208,6 +225,66 @@ impl Request {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn execute<M: GuestMemory + ?Sized>(
+        &self,
+        disk: &mut Box<dyn Ufile>,
+        mem: &M,
+        data_descs: &[IoDataDesc],
+        disk_id: &[u8],
+    ) -> result::Result<u32, ExecuteError> {
+        disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
+            .map_err(ExecuteError::Seek)?;
+        let mut len = 0;
+        for io in data_descs {
+            match self.request_type {
+                RequestType::In => {
+                    mem.read_from(GuestAddress(io.data_addr), disk, io.data_len)
+                        .map_err(ExecuteError::Read)?;
+                    len += io.data_len;
+                }
+                RequestType::Out => {
+                    mem.write_to(GuestAddress(io.data_addr), disk, io.data_len)
+                        .map_err(ExecuteError::Write)?;
+                }
+                RequestType::Flush => match disk.flush() {
+                    Ok(_) => {}
+                    Err(e) => return Err(ExecuteError::Flush(e)),
+                },
+                RequestType::GetDeviceID => {
+                    if io.data_len < disk_id.len() {
+                        return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                    }
+                    mem.write_slice(disk_id, GuestAddress(io.data_addr))
+                        .map_err(ExecuteError::GetDeviceID)?;
+                    // TODO: dragonball returns 0 here, check which value to return?
+                    return Ok(disk_id.len() as u32);
+                }
+                RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
+            };
+        }
+
+        Ok(len as u32)
+    }
+
+    fn check_capacity(
+        &self,
+        disk: &mut Box<dyn Ufile>,
+        data_descs: &[IoDataDesc],
+    ) -> result::Result<(), ExecuteError> {
+        for d in data_descs {
+            let mut top = (d.data_len as u64 + SECTOR_SIZE - 1) & !(SECTOR_SIZE - 1u64);
+
+            top = top
+                .checked_add(self.sector << SECTOR_SHIFT)
+                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+            if top > disk.get_capacity() {
+                return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+            }
+        }
+
         Ok(())
     }
 

@@ -133,6 +133,9 @@ pub enum Error {
     /// Invalid input parameter or status.
     #[error("invalid input parameter or status.")]
     InvalidInput,
+    /// The requested operation would cause a seek beyond disk end.
+    #[error("invalid offset.")]
+    InvalidOffset,
     /// Generic IO error
     #[error("IO: {0}.")]
     IOError(#[from] IOError),
