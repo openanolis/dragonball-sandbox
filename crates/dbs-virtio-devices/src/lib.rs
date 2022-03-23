@@ -150,9 +150,6 @@ pub enum Error {
     /// Error from Device activate.
     #[error("Device activate error: {0}")]
     ActivateError(#[from] ActivateError),
-    /// Internal unspecific error.
-    #[error("internal unspecific error")]
-    InternalError,
     /// Error from Interrupt.
     #[error("Interrupt error: {0}")]
     InterruptError(IOError),
