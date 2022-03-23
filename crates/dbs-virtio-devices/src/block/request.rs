@@ -30,7 +30,7 @@ pub(crate) enum ExecuteError {
 
 /// Type of request from driver to device.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum RequestType {
+pub(crate) enum RequestType {
     /// Read request.
     In,
     /// Write request.
@@ -101,11 +101,11 @@ pub struct IoDataDesc {
 #[derive(Clone, Debug)]
 pub struct Request {
     /// The type of the request.
-    request_type: RequestType,
+    pub(crate) request_type: RequestType,
     /// The offset of the request.
-    sector: u64,
-    status_addr: GuestAddress,
-    request_index: u16,
+    pub(crate) sector: u64,
+    pub(crate) status_addr: GuestAddress,
+    pub(crate) request_index: u16,
 }
 
 impl Request {
@@ -180,7 +180,7 @@ impl Request {
         Ok(req)
     }
 
-    fn check_request(&self, desc: Descriptor, max_size: u32) -> Result<()> {
+    pub(crate) fn check_request(&self, desc: Descriptor, max_size: u32) -> Result<()> {
         match self.request_type {
             RequestType::Out => {
                 if desc.is_write_only() {
@@ -228,7 +228,7 @@ impl Request {
         Ok(())
     }
 
-    fn execute<M: GuestMemory + ?Sized>(
+    pub(crate) fn execute<M: GuestMemory + ?Sized>(
         &self,
         disk: &mut Box<dyn Ufile>,
         mem: &M,
@@ -269,7 +269,7 @@ impl Request {
         Ok(len as u32)
     }
 
-    fn check_capacity(
+    pub(crate) fn check_capacity(
         &self,
         disk: &mut Box<dyn Ufile>,
         data_descs: &[IoDataDesc],
@@ -288,13 +288,13 @@ impl Request {
         Ok(())
     }
 
-    fn update_status<M: GuestMemory + ?Sized>(&self, mem: &M, status: u32) {
+    pub(crate) fn update_status<M: GuestMemory + ?Sized>(&self, mem: &M, status: u32) {
         // Safe to unwrap because we have validated request.status_addr in parse()
         mem.write_obj(status as u8, self.status_addr).unwrap();
     }
 
     // Return total IO length of all segments. Assume the req has been checked and is valid.
-    fn data_len(&self, data_descs: &[IoDataDesc]) -> u32 {
+    pub(crate) fn data_len(&self, data_descs: &[IoDataDesc]) -> u32 {
         let mut len = 0;
         for d in data_descs {
             len += d.data_len;
