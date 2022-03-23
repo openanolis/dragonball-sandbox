@@ -70,12 +70,12 @@ pub const FDT_MAX_SIZE: usize = 0x20_0000;
 // * a multiple of 32.
 // We are setting up our interrupt controller to support a maximum of 128 interrupts.
 /// First usable interrupt on aarch64.
-pub const IRQ_BASE: u32 = 32;
+pub const IRQ_BASE: u32 = db_arch::gic::IRQ_BASE;
 
 /// Last usable interrupt on aarch64.
-pub const IRQ_MAX: u32 = 159;
+pub const IRQ_MAX: u32 = db_arch::gic::IRQ_MAX;
 
 /// Below this address will reside the GIC, above this address will reside the MMIO devices.
-pub const MAPPED_IO_START: u64 = 1 << 30; // 1 GB
+pub const MAPPED_IO_START: u64 = db_arch::gic::GIC_REG_END_ADDRESS; // 1 GB
 /// End address (inclusive) of the MMIO window.
 pub const MAPPED_IO_END: u64 = (2 << 30) - 1; // 1 GB
