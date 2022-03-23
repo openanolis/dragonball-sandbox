@@ -235,6 +235,7 @@ impl Request {
         data_descs: &[IoDataDesc],
         disk_id: &[u8],
     ) -> result::Result<u32, ExecuteError> {
+        self.check_capacity(disk, data_descs)?;
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
         let mut len = 0;

@@ -39,6 +39,7 @@ impl IoEngine for Aio {
         &self.aio_evtfd
     }
 
+    // NOTE: aio doesn't seem to support negative offsets.
     fn readv(
         &mut self,
         offset: i64,
@@ -105,5 +106,69 @@ impl IoEngine for Aio {
             }
         }
         Ok(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn aio_engine() {
+        let temp_file = TempFile::new().unwrap();
+        let mut aio = Aio::new(temp_file.as_file().as_raw_fd(), 128).unwrap();
+        let buf = vec![0xffu8; 0x1000];
+        aio.writev(
+            0,
+            &mut vec![IoDataDesc {
+                data_addr: buf.as_ptr() as u64,
+                data_len: 0x10,
+            }],
+            0x123,
+        )
+        .unwrap();
+        let com_res = aio.complete().unwrap();
+        for cr in com_res {
+            assert_eq!(cr.0, 0x123);
+            assert_eq!(cr.1, 0x10);
+        }
+        let mut rbuf = vec![0u8; 0x100];
+        let rn = temp_file.as_file().read(&mut rbuf).unwrap();
+        assert_eq!(rn, 0x10);
+        assert_eq!(&rbuf[..0x10], &vec![0xff; 0x10]);
+
+        //temp_file.as_file().seek(SeekFrom::End(0x20)).unwrap();
+        temp_file.as_file().seek(SeekFrom::Start(0x120)).unwrap();
+        temp_file.as_file().write_all(&[0xeeu8; 0x20]).unwrap();
+
+        let rbuf = vec![0u8; 0x100];
+        let ret = aio.readv(
+            -0x20,
+            &mut vec![IoDataDesc {
+                data_addr: rbuf.as_ptr() as u64,
+                data_len: 0x20,
+            }],
+            0x456,
+        );
+        assert_eq!(ret.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        aio.readv(
+            0x120,
+            &mut vec![IoDataDesc {
+                data_addr: rbuf.as_ptr() as u64,
+                data_len: 0x20,
+            }],
+            0x456,
+        )
+        .unwrap();
+        let com_res = aio.complete().unwrap();
+        for cr in com_res {
+            assert_eq!(cr.0, 0x456);
+            assert_eq!(cr.1, 0x20);
+        }
+        assert_eq!(&rbuf[..0x20], &vec![0xee; 0x20]);
     }
 }
