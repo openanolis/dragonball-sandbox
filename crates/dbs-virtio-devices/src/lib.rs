@@ -138,6 +138,9 @@ pub enum Error {
     /// The requested operation would cause a seek beyond disk end.
     #[error("invalid offset.")]
     InvalidOffset,
+    /// Internal unspecific error
+    #[error("internal unspecific error..")]
+    InternalError,
     /// Generic IO error
     #[error("IO: {0}.")]
     IOError(#[from] IOError),
