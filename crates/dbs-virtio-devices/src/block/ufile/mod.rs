@@ -1,6 +1,9 @@
 // Copyright (C) 2019 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+mod localfile;
+pub use self::localfile::LocalFile;
+
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::io::RawFd;
 
@@ -37,4 +40,3 @@ pub trait Ufile: Read + Write + Seek + Send {
     /// policy, please do help to update BlockEpollHandler::io_complete().
     fn io_complete(&mut self) -> io::Result<Vec<(u16, u32)>>;
 }
-
