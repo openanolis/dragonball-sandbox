@@ -6,11 +6,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-pub(crate) mod request;
-pub(crate) mod ufile;
+mod handler;
+pub(crate) use self::handler::*;
+mod request;
+pub(crate) use self::request::*;
+mod ufile;
+pub(crate) use self::ufile::*;
 
-const BLK_DRIVER_NAME: &str = "virtio-blk";
+use dbs_utils::rate_limiter::BucketUpdate;
+
+/// Block deriver name.
+pub const BLK_DRIVER_NAME: &str = "virtio-blk";
 
 pub(crate) const SECTOR_SHIFT: u8 = 9;
 /// The size of sector
 pub const SECTOR_SIZE: u64 = (0x01u64) << (SECTOR_SHIFT as u64);
+
+pub(crate) enum KillEvent {
+    Kill,
+    BucketUpdate(BucketUpdate, BucketUpdate),
+}
