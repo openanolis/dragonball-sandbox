@@ -161,3 +161,103 @@ impl IoEngine for IoUring {
         Ok(completion_list)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::epoll_helper::*;
+
+    struct TestHandler;
+
+    impl EpollHelperHandler for TestHandler {
+        fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+            let slot = event.data as u32;
+            slot == 0xfeed
+        }
+    }
+
+    #[test]
+    fn iouring_engine() {
+        if !IoUring::is_supported() {
+            return;
+        }
+        let temp_file = TempFile::new().unwrap();
+        let mut uring = IoUring::new(temp_file.as_file().as_raw_fd(), 128).unwrap();
+
+        let mut helper = EpollHelper::new().unwrap();
+        helper
+            .add_event(uring.event_fd().as_raw_fd(), 0xfeed)
+            .unwrap();
+
+        let mut handler = TestHandler;
+
+        let buf = vec![0xffu8; 0x1000];
+        uring
+            .writev(
+                0,
+                &mut vec![IoDataDesc {
+                    data_addr: buf.as_ptr() as u64,
+                    data_len: 0x10,
+                }],
+                0x123,
+            )
+            .unwrap();
+
+        helper.run(&mut handler).unwrap();
+
+        let com_res = uring.complete().unwrap();
+        for cr in com_res {
+            assert_eq!(cr.0, 0x123);
+            assert_eq!(cr.1, 0x10);
+        }
+        let mut rbuf = vec![0u8; 0x100];
+        let rn = temp_file.as_file().read(&mut rbuf).unwrap();
+        assert_eq!(rn, 0x10);
+        assert_eq!(&rbuf[..0x10], &vec![0xff; 0x10]);
+
+        //temp_file.as_file().seek(SeekFrom::End(0x20)).unwrap();
+        temp_file.as_file().seek(SeekFrom::Start(0x120)).unwrap();
+        temp_file.as_file().write_all(&[0xeeu8; 0x20]).unwrap();
+
+        let rbuf = vec![0u8; 0x100];
+        let ret = uring.readv(
+            -0x120,
+            &mut vec![IoDataDesc {
+                data_addr: rbuf.as_ptr() as u64,
+                data_len: 0x20,
+            }],
+            0x456,
+        );
+        assert_eq!(ret.unwrap(), 1);
+        helper.run(&mut handler).unwrap();
+        let com_res = uring.complete().unwrap();
+        for cr in com_res {
+            assert_eq!(cr.0, 0x456);
+            assert_eq!(cr.1, -22);
+        }
+
+        uring
+            .readv(
+                0x120,
+                &mut vec![IoDataDesc {
+                    data_addr: rbuf.as_ptr() as u64,
+                    data_len: 0x20,
+                }],
+                0x456,
+            )
+            .unwrap();
+
+        helper.run(&mut handler).unwrap();
+
+        let com_res = uring.complete().unwrap();
+        for cr in com_res {
+            assert_eq!(cr.0, 0x456);
+            assert_eq!(cr.1, 0x20);
+        }
+        assert_eq!(&rbuf[..0x20], &vec![0xee; 0x20]);
+    }
+}

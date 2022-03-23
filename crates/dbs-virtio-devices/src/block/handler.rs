@@ -28,9 +28,9 @@ use crate::{
 use super::{ExecuteError, IoDataDesc, KillEvent, Request, RequestType, Ufile, SECTOR_SHIFT};
 
 // New descriptors are pending on the virtio queue.
-const QUEUE_AVAIL_EVENT: u32 = 0;
+pub const QUEUE_AVAIL_EVENT: u32 = 0;
 // Rate limiter budget is now available.
-const RATE_LIMITER_EVENT: u32 = 1;
+pub const RATE_LIMITER_EVENT: u32 = 1;
 // Some AIO requests have been completed. Used to support Linux AIO/TDC AIO.
 pub const END_IO_EVENT: u32 = 2;
 // trigger the thread to deal with some specific event
@@ -51,7 +51,7 @@ pub(crate) struct InnerBlockEpollHandler<AS: DbsGuestAddressSpace, Q: QueueState
 }
 
 impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
-    fn process_queue(&mut self) -> bool {
+    pub(crate) fn process_queue(&mut self) -> bool {
         let as_mem = self.vm_as.memory();
         let mem = as_mem.deref();
         let mut queue = self.queue.queue_mut().lock();
@@ -121,9 +121,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
                         mem.deref(),
                     ) {
                         Ok(num_bytes_to_mem) => {
-                            if num_bytes_to_mem != 0 {
-                                used_desc_vec.push((index, num_bytes_to_mem));
-                            }
+                            used_desc_vec.push((index, num_bytes_to_mem));
                         }
                         Err(_e) => {
                             //METRICS.block.execute_fails.inc();
@@ -309,7 +307,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
         }
     }
 
-    fn io_complete(&mut self) -> Result<()> {
+    pub(crate) fn io_complete(&mut self) -> Result<()> {
         let as_mem = self.vm_as.memory();
         let mem: &AS::M = as_mem.deref();
         let iovs = self.disk_image.io_complete()?;
