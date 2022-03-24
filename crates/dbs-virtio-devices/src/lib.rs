@@ -142,7 +142,7 @@ pub enum Error {
     #[error("invalid offset.")]
     InvalidOffset,
     /// Internal unspecific error
-    #[error("internal unspecific error..")]
+    #[error("internal unspecific error.")]
     InternalError,
     /// Generic IO error
     #[error("IO: {0}.")]
@@ -162,13 +162,28 @@ pub enum Error {
     /// Guest gave us an invalid guest memory address.
     #[error("invalid guest memory address. {0:?}")]
     InvalidGuestAddress(GuestAddress),
+    /// Failed creating a new MmapRegion instance.
+    #[error("new mmap region failed: {0}")]
+    NewMmapRegion(vm_memory::mmap::MmapRegionError),
+    /// Failed setting kvm user memory region.
+    #[error("set user memory region failed: {0}")]
+    SetUserMemoryRegion(kvm_ioctls::Error),
+    /// Inserting mmap region failed.
+    #[error("inserting mmap region failed: {0}")]
+    InsertMmap(vm_memory::mmap::Error),
 
     #[cfg(feature = "virtio-vsock")]
     #[error("virtio-vsock error: {0}")]
     VirtioVsockError(#[from] self::vsock::VsockError),
+
     #[cfg(feature = "virtio-net")]
     #[error("Virtio-net error: {0}")]
     VirtioNetError(#[from] crate::net::NetError),
+
+    #[cfg(feature = "virtio-fs")]
+    /// Error from Virtio fs.
+    #[error("virtio-fs error: {0}")]
+    VirtioFs(fs::Error),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
