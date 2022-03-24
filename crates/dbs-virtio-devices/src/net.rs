@@ -18,10 +18,12 @@ use dbs_device::resources::ResourceConstraint;
 use dbs_utils::epoll_manager::{
     EpollManager, EventOps, EventSet, Events, MutEventSubscriber, SubscriberId,
 };
+use dbs_utils::metric::{IncMetric, SharedIncMetric};
 use dbs_utils::net::{net_gen, MacAddr, Tap, MAC_ADDR_LEN};
 use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter, TokenType};
 use libc;
 use log::{debug, error, info, trace};
+use serde::Serialize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_queue::{QueueState, QueueStateT};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryRegion, GuestRegionMmap};
@@ -67,6 +69,39 @@ pub enum NetError {
     /// Setting vnet header size failed.
     #[error("set tap device vnet header size failed: {0}")]
     TapSetVnetHdrSize(#[source] dbs_utils::net::TapError),
+}
+
+/// Metrics specific to the net device.
+#[derive(Default, Serialize)]
+pub struct NetDeviceMetrics {
+    /// Number of times when activate failed on a network device.
+    pub activate_fails: SharedIncMetric,
+    /// Number of times when interacting with the space config of a network device failed.
+    pub cfg_fails: SharedIncMetric,
+    /// Number of times when handling events on a network device failed.
+    pub event_fails: SharedIncMetric,
+    /// Number of events associated with the receiving queue.
+    pub rx_queue_event_count: SharedIncMetric,
+    /// Number of events associated with the rate limiter installed on the receiving path.
+    pub rx_event_rate_limiter_count: SharedIncMetric,
+    /// Number of events received on the associated tap.
+    pub rx_tap_event_count: SharedIncMetric,
+    /// Number of bytes received.
+    pub rx_bytes_count: SharedIncMetric,
+    /// Number of packets received.
+    pub rx_packets_count: SharedIncMetric,
+    /// Number of errors while receiving data.
+    pub rx_fails: SharedIncMetric,
+    /// Number of transmitted bytes.
+    pub tx_bytes_count: SharedIncMetric,
+    /// Number of errors while transmitting data.
+    pub tx_fails: SharedIncMetric,
+    /// Number of transmitted packets.
+    pub tx_packets_count: SharedIncMetric,
+    /// Number of events associated with the transmitting queue.
+    pub tx_queue_event_count: SharedIncMetric,
+    /// Number of events associated with the rate limiter installed on the transmitting path.
+    pub tx_rate_limiter_event_count: SharedIncMetric,
 }
 
 struct TxVirtio<Q: QueueStateT> {
@@ -130,6 +165,7 @@ pub(crate) struct NetEpollHandler<
     id: String,
     patch_rate_limiter_fd: EventFd,
     receiver: Option<mpsc::Receiver<(BucketUpdate, BucketUpdate, BucketUpdate, BucketUpdate)>>,
+    pub metrics: Arc<NetDeviceMetrics>,
 }
 
 impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
@@ -198,6 +234,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                 match next_desc {
                     Some(desc) => {
                         if !desc.is_write_only() {
+                            self.metrics.rx_fails.inc();
                             debug!("{}: receiving buffer is not write-only", self.id);
                             break;
                         }
@@ -207,6 +244,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                         match mem.write(source_slice, desc.addr()) {
                             Ok(sz) => write_count += sz,
                             Err(e) => {
+                                self.metrics.rx_fails.inc();
                                 debug!("{}: failed to write guest memory slice, {:?}", self.id, e);
                                 break;
                             }
@@ -218,6 +256,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                         next_desc = desc_chain.next();
                     }
                     None => {
+                        self.metrics.rx_fails.inc();
                         debug!("{}: receiving buffer is too small", self.id);
                         break;
                     }
@@ -236,6 +275,8 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
             return false;
         }
 
+        self.metrics.rx_bytes_count.add(write_count);
+        self.metrics.rx_packets_count.inc();
         true
     }
 
@@ -243,9 +284,16 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
     //
     // `frame_buf` should contain the frame bytes in a slice of exact length.
     // Returns whether MMDS consumed the frame.
-    fn write_to_tap(frame_buf: &[u8], tap: &mut Tap) {
-        if let Err(e) = tap.write(frame_buf) {
-            error!("{}: failed to write to tap, {:?}", NET_DRIVER_NAME, e);
+    fn write_to_tap(frame_buf: &[u8], tap: &mut Tap, metrics: &Arc<NetDeviceMetrics>) {
+        match tap.write(frame_buf) {
+            Ok(_) => {
+                metrics.tx_bytes_count.add(frame_buf.len());
+                metrics.tx_packets_count.inc();
+            }
+            Err(e) => {
+                metrics.tx_fails.inc();
+                error!("{}: failed to write to tap, {:?}", NET_DRIVER_NAME, e);
+            }
         }
     }
 
@@ -270,6 +318,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                     match e.raw_os_error() {
                         Some(err) if err == libc::EAGAIN => (),
                         _ => {
+                            self.metrics.rx_fails.inc();
                             error!("{}: failed to read tap: {:?}", self.id, e);
                             return Err(e.into());
                         }
@@ -368,13 +417,18 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                     match read_result {
                         Ok(sz) => read_count += sz,
                         Err(e) => {
+                            self.metrics.tx_fails.inc();
                             error!("{}: failed to read slice: {:?}", self.id, e);
                             break;
                         }
                     }
                 }
 
-                Self::write_to_tap(&self.tx.frame_buf[..read_count], &mut self.tap);
+                Self::write_to_tap(
+                    &self.tx.frame_buf[..read_count],
+                    &mut self.tap,
+                    &self.metrics,
+                );
 
                 self.tx.used_desc_heads[used_count] = header_index;
                 used_count += 1;
@@ -422,17 +476,22 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
         let mem = guard.deref();
         match events.data() {
             RX_QUEUE_EVENT => {
+                self.metrics.rx_queue_event_count.inc();
                 if let Err(e) = self.rx.queue.consume_event() {
+                    self.metrics.event_fails.inc();
                     error!("{}: failed to get rx queue event, {:?}", self.id, e);
                 } else if !self.rx.rate_limiter.is_blocked() {
                     // If the limiter is not blocked, resume the receiving of bytes.
                     // There should be a buffer available now to receive the frame into.
                     if let Err(e) = self.resume_rx(mem) {
+                        self.metrics.event_fails.inc();
                         error!("{}: failed to resume rx_queue event, {:?}", self.id, e);
                     }
                 }
             }
             RX_TAP_EVENT => {
+                self.metrics.rx_tap_event_count.inc();
+
                 // While limiter is blocked, don't process any more incoming.
                 if self.rx.rate_limiter.is_blocked() {
                     // TODO: this may cause busy loop when rate limiting.
@@ -443,6 +502,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
                         self.rx.deferred_frame = false;
                         // Process more packats from the tap device.
                         if let Err(e) = self.process_rx(mem) {
+                            self.metrics.event_fails.inc();
                             error!("{}: failed to process rx queue, {:?}", self.id, e);
                         }
                     } else if self.rx.deferred_irqs {
@@ -456,11 +516,14 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
                 }
             }
             TX_QUEUE_EVENT => {
+                self.metrics.tx_queue_event_count.inc();
                 if let Err(e) = self.tx.queue.consume_event() {
+                    self.metrics.event_fails.inc();
                     error!("{}: failed to get tx queue event: {:?}", self.id, e);
                 // If the limiter is not blocked, continue transmitting bytes.
                 } else if !self.tx.rate_limiter.is_blocked() {
                     if let Err(e) = self.process_tx(mem) {
+                        self.metrics.event_fails.inc();
                         error!("{}: failed to process tx queue, {:?}", self.id, e);
                     }
                 }
@@ -468,14 +531,17 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
             RX_RATE_LIMITER_EVENT => {
                 // Upon rate limiter event, call the rate limiter handler and restart processing
                 // the rx queue.
+                self.metrics.rx_event_rate_limiter_count.inc();
                 match self.rx.rate_limiter.event_handler() {
                     // There might be enough budget now to receive the frame.
                     Ok(_) => {
                         if let Err(e) = self.resume_rx(mem) {
+                            self.metrics.event_fails.inc();
                             error!("{}: failed to resume rx, {:?}", self.id, e);
                         }
                     }
                     Err(e) => {
+                        self.metrics.event_fails.inc();
                         error!("{}: failed to get rx rate-limiter event: {:?}", self.id, e);
                     }
                 }
@@ -483,14 +549,17 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
             TX_RATE_LIMITER_EVENT => {
                 // Upon rate limiter event, call the rate limiter handler and restart processing
                 // the tx queue.
+                self.metrics.tx_rate_limiter_event_count.inc();
                 match self.tx.rate_limiter.event_handler() {
                     // There might be enough budget now to send the frame.
                     Ok(_) => {
                         if let Err(e) = self.process_tx(mem) {
+                            self.metrics.event_fails.inc();
                             error!("{}: failed to resume tx, {:?}", self.id, e);
                         }
                     }
                     Err(e) => {
+                        self.metrics.event_fails.inc();
                         error!("{}: failed to get tx rate-limiter event, {:?}", self.id, e);
                     }
                 }
@@ -578,6 +647,7 @@ pub struct Net<AS: GuestAddressSpace> {
     phantom: PhantomData<AS>,
     patch_rate_limiter_fd: EventFd,
     sender: Option<mpsc::Sender<(BucketUpdate, BucketUpdate, BucketUpdate, BucketUpdate)>>,
+    metrics: Arc<NetDeviceMetrics>,
 }
 
 impl<AS: GuestAddressSpace> Net<AS> {
@@ -639,6 +709,7 @@ impl<AS: GuestAddressSpace> Net<AS> {
             phantom: PhantomData,
             patch_rate_limiter_fd: EventFd::new(0).unwrap(),
             sender: None,
+            metrics: Arc::new(NetDeviceMetrics::default()),
         })
     }
 
@@ -736,11 +807,20 @@ where
         trace!(target: "virtio-net", "{}: VirtioDevice::activate()", self.id);
         // Do not support control queue and multi queue.
         if config.queues.len() != 2 {
+            self.metrics.activate_fails.inc();
             return Err(ActivateError::InvalidParam);
         }
 
-        self.device_info.check_queue_sizes(&config.queues[..])?;
-        let tap = self.tap.take().ok_or_else(|| ActivateError::InvalidParam)?;
+        self.device_info
+            .check_queue_sizes(&config.queues[..])
+            .map_err(|e| {
+                self.metrics.activate_fails.inc();
+                e
+            })?;
+        let tap = self.tap.take().ok_or_else(|| {
+            self.metrics.activate_fails.inc();
+            ActivateError::InvalidParam
+        })?;
         let (sender, receiver) = mpsc::channel();
         self.sender = Some(sender);
         let rx_queue = config.queues.remove(0);
@@ -757,6 +837,7 @@ where
             id: self.id.clone(),
             patch_rate_limiter_fd,
             receiver: Some(receiver),
+            metrics: self.metrics.clone(),
         });
 
         self.subscriber_id = Some(self.device_info.register_event_handler(handler));
