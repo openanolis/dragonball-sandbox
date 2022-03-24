@@ -862,3 +862,554 @@ where
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    use dbs_device::resources::DeviceResources;
+    use dbs_interrupt::NoopNotifier;
+    use dbs_utils::epoll_manager::SubscriberOps;
+    use dbs_utils::rate_limiter::TokenBucket;
+    use kvm_ioctls::Kvm;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+
+    use super::*;
+    use crate::tests::{VirtQueue, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+
+    static NEXT_IP: AtomicUsize = AtomicUsize::new(1);
+
+    #[allow(dead_code)]
+    const MAX_REQ_SIZE: u32 = 0x10000;
+
+    fn create_net_epoll_handler(id: String) -> NetEpollHandler<Arc<GuestMemoryMmap>> {
+        let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let rx = RxVirtio::new(
+            VirtioQueueConfig::create(256, 0).unwrap(),
+            RateLimiter::default(),
+        );
+        let tx = TxVirtio::new(
+            VirtioQueueConfig::create(256, 0).unwrap(),
+            RateLimiter::default(),
+        );
+        let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
+        let queues = vec![VirtioQueueConfig::create(256, 0).unwrap()];
+
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let resources = DeviceResources::new();
+        let config = VirtioDeviceConfig::new(
+            mem,
+            vm_fd,
+            resources,
+            queues,
+            None,
+            Arc::new(NoopNotifier::new()),
+        );
+        NetEpollHandler {
+            tap,
+            rx,
+            tx,
+            config,
+            id,
+            patch_rate_limiter_fd: EventFd::new(0).unwrap(),
+            receiver: None,
+            metrics: Arc::new(NetDeviceMetrics::default()),
+        }
+    }
+
+    #[test]
+    fn test_net_virtio_device_normal() {
+        let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let epoll_mgr = EpollManager::default();
+
+        let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+            tap,
+            None,
+            Arc::new(vec![128]),
+            epoll_mgr,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::device_type(
+                &dev
+            ),
+            TYPE_NET
+        );
+        let queue_size = vec![128];
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::queue_max_sizes(
+                &dev
+            ),
+            &queue_size[..]
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 0),
+            dev.device_info.get_avail_features(0)
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 1),
+            dev.device_info.get_avail_features(1)
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 2),
+            dev.device_info.get_avail_features(2)
+        );
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::set_acked_features(
+            &mut dev, 2, 0,
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 2),
+            0
+        );
+        let mut config: [u8; 1] = [0];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut dev,
+            0,
+            &mut config,
+        );
+        let config: [u8; 16] = [0; 16];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::write_config(
+            &mut dev, 0, &config,
+        );
+    }
+
+    #[test]
+    fn test_net_virtio_device_active() {
+        let epoll_mgr = EpollManager::default();
+        {
+            // config queue size is not 2
+            let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+                tap,
+                None,
+                Arc::new(vec![128]),
+                epoll_mgr.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues = Vec::new();
+
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
+
+            matches!(dev.activate(config), Err(ActivateError::InvalidParam));
+        }
+        {
+            // check queue sizes error
+            let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+                tap,
+                None,
+                Arc::new(vec![128]),
+                epoll_mgr.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues = vec![
+                VirtioQueueConfig::create(0, 0).unwrap(),
+                VirtioQueueConfig::create(0, 0).unwrap(),
+            ];
+
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
+
+            matches!(dev.activate(config), Err(ActivateError::InvalidParam));
+        }
+        {
+            // test no tap
+            let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+                tap,
+                None,
+                Arc::new(vec![128, 128]),
+                epoll_mgr.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            dev.tap = None;
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues = vec![
+                VirtioQueueConfig::create(128, 0).unwrap(),
+                VirtioQueueConfig::create(128, 0).unwrap(),
+            ];
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
+
+            matches!(dev.activate(config), Err(ActivateError::InvalidParam));
+        }
+        {
+            // Ok
+            let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+                tap,
+                None,
+                Arc::new(vec![128, 128]),
+                epoll_mgr,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues = vec![
+                VirtioQueueConfig::create(128, 0).unwrap(),
+                VirtioQueueConfig::create(128, 0).unwrap(),
+            ];
+
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
+
+            assert!(dev.activate(config).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_net_set_patch_rate_limiters() {
+        let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
+        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let epoll_mgr = EpollManager::default();
+
+        let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
+            tap,
+            None,
+            Arc::new(vec![128]),
+            epoll_mgr,
+            None,
+            None,
+        )
+        .unwrap();
+
+        //No sender
+        assert!(dev
+            .set_patch_rate_limiters(
+                BucketUpdate::None,
+                BucketUpdate::None,
+                BucketUpdate::None,
+                BucketUpdate::None
+            )
+            .is_err());
+
+        let (sender, _receiver) = mpsc::channel();
+        dev.sender = Some(sender);
+        assert!(dev
+            .set_patch_rate_limiters(
+                BucketUpdate::None,
+                BucketUpdate::None,
+                BucketUpdate::None,
+                BucketUpdate::None
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn test_net_get_patch_rate_limiters() {
+        let mut handler = create_net_epoll_handler("test_1".to_string());
+        let tokenbucket = TokenBucket::new(1, 1, 4);
+
+        //update rx
+        handler.get_patch_rate_limiters(
+            BucketUpdate::None,
+            BucketUpdate::Update(tokenbucket.clone()),
+            BucketUpdate::None,
+            BucketUpdate::None,
+        );
+        assert_eq!(handler.rx.rate_limiter.ops().unwrap(), &tokenbucket);
+
+        //update tx
+        handler.get_patch_rate_limiters(
+            BucketUpdate::None,
+            BucketUpdate::None,
+            BucketUpdate::None,
+            BucketUpdate::Update(tokenbucket.clone()),
+        );
+        assert_eq!(handler.tx.rate_limiter.ops().unwrap(), &tokenbucket);
+    }
+
+    #[test]
+    fn test_net_epoll_handler_handle_event() {
+        let handler = create_net_epoll_handler("test_1".to_string());
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_net_epoll_handler("test_2".to_string());
+
+        // test for RX_QUEUE_EVENT
+        let events = Events::with_data(&event_fd, RX_QUEUE_EVENT, event_set);
+        handler.process(events, &mut event_op);
+        handler.config.queues[0].generate_event().unwrap();
+        handler.process(events, &mut event_op);
+
+        // test for TX_QUEUE_EVENT
+        let events = Events::with_data(&event_fd, TX_QUEUE_EVENT, event_set);
+        handler.process(events, &mut event_op);
+        handler.config.queues[0].generate_event().unwrap();
+        handler.process(events, &mut event_op);
+
+        // test for RX_TAP_EVENT
+        let events = Events::with_data(&event_fd, RX_TAP_EVENT, event_set);
+        handler.process(events, &mut event_op);
+
+        // test for RX&TX RATE_LIMITER_EVENT
+        let events = Events::with_data(&event_fd, RX_RATE_LIMITER_EVENT, event_set);
+        handler.process(events, &mut event_op);
+        let events = Events::with_data(&event_fd, TX_RATE_LIMITER_EVENT, event_set);
+        handler.process(events, &mut event_op);
+
+        // test for PATCH_RATE_LIMITER_EVENT
+        let events = Events::with_data(&event_fd, PATCH_RATE_LIMITER_EVENT, event_set);
+        handler.process(events, &mut event_op);
+    }
+
+    #[test]
+    fn test_net_epoll_handler_handle_unknown_event() {
+        let handler = create_net_epoll_handler("test_1".to_string());
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_net_epoll_handler("test_2".to_string());
+
+        // test for unknown event
+        let events = Events::with_data(&event_fd, NET_EVENTS_COUNT + 10, event_set);
+        handler.process(events, &mut event_op);
+    }
+
+    #[test]
+    fn test_net_epoll_handler_process_queue() {
+        {
+            let mut handler = create_net_epoll_handler("test_1".to_string());
+
+            let m = &handler.config.vm_as.clone();
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+            vq.avail.ring(0).store(0);
+            vq.avail.idx().store(1);
+            let q = vq.create_queue();
+            vq.dtable(0).set(0x1000, 0x1000, VIRTQ_DESC_F_NEXT, 1);
+            vq.dtable(1)
+                .set(0x2000, 0x1000, VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE, 2);
+            vq.dtable(2).set(0x3000, 1, VIRTQ_DESC_F_WRITE, 1);
+
+            handler.config.queues = vec![VirtioQueueConfig::new(
+                q,
+                Arc::new(EventFd::new(0).unwrap()),
+                Arc::new(NoopNotifier::new()),
+                0,
+            )];
+            assert!(handler.process_rx(m).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_net_bandwidth_rate_limiter() {
+        let handler = create_net_epoll_handler("test_1".to_string());
+
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_net_epoll_handler("test_2".to_string());
+        let m = &handler.config.vm_as.clone();
+
+        // Test TX bandwidth rate limiting
+        {
+            // create bandwidth rate limiter
+            let mut rl = RateLimiter::new(0x1000, 0, 100, 0, 0, 0).unwrap();
+            // use up the budget
+            assert!(rl.consume(0x1000, TokenType::Bytes));
+
+            // set this tx rate limiter to be used
+            handler.tx.rate_limiter = rl;
+            // try doing TX
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+
+            let q = vq.create_queue();
+
+            vq.avail.idx().store(1);
+            vq.avail.ring(0).store(0);
+            vq.dtable(0).set(0x2000, 0x1000, 0, 0);
+            handler.tx.queue.queue = q;
+
+            let events = Events::with_data(&event_fd, TX_QUEUE_EVENT, event_set);
+            assert!(handler.tx.queue.generate_event().is_ok());
+            handler.process(events, &mut event_op);
+            assert!(handler.tx.rate_limiter.is_blocked());
+
+            thread::sleep(Duration::from_millis(200));
+
+            let events = Events::with_data(&event_fd, TX_RATE_LIMITER_EVENT, event_set);
+            handler.process(events, &mut event_op);
+            assert!(!handler.tx.rate_limiter.is_blocked());
+        }
+        // Test RX bandwidth rate limiting
+        {
+            // create bandwidth rate limiter
+            let mut rl = RateLimiter::new(0x1000, 0, 100, 0, 0, 0).unwrap();
+            // use up the budget
+            assert!(rl.consume(0x1000, TokenType::Bytes));
+
+            // set this rx rate limiter to be used
+            handler.rx.rate_limiter = rl;
+            // try doing RX
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+            vq.avail.ring(0).store(0);
+            vq.avail.idx().store(1);
+            vq.dtable(0).set(0x2000, 0x1000, VIRTQ_DESC_F_WRITE, 0);
+
+            let q = vq.create_queue();
+            handler.rx.queue.queue = q;
+
+            handler.rx.deferred_frame = true;
+            handler.rx.bytes_read = 0x1000;
+
+            let events = Events::with_data(&event_fd, RX_QUEUE_EVENT, event_set);
+            assert!(handler.rx.queue.generate_event().is_ok());
+            handler.process(events, &mut event_op);
+            assert!(handler.rx.rate_limiter.is_blocked());
+
+            thread::sleep(Duration::from_millis(200));
+
+            let events = Events::with_data(&event_fd, RX_RATE_LIMITER_EVENT, event_set);
+            handler.process(events, &mut event_op);
+            assert!(!handler.rx.rate_limiter.is_blocked());
+        }
+    }
+
+    #[test]
+    fn test_net_ops_rate_limiter() {
+        let handler = create_net_epoll_handler("test_1".to_string());
+
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_net_epoll_handler("test_2".to_string());
+        let m = &handler.config.vm_as.clone();
+
+        // Test TX ops rate limiting
+        {
+            // create ops rate limiter
+            let mut rl = RateLimiter::new(0, 0, 0, 2, 0, 100).unwrap();
+            // use up the budget
+            assert!(rl.consume(2, TokenType::Ops));
+
+            // set this tx rate limiter to be used
+            handler.tx.rate_limiter = rl;
+            // try doing TX
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+            vq.avail.ring(0).store(0);
+            vq.avail.idx().store(1);
+
+            let q = vq.create_queue();
+            handler.tx.queue.queue = q;
+
+            let events = Events::with_data(&event_fd, TX_QUEUE_EVENT, event_set);
+            assert!(handler.tx.queue.generate_event().is_ok());
+            handler.process(events, &mut event_op);
+            assert!(handler.tx.rate_limiter.is_blocked());
+
+            thread::sleep(Duration::from_millis(100));
+
+            let events = Events::with_data(&event_fd, TX_RATE_LIMITER_EVENT, event_set);
+            handler.process(events, &mut event_op);
+            assert!(!handler.tx.rate_limiter.is_blocked());
+        }
+        // Test RX ops rate limiting
+        {
+            // create ops rate limiter
+            let mut rl = RateLimiter::new(0, 0, 0, 2, 0, 100).unwrap();
+            // use up the budget
+            assert!(rl.consume(2, TokenType::Ops));
+
+            // set this rx rate limiter to be used
+            handler.rx.rate_limiter = rl;
+            // try doing RX
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+            vq.avail.ring(0).store(0);
+            vq.avail.idx().store(1);
+
+            let q = vq.create_queue();
+            handler.rx.queue.queue = q;
+
+            handler.rx.deferred_frame = true;
+
+            let events = Events::with_data(&event_fd, RX_QUEUE_EVENT, event_set);
+            assert!(handler.rx.queue.generate_event().is_ok());
+            handler.process(events, &mut event_op);
+            assert!(handler.rx.rate_limiter.is_blocked());
+
+            thread::sleep(Duration::from_millis(100));
+
+            let events = Events::with_data(&event_fd, RX_RATE_LIMITER_EVENT, event_set);
+            handler.process(events, &mut event_op);
+            assert!(!handler.rx.rate_limiter.is_blocked());
+        }
+    }
+}
