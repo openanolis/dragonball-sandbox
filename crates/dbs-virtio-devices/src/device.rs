@@ -312,6 +312,33 @@ impl<R: GuestMemoryRegion> Clone for VirtioSharedMemoryList<R> {
     }
 }
 
+/// A callback for the VMM to insert memory region for virtio devices that
+/// has device memory, such as DAX of virtiofs, pmem.
+///
+/// insert_region function is used to solve the problem that the virtio device cannot
+/// find the host address corresponding to the guest address when reading the
+/// guest device memory.
+///
+/// For example, the guest application executes the following code:
+/// {
+///     // "dax_fd" is virtio-fs file that support dax
+///     // "no_dax_fd" is virtio-fs file that do not support dax
+///     void *dax_ptr = (void*)mmap(NUMM, 4096, PORT, MAP_SHARED, dax_fd, 0);
+///     write(no_dax_fd, dax_ptr, 4096);
+/// }
+/// dragonball will coredump.
+///
+/// This is because the virtiofs device cannot resolve the dax_ptr address
+/// when calling vm_as.get_slice(). There is no DAX region in vm_as. This
+/// trait inserts the virtio device memory region, such as DAX region, into
+/// vm_as. This trait should be implemented in VMM when creating virtio
+/// devices with device memory, because the virtio device does not have
+/// permission to change vm_as.
+pub trait VirtioRegionHandler: Send {
+    /// Insert GuestRegionMmap to vm_as & address_space.
+    fn insert_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<()>;
+}
+
 /// Trait for Virtio transport layer to manage virtio devices.
 ///
 /// The virtio transport driver takes the responsibility to manage lifecycle of virtio devices.
