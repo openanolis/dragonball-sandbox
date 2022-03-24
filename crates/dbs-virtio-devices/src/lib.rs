@@ -124,6 +124,9 @@ pub enum Error {
     /// Error from Device activate.
     #[error("Device activate error: {0}")]
     ActivateError(#[from] ActivateError),
+    /// Internal unspecific error.
+    #[error("internal unspecific error")]
+    InternalError,
     /// Error from Interrupt.
     #[error("Interrupt error: {0}")]
     InterruptError(IOError),
@@ -131,6 +134,9 @@ pub enum Error {
     #[cfg(feature = "virtio-vsock")]
     #[error("virtio-vsock error: {0}")]
     VirtioVsockError(#[from] self::vsock::VsockError),
+    #[cfg(feature = "virtio-net")]
+    #[error("Virtio-net error: {0}")]
+    VirtioNetError(#[from] crate::net::NetError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.

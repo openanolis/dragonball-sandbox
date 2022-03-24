@@ -5,15 +5,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::any::Any;
 use std::cmp;
 use std::io::{self, Read, Write};
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
-use dbs_utils::epoll_manager::{EventOps, EventSet, Events, MutEventSubscriber};
-use dbs_utils::net::Tap;
+use dbs_device::resources::ResourceConstraint;
+use dbs_utils::epoll_manager::{
+    EpollManager, EventOps, EventSet, Events, MutEventSubscriber, SubscriberId,
+};
+use dbs_utils::net::{net_gen, MacAddr, Tap, MAC_ADDR_LEN};
 use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter, TokenType};
 use libc;
 use log::{debug, error, info, trace};
@@ -22,8 +27,11 @@ use virtio_queue::{QueueState, QueueStateT};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryRegion, GuestRegionMmap};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::device::VirtioDeviceConfig;
-use crate::{DbsGuestAddressSpace, Error, Result, VirtioQueueConfig};
+use crate::device::{VirtioDeviceConfig, VirtioDeviceInfo};
+use crate::{
+    ActivateError, ActivateResult, DbsGuestAddressSpace, Error, Result, VirtioDevice,
+    VirtioQueueConfig, TYPE_NET,
+};
 
 const NET_DRIVER_NAME: &str = "virtio-net";
 
@@ -46,6 +54,20 @@ const TX_RATE_LIMITER_EVENT: u32 = 4;
 const PATCH_RATE_LIMITER_EVENT: u32 = 5;
 // Number of DeviceEventT events supported by this implementation.
 pub const NET_EVENTS_COUNT: u32 = 6;
+
+/// Error for virtio-net devices to handle requests from guests.
+#[derive(Debug, thiserror::Error)]
+pub enum NetError {
+    /// Open tap device failed.
+    #[error("open tap device failed: {0}")]
+    TapOpen(#[source] dbs_utils::net::TapError),
+    /// Setting tap interface offload flags failed.
+    #[error("set tap device vnet header size failed: {0}")]
+    TapSetOffload(#[source] dbs_utils::net::TapError),
+    /// Setting vnet header size failed.
+    #[error("set tap device vnet header size failed: {0}")]
+    TapSetVnetHdrSize(#[source] dbs_utils::net::TapError),
+}
 
 struct TxVirtio<Q: QueueStateT> {
     queue: VirtioQueueConfig<Q>,
@@ -352,7 +374,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
                     }
                 }
 
-                Self::write_to_tap(&mut self.tx.frame_buf[..read_count], &mut self.tap);
+                Self::write_to_tap(&self.tx.frame_buf[..read_count], &mut self.tap);
 
                 self.tx.used_desc_heads[used_count] = header_index;
                 used_count += 1;
@@ -542,5 +564,220 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutE
                 self.id, e
             );
         }
+    }
+}
+
+pub struct Net<AS: GuestAddressSpace> {
+    pub(crate) device_info: VirtioDeviceInfo,
+    pub tap: Option<Tap>,
+    pub queue_sizes: Arc<Vec<u16>>,
+    pub rx_rate_limiter: Option<RateLimiter>,
+    pub tx_rate_limiter: Option<RateLimiter>,
+    pub subscriber_id: Option<SubscriberId>,
+    id: String,
+    phantom: PhantomData<AS>,
+    patch_rate_limiter_fd: EventFd,
+    sender: Option<mpsc::Sender<(BucketUpdate, BucketUpdate, BucketUpdate, BucketUpdate)>>,
+}
+
+impl<AS: GuestAddressSpace> Net<AS> {
+    /// Create a new virtio network device with the given TAP interface.
+    pub fn new_with_tap(
+        tap: Tap,
+        guest_mac: Option<&MacAddr>,
+        queue_sizes: Arc<Vec<u16>>,
+        event_mgr: EpollManager,
+        rx_rate_limiter: Option<RateLimiter>,
+        tx_rate_limiter: Option<RateLimiter>,
+    ) -> Result<Self> {
+        trace!(target: "virtio-net", "{}: Net::new_with_tap()", NET_DRIVER_NAME);
+
+        // Set offload flags to match the virtio features below.
+        tap.set_offload(
+            net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6,
+        )
+        .map_err(NetError::TapSetOffload)?;
+
+        let vnet_hdr_size = vnet_hdr_len() as i32;
+        tap.set_vnet_hdr_size(vnet_hdr_size)
+            .map_err(NetError::TapSetVnetHdrSize)?;
+        info!("net tap set finished");
+
+        let mut avail_features = 1u64 << VIRTIO_NET_F_GUEST_CSUM
+            | 1u64 << VIRTIO_NET_F_CSUM
+            | 1u64 << VIRTIO_NET_F_GUEST_TSO4
+            | 1u64 << VIRTIO_NET_F_GUEST_UFO
+            | 1u64 << VIRTIO_NET_F_HOST_TSO4
+            | 1u64 << VIRTIO_NET_F_HOST_UFO
+            | 1u64 << VIRTIO_F_VERSION_1;
+
+        let mut config_space = Vec::new();
+        if let Some(mac) = guest_mac {
+            config_space.resize(MAC_ADDR_LEN, 0);
+            config_space[..].copy_from_slice(mac.get_bytes());
+            // When this feature isn't available, the driver generates a random MAC address.
+            // Otherwise, it should attempt to read the device MAC address from the config space.
+            avail_features |= 1u64 << VIRTIO_NET_F_MAC;
+        }
+
+        let device_info = VirtioDeviceInfo::new(
+            NET_DRIVER_NAME.to_string(),
+            avail_features,
+            queue_sizes.clone(),
+            config_space,
+            event_mgr,
+        );
+        let id = device_info.driver_name.clone();
+        Ok(Net {
+            tap: Some(tap),
+            device_info,
+            queue_sizes,
+            rx_rate_limiter,
+            tx_rate_limiter,
+            subscriber_id: None,
+            id,
+            phantom: PhantomData,
+            patch_rate_limiter_fd: EventFd::new(0).unwrap(),
+            sender: None,
+        })
+    }
+
+    /// Create a new virtio network device with the given Host Device Name
+    pub fn new(
+        host_dev_name: String,
+        guest_mac: Option<&MacAddr>,
+        queue_sizes: Arc<Vec<u16>>,
+        epoll_mgr: EpollManager,
+        rx_rate_limiter: Option<RateLimiter>,
+        tx_rate_limiter: Option<RateLimiter>,
+    ) -> Result<Self> {
+        info!("open net tap {}", host_dev_name);
+        let tap = Tap::open_named(host_dev_name.as_str(), false).map_err(NetError::TapOpen)?;
+        info!("net tap opened");
+
+        Self::new_with_tap(
+            tap,
+            guest_mac,
+            queue_sizes,
+            epoll_mgr,
+            rx_rate_limiter,
+            tx_rate_limiter,
+        )
+    }
+}
+
+impl<AS: GuestAddressSpace + 'static> Net<AS> {
+    pub fn set_patch_rate_limiters(
+        &self,
+        rx_bytes: BucketUpdate,
+        rx_ops: BucketUpdate,
+        tx_bytes: BucketUpdate,
+        tx_ops: BucketUpdate,
+    ) -> Result<()> {
+        if let Some(sender) = &self.sender {
+            if sender.send((rx_bytes, rx_ops, tx_bytes, tx_ops)).is_ok() {
+                if let Err(e) = self.patch_rate_limiter_fd.write(1) {
+                    error!(
+                        "virtio-net: failed to write rate-limiter patch event {:?}",
+                        e
+                    );
+                    Err(Error::InternalError)
+                } else {
+                    Ok(())
+                }
+            } else {
+                error!("virtio-net: failed to send rate-limiter patch data");
+                Err(Error::InternalError)
+            }
+        } else {
+            error!("virtio-net: failed to establish channel to send rate-limiter patch data");
+            Err(Error::InternalError)
+        }
+    }
+}
+
+impl<AS, Q, R> VirtioDevice<AS, Q, R> for Net<AS>
+where
+    AS: DbsGuestAddressSpace,
+    Q: QueueStateT + Send + 'static,
+    R: GuestMemoryRegion + Sync + Send + 'static,
+{
+    fn device_type(&self) -> u32 {
+        TYPE_NET
+    }
+
+    fn queue_max_sizes(&self) -> &[u16] {
+        &self.queue_sizes
+    }
+
+    fn get_avail_features(&self, page: u32) -> u32 {
+        self.device_info.get_avail_features(page)
+    }
+
+    fn set_acked_features(&mut self, page: u32, value: u32) {
+        trace!(target: "virtio-net", "{}: VirtioDevice::set_acked_features({}, 0x{:x})",
+               self.id, page, value);
+        self.device_info.set_acked_features(page, value)
+    }
+
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+        trace!(target: "virtio-net", "{}: VirtioDevice::read_config(0x{:x}, {:?})",
+               self.id, offset, data);
+        self.device_info.read_config(offset, data)
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        trace!(target: "virtio-net", "{}: VirtioDevice::write_config(0x{:x}, {:?})",
+               self.id, offset, data);
+        self.device_info.write_config(offset, data)
+    }
+
+    fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
+        trace!(target: "virtio-net", "{}: VirtioDevice::activate()", self.id);
+        // Do not support control queue and multi queue.
+        if config.queues.len() != 2 {
+            return Err(ActivateError::InvalidParam);
+        }
+
+        self.device_info.check_queue_sizes(&config.queues[..])?;
+        let tap = self.tap.take().ok_or_else(|| ActivateError::InvalidParam)?;
+        let (sender, receiver) = mpsc::channel();
+        self.sender = Some(sender);
+        let rx_queue = config.queues.remove(0);
+        let tx_queue = config.queues.remove(0);
+        let rx = RxVirtio::<Q>::new(rx_queue, self.rx_rate_limiter.take().unwrap_or_default());
+        let tx = TxVirtio::<Q>::new(tx_queue, self.tx_rate_limiter.take().unwrap_or_default());
+        let patch_rate_limiter_fd = self.patch_rate_limiter_fd.try_clone().unwrap();
+
+        let handler = Box::new(NetEpollHandler {
+            tap,
+            rx,
+            tx,
+            config,
+            id: self.id.clone(),
+            patch_rate_limiter_fd,
+            receiver: Some(receiver),
+        });
+
+        self.subscriber_id = Some(self.device_info.register_event_handler(handler));
+        Ok(())
+    }
+
+    fn get_resource_requirements(
+        &self,
+        requests: &mut Vec<ResourceConstraint>,
+        use_generic_irq: bool,
+    ) {
+        trace!(target: "virtio-net", "{}: VirtioDevice::get_resource_requirements()", self.id);
+        requests.push(ResourceConstraint::LegacyIrq { irq: None });
+        if use_generic_irq {
+            requests.push(ResourceConstraint::GenericIrq {
+                size: (self.queue_sizes.len() + 1) as u32,
+            });
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
