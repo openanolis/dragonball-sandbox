@@ -24,6 +24,9 @@ pub mod mmio;
 #[cfg(feature = "virtio-vsock")]
 pub mod vsock;
 
+#[cfg(feature = "virtio-net")]
+pub mod net;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
