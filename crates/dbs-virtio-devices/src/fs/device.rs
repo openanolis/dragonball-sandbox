@@ -2,13 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{mpsc, Arc};
@@ -16,10 +17,9 @@ use std::time::Duration;
 
 use blobfs::{BlobFs, Config as BlobfsConfig};
 use caps::{CapSet, Capability};
-use dbs_utils::epoll_manager::{
-    EpollManager, EventOps, EventSet, Events, MutEventSubscriber, SubscriberId,
-};
-use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter, TokenType};
+use dbs_device::resources::{DeviceResources, ResourceConstraint};
+use dbs_utils::epoll_manager::{EpollManager, SubscriberId};
+use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter};
 use fuse_backend_rs::api::{Vfs, VfsIndex, VfsOptions};
 use fuse_backend_rs::passthrough::{CachePolicy, Config as PassthroughConfig, PassthroughFs};
 use kvm_bindings::kvm_userspace_memory_region;
@@ -30,17 +30,25 @@ use rafs::{
     fs::{Rafs, RafsConfig},
     RafsIoRead,
 };
-use rlimit::{setrlimit, Resource};
+use rlimit::Resource;
 use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
+use virtio_queue::QueueStateT;
 use vm_memory::{
-    FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
+    FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize,
+    MmapRegion,
 };
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{Error, Result, VirtioDeviceConfig, VirtioDeviceInfo, VirtioRegionHandler};
+use crate::{
+    ActivateError, ActivateResult, Error, Result, VirtioDevice, VirtioDeviceConfig,
+    VirtioDeviceInfo, VirtioRegionHandler, VirtioSharedMemory, VirtioSharedMemoryList,
+    TYPE_VIRTIO_FS,
+};
 
-use super::{Error as FsError, Result as FsResult, VIRTIO_FS_NAME};
+use super::{
+    CacheHandler, Error as FsError, Result as FsResult, VirtioFsEpollHandler, VIRTIO_FS_NAME,
+};
 
 const CONFIG_SPACE_TAG_SIZE: usize = 36;
 const CONFIG_SPACE_NUM_QUEUES_SIZE: usize = 4;
@@ -64,6 +72,7 @@ struct BlobCacheConfig {
 }
 
 /// Info of backend filesystems of VirtioFs
+#[allow(dead_code)]
 pub struct BackendFsInfo {
     pub(crate) index: VfsIndex,
     pub(crate) fstype: String,
@@ -756,5 +765,201 @@ fn set_default_rlimit_nofile() -> Result<()> {
                 error!("{}: failed to set rlimit {:?}", VIRTIO_FS_NAME, e);
                 Error::IOError(e)
             })
+    }
+}
+
+impl<AS, Q> VirtioDevice<AS, Q, GuestRegionMmap> for VirtioFs<AS>
+where
+    AS: 'static + GuestAddressSpace + Clone + Send + Sync,
+    AS::T: Send,
+    AS::M: Sync + Send,
+    Q: QueueStateT + Send + 'static,
+{
+    fn device_type(&self) -> u32 {
+        TYPE_VIRTIO_FS
+    }
+
+    fn queue_max_sizes(&self) -> &[u16] {
+        &self.queue_sizes
+    }
+
+    fn get_avail_features(&self, page: u32) -> u32 {
+        self.device_info.get_avail_features(page)
+    }
+
+    fn set_acked_features(&mut self, page: u32, value: u32) {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::set_acked_features({}, 0x{:x})",
+            self.id,
+            page,
+            value
+        );
+        self.device_info.set_acked_features(page, value)
+    }
+
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::read_config(0x{:x}, {:?})",
+            self.id,
+            offset,
+            data
+        );
+        self.device_info.read_config(offset, data)
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::write_config(0x{:x}, {:?})",
+            self.id,
+            offset,
+            data
+        );
+        self.device_info.write_config(offset, data)
+    }
+
+    fn activate(&mut self, config: VirtioDeviceConfig<AS, Q>) -> ActivateResult {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::activate()",
+            self.id
+        );
+
+        self.device_info.check_queue_sizes(&config.queues)?;
+
+        let (sender, receiver) = mpsc::channel();
+        self.sender = Some(sender);
+        let rate_limiter = self.rate_limiter.take().unwrap_or_default();
+        let patch_rate_limiter_fd = self.patch_rate_limiter_fd.try_clone().map_err(|e| {
+            error!(
+                "{}: failed to clone patch rate limiter eventfd {:?}",
+                VIRTIO_FS_NAME, e
+            );
+            ActivateError::InternalError
+        })?;
+
+        let cache_handler = if let Some((addr, _guest_addr)) = config.get_shm_region_addr() {
+            let handler = CacheHandler {
+                cache_size: self.cache_size,
+                mmap_cache_addr: addr,
+                id: self.id.clone(),
+            };
+
+            Some(handler)
+        } else {
+            None
+        };
+
+        let handler = VirtioFsEpollHandler::new(
+            config,
+            self.fs.clone(),
+            cache_handler,
+            self.thread_pool_size,
+            self.id.clone(),
+            rate_limiter,
+            patch_rate_limiter_fd,
+            Some(receiver),
+        );
+
+        self.subscriber_id = Some(self.device_info.register_event_handler(Box::new(handler)));
+
+        Ok(())
+    }
+
+    // Please keep in synchronization with vhost/fs.rs
+    fn get_resource_requirements(
+        &self,
+        requests: &mut Vec<ResourceConstraint>,
+        use_generic_irq: bool,
+    ) {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::get_resource_requirements()",
+            self.id
+        );
+        requests.push(ResourceConstraint::LegacyIrq { irq: None });
+        if use_generic_irq {
+            // Allocate one irq for device configuration change events, and one irq for each queue.
+            requests.push(ResourceConstraint::GenericIrq {
+                size: (self.queue_sizes.len() + 1) as u32,
+            });
+        }
+
+        // Check if we have dax enabled or not, just return if no dax window requested.
+        if !self.is_dax_on() {
+            info!("{}: DAX window is disabled.", self.id);
+            return;
+        }
+
+        // Request for DAX window. The memory needs to be 2MiB aligned in order to support
+        // hugepages, and needs to be above 4G to avoid confliction with lapic/ioapic devices.
+        requests.push(ResourceConstraint::MmioAddress {
+            range: Some((0x1_0000_0000, std::u64::MAX)),
+            align: 0x0020_0000,
+            size: self.cache_size,
+        });
+
+        // Request for new kvm memory slot for DAX window.
+        requests.push(ResourceConstraint::KvmMemSlot {
+            slot: None,
+            size: 1,
+        });
+    }
+
+    // Please keep in synchronization with vhost/fs.rs
+    fn set_resource(
+        &mut self,
+        vm_fd: Arc<VmFd>,
+        resource: DeviceResources,
+    ) -> Result<Option<VirtioSharedMemoryList<GuestRegionMmap>>> {
+        trace!(
+            target: VIRTIO_FS_NAME,
+            "{}: VirtioDevice::set_resource()",
+            self.id
+        );
+
+        let mmio_res = resource.get_mmio_address_ranges();
+        let slot_res = resource.get_kvm_mem_slots();
+
+        // Do nothing if there's no dax window requested.
+        if mmio_res.is_empty() {
+            return Ok(None);
+        }
+
+        // Make sure we have the correct resource as requested, and currently we only support one
+        // shm region for DAX window (version table and journal are not supported yet).
+        if mmio_res.len() != slot_res.len() || mmio_res.len() != 1 {
+            error!(
+                "{}: wrong number of mmio or kvm slot resource ({}, {})",
+                self.id,
+                mmio_res.len(),
+                slot_res.len()
+            );
+            return Err(Error::InvalidResource);
+        }
+
+        let guest_addr = mmio_res[0].0;
+        let cache_len = mmio_res[0].1;
+
+        let mmap_region = self.register_mmap_region(vm_fd, guest_addr, cache_len, &slot_res)?;
+
+        Ok(Some(VirtioSharedMemoryList {
+            host_addr: mmap_region.deref().deref().as_ptr() as u64,
+            guest_addr: GuestAddress(guest_addr),
+            len: cache_len as GuestUsize,
+            kvm_userspace_memory_region_flags: 0,
+            kvm_userspace_memory_region_slot: slot_res[0],
+            region_list: vec![VirtioSharedMemory {
+                offset: 0,
+                len: cache_len,
+            }],
+            mmap_region,
+        }))
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
