@@ -29,22 +29,17 @@ const QUEUE_AVAIL_EVENT: u32 = 0;
 // two rate limiter events
 const RATE_LIMITER_EVENT_COUNT: u32 = 2;
 
-// Attr and entry timeout values
-const CACHE_ALWAYS_TIMEOUT: u64 = 86_400; // 1 day
-const CACHE_AUTO_TIMEOUT: u64 = 1;
-const CACHE_NONE_TIMEOUT: u64 = 0;
-
 /// CacheHandler handles DAX window mmap/unmap operations
 #[derive(Clone)]
 pub struct CacheHandler {
     /// the size of memory region allocated for virtiofs
-    cache_size: u64,
+    pub(crate) cache_size: u64,
 
     /// the address of mmap region corresponding to the memory region
-    mmap_cache_addr: u64,
+    pub(crate) mmap_cache_addr: u64,
 
     /// the device ID
-    id: String,
+    pub(crate) id: String,
 }
 
 impl CacheHandler {
@@ -205,7 +200,7 @@ where
         rate_limiter: RateLimiter,
         patch_rate_limiter_fd: EventFd,
         receiver: Option<mpsc::Receiver<(BucketUpdate, BucketUpdate)>>,
-    ) -> Result<Self> {
+    ) -> Self {
         let thread_pool = if thread_pool_size > 0 {
             Some(ThreadPool::with_name(
                 "virtiofs-thread".to_string(),
@@ -214,7 +209,7 @@ where
         } else {
             None
         };
-        let handler = Self {
+        Self {
             config: Arc::new(Mutex::new(config)),
             server: Arc::new(Server::new(fs)),
             cache_handler,
@@ -223,8 +218,7 @@ where
             rate_limiter,
             patch_rate_limiter_fd,
             receiver,
-        };
-        Ok(handler)
+        }
     }
 
     fn process_queue(&mut self, queue_index: usize) -> Result<()> {

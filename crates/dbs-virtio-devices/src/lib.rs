@@ -144,6 +144,9 @@ pub enum Error {
     /// Internal unspecific error
     #[error("internal unspecific error.")]
     InternalError,
+    /// Device resource doesn't match what requested
+    #[error("invalid resource.")]
+    InvalidResource,
     /// Generic IO error
     #[error("IO: {0}.")]
     IOError(#[from] IOError),
