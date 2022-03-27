@@ -490,3 +490,166 @@ where
         }
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::sync::Arc;
+
+    use dbs_interrupt::NoopNotifier;
+    use dbs_utils::epoll_manager::EpollManager;
+    use dbs_utils::epoll_manager::SubscriberOps;
+    use dbs_utils::rate_limiter::TokenBucket;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+
+    use crate::fs::device::tests::*;
+    use crate::fs::*;
+    use crate::tests::{VirtQueue, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use crate::VirtioQueueConfig;
+
+    use super::*;
+
+    #[test]
+    fn test_fs_get_patch_rate_limiters() {
+        let mut handler = create_fs_epoll_handler(String::from("1"));
+        let tokenbucket = TokenBucket::new(1, 1, 4);
+
+        handler.get_patch_rate_limiters(
+            BucketUpdate::None,
+            BucketUpdate::Update(tokenbucket.clone()),
+        );
+        assert_eq!(handler.rate_limiter.ops().unwrap(), &tokenbucket);
+
+        handler.get_patch_rate_limiters(
+            BucketUpdate::Update(tokenbucket.clone()),
+            BucketUpdate::None,
+        );
+        assert_eq!(handler.rate_limiter.bandwidth().unwrap(), &tokenbucket);
+
+        handler.get_patch_rate_limiters(BucketUpdate::None, BucketUpdate::None);
+        assert_eq!(handler.rate_limiter.ops().unwrap(), &tokenbucket);
+
+        handler.get_patch_rate_limiters(BucketUpdate::None, BucketUpdate::Disabled);
+        assert_eq!(handler.rate_limiter.ops(), None);
+
+        handler.get_patch_rate_limiters(BucketUpdate::Disabled, BucketUpdate::None);
+        assert_eq!(handler.rate_limiter.bandwidth(), None);
+    }
+
+    #[test]
+    fn test_fs_set_patch_rate_limiters() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+
+        // No sender
+        assert!(fs
+            .set_patch_rate_limiters(BucketUpdate::None, BucketUpdate::None)
+            .is_err());
+
+        // Success
+        let (sender, receiver) = mpsc::channel();
+        fs.sender = Some(sender);
+        assert!(fs
+            .set_patch_rate_limiters(BucketUpdate::None, BucketUpdate::None)
+            .is_ok());
+
+        // Send error
+        drop(receiver);
+        assert!(fs
+            .set_patch_rate_limiters(BucketUpdate::None, BucketUpdate::None)
+            .is_err());
+    }
+
+    #[test]
+    fn test_fs_epoll_handler_handle_event() {
+        let handler = create_fs_epoll_handler("test_1".to_string());
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_fs_epoll_handler("test_2".to_string());
+
+        // test for QUEUE_AVAIL_EVENT
+        let events = Events::with_data(&event_fd, QUEUE_AVAIL_EVENT, event_set);
+        handler.process(events, &mut event_op);
+        handler.config.lock().unwrap().queues[0]
+            .generate_event()
+            .unwrap();
+        handler.process(events, &mut event_op);
+
+        // test for RATE_LIMITER_EVENT
+        let queues_len = handler.config.lock().unwrap().queues.len() as u32;
+        let events = Events::with_data(&event_fd, QUEUE_AVAIL_EVENT + queues_len, event_set);
+        handler.process(events, &mut event_op);
+
+        // test for PATCH_RATE_LIMITER_EVENT
+        if let Err(e) = handler.patch_rate_limiter_fd.write(1) {
+            error!(
+                "{} test: failed to write patch_rate_limiter_fd, {:?}",
+                VIRTIO_FS_NAME, e
+            );
+        }
+        let events = Events::with_data(&event_fd, 1 + QUEUE_AVAIL_EVENT + queues_len, event_set);
+        handler.process(events, &mut event_op);
+    }
+
+    #[test]
+    fn test_fs_epoll_handler_handle_unknown_event() {
+        let handler = create_fs_epoll_handler("test_1".to_string());
+        let event_fd = EventFd::new(0).unwrap();
+        let mgr = EpollManager::default();
+        let id = mgr.add_subscriber(Box::new(handler));
+        let mut inner_mgr = mgr.mgr.lock().unwrap();
+        let mut event_op = inner_mgr.event_ops(id).unwrap();
+        let event_set = EventSet::EDGE_TRIGGERED;
+        let mut handler = create_fs_epoll_handler("test_2".to_string());
+
+        // test for unknown event
+        let events = Events::with_data(&event_fd, FS_EVENTS_COUNT + 10, event_set);
+        handler.process(events, &mut event_op);
+    }
+
+    #[test]
+    fn test_fs_epoll_handler_process_queue() {
+        {
+            let mut handler = create_fs_epoll_handler("test_1".to_string());
+
+            let m = &handler.config.lock().unwrap().vm_as.clone();
+            let vq = VirtQueue::new(GuestAddress(0), m, 16);
+            vq.avail.ring(0).store(0);
+            vq.avail.idx().store(1);
+            let q = vq.create_queue();
+            vq.dtable(0).set(0x1000, 0x1000, VIRTQ_DESC_F_NEXT, 1);
+            vq.dtable(1)
+                .set(0x2000, 0x1000, VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE, 2);
+            vq.dtable(2).set(0x3000, 1, VIRTQ_DESC_F_WRITE, 1);
+
+            handler.config.lock().unwrap().queues = vec![VirtioQueueConfig::new(
+                q,
+                Arc::new(EventFd::new(0).unwrap()),
+                Arc::new(NoopNotifier::new()),
+                0,
+            )];
+            assert!(handler.process_queue(0).is_ok());
+        }
+    }
+}
