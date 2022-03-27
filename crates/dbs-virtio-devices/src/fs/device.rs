@@ -35,8 +35,7 @@ use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
 use virtio_queue::QueueStateT;
 use vm_memory::{
-    FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize,
-    MmapRegion,
+    FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -99,7 +98,7 @@ pub struct VirtioFs<AS: GuestAddressSpace> {
     pub(crate) id: String,
     pub(crate) rate_limiter: Option<RateLimiter>,
     pub(crate) patch_rate_limiter_fd: EventFd,
-    sender: Option<mpsc::Sender<(BucketUpdate, BucketUpdate)>>,
+    pub(crate) sender: Option<mpsc::Sender<(BucketUpdate, BucketUpdate)>>,
     phantom: PhantomData<AS>,
 }
 
@@ -961,5 +960,681 @@ where
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    #[cfg(feature = "test-resources")]
+    use std::env::temp_dir;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use dbs_device::resources::DeviceResources;
+    use dbs_interrupt::NoopNotifier;
+    use kvm_ioctls::Kvm;
+    use virtio_queue::QueueState;
+    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
+    use vmm_sys_util::tempfile::TempFile;
+    use Error as VirtIoError;
+
+    use super::*;
+    use crate::device::VirtioRegionHandler;
+    use crate::{ActivateError, VirtioQueueConfig, TYPE_VIRTIO_FS};
+
+    pub(crate) const TAG: &str = "test";
+    pub(crate) const NUM_QUEUES: usize = 1;
+    pub(crate) const QUEUE_SIZE: u16 = 1024;
+    pub(crate) const CACHE_SIZE: u64 = 0;
+    pub(crate) const THREAD_NUM: u16 = 10;
+    pub(crate) const CACHE_POLICY: &str = "auto";
+    pub(crate) const WB_CACHE: bool = true;
+    pub(crate) const NO_OPEN: bool = true;
+    pub(crate) const NO_READDIR: bool = false;
+    pub(crate) const KILLPRIV_V2: bool = false;
+    pub(crate) const XATTR: bool = false;
+    pub(crate) const DROP_SYS_RSC: bool = false;
+    pub(crate) const FS_EVENTS_COUNT: u32 = 4;
+
+    pub struct DummyVirtioRegionHandler {}
+
+    impl VirtioRegionHandler for DummyVirtioRegionHandler {
+        fn insert_region(
+            &mut self,
+            _region: Arc<GuestRegionMmap>,
+        ) -> std::result::Result<(), VirtIoError> {
+            Ok(())
+        }
+    }
+
+    pub fn new_dummy_handler_helper() -> Box<dyn VirtioRegionHandler> {
+        Box::new(DummyVirtioRegionHandler {})
+    }
+
+    #[cfg(feature = "test-resources")]
+    fn create_fs_device_default() -> VirtioFs<Arc<GuestMemoryMmap>> {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+
+        fs
+    }
+
+    pub(crate) fn create_fs_epoll_handler(
+        id: String,
+    ) -> VirtioFsEpollHandler<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> {
+        let vfs = Arc::new(Vfs::new(VfsOptions::default()));
+        let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
+        let queues = vec![
+            VirtioQueueConfig::create(256, 0).unwrap(),
+            VirtioQueueConfig::create(256, 0).unwrap(),
+        ];
+        let rate_limiter = RateLimiter::default();
+
+        // Call for kvm too frequently would cause error in some host kernel.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let resources = DeviceResources::new();
+        let config = VirtioDeviceConfig::new(
+            mem,
+            vm_fd,
+            resources,
+            queues,
+            None,
+            Arc::new(NoopNotifier::new()),
+        );
+        VirtioFsEpollHandler::new(
+            config,
+            vfs,
+            None,
+            2,
+            id,
+            rate_limiter,
+            EventFd::new(0).unwrap(),
+            None,
+        )
+    }
+
+    #[test]
+    fn test_virtio_fs_device_create_error() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+
+        // invalid cache policy
+        let res: Result<VirtioFs<Arc<GuestMemoryMmap>>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            "dummy_policy",
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager.clone(),
+            Some(rate_limiter),
+        );
+        assert!(res.is_err());
+
+        // drop_sys_resource with write_back_cache
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let res: Result<VirtioFs<Arc<GuestMemoryMmap>>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            true,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            true,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_virtio_fs_device_normal() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+
+        assert!(fs.is_dax_on());
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::device_type(&fs),
+            TYPE_VIRTIO_FS
+        );
+        let queue_size = vec![QUEUE_SIZE; NUM_QUEUE_OFFSET + NUM_QUEUES];
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::queue_max_sizes(
+                &fs
+            ),
+            &queue_size[..]
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&fs, 0),
+            fs.device_info.get_avail_features(0)
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&fs, 1),
+            fs.device_info.get_avail_features(1)
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&fs, 2),
+            fs.device_info.get_avail_features(2)
+        );
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::set_acked_features(
+            &mut fs, 2, 0,
+        );
+        assert_eq!(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&fs, 2),
+            0);
+        let mut config: [u8; 1] = [0];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut fs,
+            0,
+            &mut config,
+        );
+        let config: [u8; 16] = [0; 16];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::write_config(
+            &mut fs, 0, &config,
+        );
+    }
+
+    #[test]
+    fn test_virtio_fs_device_active() {
+        let epoll_manager = EpollManager::default();
+        {
+            // config queue size is not 2
+            let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+            let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+                TAG,
+                NUM_QUEUES,
+                QUEUE_SIZE,
+                CACHE_SIZE,
+                CACHE_POLICY,
+                THREAD_NUM,
+                WB_CACHE,
+                NO_OPEN,
+                KILLPRIV_V2,
+                XATTR,
+                DROP_SYS_RSC,
+                NO_READDIR,
+                new_dummy_handler_helper(),
+                epoll_manager.clone(),
+                Some(rate_limiter),
+            )
+            .unwrap();
+
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues: Vec<VirtioQueueConfig<QueueState>> = Vec::new();
+
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config = VirtioDeviceConfig::new(
+                Arc::new(mem),
+                vm_fd,
+                resources,
+                queues,
+                None,
+                Arc::new(NoopNotifier::new()),
+            );
+            assert!(matches!(
+                fs.activate(config),
+                Err(ActivateError::InvalidParam)
+            ));
+        }
+
+        {
+            // Ok
+            let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+            let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+                TAG,
+                NUM_QUEUES,
+                QUEUE_SIZE,
+                CACHE_SIZE,
+                CACHE_POLICY,
+                THREAD_NUM,
+                WB_CACHE,
+                NO_OPEN,
+                KILLPRIV_V2,
+                XATTR,
+                DROP_SYS_RSC,
+                NO_READDIR,
+                new_dummy_handler_helper(),
+                epoll_manager,
+                Some(rate_limiter),
+            )
+            .unwrap();
+
+            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+            let queues = vec![
+                VirtioQueueConfig::<QueueState>::create(1024, 0).unwrap(),
+                VirtioQueueConfig::<QueueState>::create(2, 0).unwrap(),
+            ];
+
+            let kvm = Kvm::new().unwrap();
+            let vm_fd = Arc::new(kvm.create_vm().unwrap());
+            let resources = DeviceResources::new();
+            let config = VirtioDeviceConfig::new(
+                Arc::new(mem),
+                vm_fd,
+                resources,
+                queues,
+                None,
+                Arc::new(NoopNotifier::new()),
+            );
+
+            let result = fs.activate(config);
+            assert!(result.is_ok());
+        }
+    }
+
+    // this test case need specific resources and is recommended to run
+    // via dbuvm docker image
+    #[test]
+    #[cfg(feature = "test-resources")]
+    fn test_fs_manipulate_backend_fs() {
+        let source = "/test_resources/nydus-rs/bootstrap/image_v2.boot";
+        let source_path = PathBuf::from(source);
+        let bootstrapfile = source_path.to_str().unwrap().to_string();
+        if !source_path.exists() {
+            panic!("Test resource file not found: {}", bootstrapfile);
+        }
+        // mount
+        {
+            // invalid fs type
+            {
+                let mut fs = create_fs_device_default();
+                let res = fs.manipulate_backend_fs(
+                    None,
+                    Some(String::from("dummyFs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+            }
+            // passthroughFs
+            {
+                let mut fs = create_fs_device_default();
+
+                // no mount source
+                let res = fs.manipulate_backend_fs(
+                    None,
+                    Some(String::from("PassthroughFs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+                // invalid mount source
+                let res = fs.manipulate_backend_fs(
+                    Some(String::from("dummy_source_path")),
+                    Some(String::from("PassthroughFs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+                // success
+                let mount_dir = temp_dir();
+                let mount_path = mount_dir.into_os_string().into_string().unwrap();
+                fs.manipulate_backend_fs(
+                    Some(mount_path),
+                    Some(String::from("PassthroughFs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                )
+                .unwrap();
+            }
+            // Rafs
+            {
+                let mut fs = create_fs_device_default();
+
+                // no mount source
+                let res = fs.manipulate_backend_fs(
+                    None,
+                    Some(String::from("Rafs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+                // invalid mount source
+                let res = fs.manipulate_backend_fs(
+                    Some(String::from("dummy_source_path")),
+                    Some(String::from("Rafs")),
+                    "/mountpoint",
+                    None,
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+                // invalid rafs cfg format
+                let dummy_rafs_cfg = r#"
+                {
+                    "device": {
+                        "backend": {
+                            "type": "oss",
+                            "config": {
+                                "endpoint": "test"
+                            }
+                        }
+                    }
+                }"#;
+                let res = fs.manipulate_backend_fs(
+                    Some(bootstrapfile.clone()),
+                    Some(String::from("Rafs")),
+                    "/mountpoint",
+                    Some(String::from(dummy_rafs_cfg)),
+                    "mount",
+                    None,
+                    None,
+                );
+                assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+                // success
+                let rafs_cfg = r#"
+                {
+                    "device": {
+                        "backend": {
+                            "type": "oss",
+                            "config": {
+                                "endpoint": "test",
+                                "access_key_id": "test",
+                                "access_key_secret": "test",
+                                "bucket_name": "antsys-nydus",
+                                "object_prefix":"nydus_v2/",
+                                "scheme": "http"
+                            }
+                        }
+                    },
+                    "mode": "direct",
+                    "digest_validate": false,
+                    "enable_xattr": true,
+                    "fs_prefetch": {
+                        "enable": true,
+                        "threads_count": 10,
+                        "merging_size": 131072,
+                        "bandwidth_rate": 10485760
+                    }
+                }"#;
+                fs.manipulate_backend_fs(
+                    Some(bootstrapfile.clone()),
+                    Some(String::from("Rafs")),
+                    "/mountpoint",
+                    Some(String::from(rafs_cfg)),
+                    "mount",
+                    None,
+                    None,
+                )
+                .unwrap();
+            }
+        }
+        // umount
+        {
+            let mut fs = create_fs_device_default();
+
+            // invalid mountpoint
+            let res = fs.manipulate_backend_fs(
+                None,
+                None,
+                "/dummy_mountpoint",
+                None,
+                "umount",
+                None,
+                None,
+            );
+            assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+            // success
+            let mut fs = create_fs_device_default();
+            let dummy_dir = temp_dir();
+            let dummy_path = dummy_dir.into_os_string().into_string().unwrap();
+            fs.manipulate_backend_fs(
+                Some(dummy_path),
+                Some(String::from("PassthroughFs")),
+                "/mountpoint",
+                None,
+                "mount",
+                None,
+                None,
+            )
+            .unwrap();
+            fs.manipulate_backend_fs(None, None, "/mountpoint", None, "umount", None, None)
+                .unwrap();
+        }
+
+        // update
+        {
+            let mut fs = create_fs_device_default();
+            let rafs_cfg = r#"
+                {
+                    "device": {
+                    "backend": {
+                        "type": "oss",
+                        "config": {
+                        "endpoint": "test",
+                        "access_key_id": "test",
+                        "access_key_secret": "test",
+                        "bucket_name": "antsys-nydus",
+                        "object_prefix":"nydus_v2/",
+                        "scheme": "http"
+                        }
+                    }
+                    },
+                    "mode": "direct",
+                    "digest_validate": false,
+                    "enable_xattr": true,
+                    "fs_prefetch": {
+                    "enable": true,
+                    "threads_count": 10,
+                    "merging_size": 131072,
+                    "bandwidth_rate": 10485760
+                    }
+                }"#;
+            // no config
+            let res = fs.manipulate_backend_fs(
+                Some(bootstrapfile.clone()),
+                Some(String::from("Rafs")),
+                "/mountpoint",
+                None,
+                "update",
+                None,
+                None,
+            );
+            assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+            // no source configured
+            let res = fs.manipulate_backend_fs(
+                Some(bootstrapfile.clone()),
+                Some(String::from("Rafs")),
+                "/mountpoint",
+                Some(String::from(rafs_cfg)),
+                "update",
+                None,
+                None,
+            );
+            assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+            // invalid mountpoint
+            fs.manipulate_backend_fs(
+                Some(bootstrapfile.clone()),
+                Some(String::from("Rafs")),
+                "/mountpoint",
+                Some(String::from(rafs_cfg)),
+                "mount",
+                None,
+                None,
+            )
+            .unwrap();
+
+            let res = fs.manipulate_backend_fs(
+                Some(bootstrapfile.clone()),
+                Some(String::from("Rafs")),
+                "/dummy_mountpoint",
+                Some(String::from(rafs_cfg)),
+                "update",
+                None,
+                None,
+            );
+            assert!(matches!(res, Err(FsError::BackendFs(_))));
+
+            // success
+            fs.manipulate_backend_fs(
+                Some(bootstrapfile.clone()),
+                Some(String::from("Rafs")),
+                "/mountpoint",
+                Some(String::from(rafs_cfg)),
+                "mount",
+                None,
+                None,
+            )
+            .unwrap();
+
+            let res = fs.manipulate_backend_fs(
+                Some(bootstrapfile),
+                Some(String::from("Rafs")),
+                "/mountpoint",
+                Some(String::from(rafs_cfg)),
+                "update",
+                None,
+                None,
+            );
+            assert!(res.is_ok());
+        }
+
+        // invalid operation
+        {
+            let mut fs = create_fs_device_default();
+            let res = fs.manipulate_backend_fs(
+                None,
+                None,
+                "/mountpoint",
+                None,
+                "dummy_ops",
+                None,
+                Some(1024 * 1024 * 1024),
+            );
+            assert!(matches!(res, Err(FsError::BackendFs(_))));
+        }
+    }
+
+    #[test]
+    fn test_parse_prefetch_files() {
+        // Non-empty prefetch list
+        let tmp_file = TempFile::new().unwrap();
+        writeln!(tmp_file.as_file(), "/hello.txt").unwrap();
+        writeln!(tmp_file.as_file()).unwrap();
+        writeln!(tmp_file.as_file(), "  ").unwrap();
+        writeln!(tmp_file.as_file(), "\t").unwrap();
+        writeln!(tmp_file.as_file(), "/").unwrap();
+        writeln!(tmp_file.as_file(), "\n").unwrap();
+        writeln!(tmp_file.as_file(), "test").unwrap();
+
+        let files = parse_prefetch_files(Some(tmp_file.as_path().to_str().unwrap().to_string()));
+        assert_eq!(
+            files,
+            Some(vec![PathBuf::from("/hello.txt"), PathBuf::from("/")])
+        );
+
+        // Empty prefetch list
+        let tmp_file = TempFile::new().unwrap();
+        let files = parse_prefetch_files(Some(tmp_file.as_path().to_str().unwrap().to_string()));
+        assert_eq!(files, None);
+
+        // None prefetch list
+        let files = parse_prefetch_files(None);
+        assert_eq!(files, None);
+
+        // Not exist prefetch list
+        let files = parse_prefetch_files(Some("no_such_file".to_string()));
+        assert_eq!(files, None);
+    }
+
+    #[test]
+    #[allow(clippy::unusual_byte_groupings)]
+    fn test_kb_to_bytes() {
+        let kb = 0x1000;
+        assert_eq!(kb_to_bytes(kb).unwrap(), 0x400_000);
+
+        let kb = 0x100_0000;
+        assert_eq!(kb_to_bytes(kb).unwrap(), 0x400_00_0000);
+
+        let kb = 0x20_0000_0000_0000;
+        assert_eq!(kb_to_bytes(kb).unwrap(), 0x8000_0000_0000_0000);
+
+        let kb = 0x100_0000_0000_0000;
+        assert!(kb_to_bytes(kb).is_err());
+
+        let kb = 0x1000_0000_0000_0000;
+        assert!(kb_to_bytes(kb).is_err());
+
+        let kb = 0x1100_0000_0000_0000;
+        assert!(kb_to_bytes(kb).is_err());
     }
 }
