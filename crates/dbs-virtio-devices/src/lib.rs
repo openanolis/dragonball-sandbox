@@ -27,6 +27,11 @@ pub mod vsock;
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
+use vm_memory::GuestAddressSpace;
+
+pub trait DbsGuestAddressSpace: GuestAddressSpace + 'static + Clone + Send + Sync {}
+
+impl<T> DbsGuestAddressSpace for T where T: GuestAddressSpace + 'static + Clone + Send + Sync {}
 
 /// Version of virtio specifications supported by PCI virtio devices.
 #[allow(non_camel_case_types)]
