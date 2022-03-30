@@ -146,10 +146,20 @@ pub(crate) use warn_or_panic;
 
 #[cfg(test)]
 pub mod tests {
+    use std::marker::PhantomData;
+    use std::mem;
     use std::sync::Arc;
 
     use dbs_interrupt::KvmIrqManager;
     use kvm_ioctls::{Kvm, VmFd};
+    use virtio_queue::{QueueState, QueueStateT};
+    use vm_memory::{
+        Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize, VolatileMemory,
+        VolatileRef, VolatileSlice,
+    };
+
+    pub const VIRTQ_DESC_F_NEXT: u16 = 0x1;
+    pub const VIRTQ_DESC_F_WRITE: u16 = 0x2;
 
     pub fn create_vm_and_irq_manager() -> (Arc<VmFd>, Arc<KvmIrqManager>) {
         let kvm = Kvm::new().unwrap();
@@ -159,5 +169,238 @@ pub mod tests {
         assert!(irq_manager.initialize().is_ok());
 
         (vmfd, irq_manager)
+    }
+
+    // Represents a virtio descriptor in guest memory.
+    pub struct VirtqDesc<'a> {
+        pub desc: VolatileSlice<'a>,
+    }
+
+    #[repr(C)]
+    // Used to calculate field offset
+    pub struct DescriptorTmp {
+        addr: vm_memory::Le64,
+        len: vm_memory::Le32,
+        flags: vm_memory::Le16,
+        next: vm_memory::Le16,
+    }
+
+    macro_rules! offset_of {
+        ($ty:ty, $field:ident) => {
+            #[allow(deref_nullptr)]
+            //unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
+            unsafe {
+                &(*std::ptr::null::<$ty>()).$field as *const _ as usize
+            }
+        };
+    }
+
+    impl<'a> VirtqDesc<'a> {
+        fn new(dtable: &'a VolatileSlice<'a>, i: u16) -> Self {
+            let desc = dtable
+                .get_slice((i as usize) * Self::dtable_len(1), Self::dtable_len(1))
+                .unwrap();
+            VirtqDesc { desc }
+        }
+
+        pub fn addr(&self) -> VolatileRef<u64> {
+            self.desc.get_ref(offset_of!(DescriptorTmp, addr)).unwrap()
+        }
+
+        pub fn len(&self) -> VolatileRef<u32> {
+            self.desc.get_ref(offset_of!(DescriptorTmp, len)).unwrap()
+        }
+
+        pub fn flags(&self) -> VolatileRef<u16> {
+            self.desc.get_ref(offset_of!(DescriptorTmp, flags)).unwrap()
+        }
+
+        pub fn next(&self) -> VolatileRef<u16> {
+            self.desc.get_ref(offset_of!(DescriptorTmp, next)).unwrap()
+        }
+
+        pub fn set(&self, addr: u64, len: u32, flags: u16, next: u16) {
+            self.addr().store(addr);
+            self.len().store(len);
+            self.flags().store(flags);
+            self.next().store(next);
+        }
+
+        fn dtable_len(nelem: u16) -> usize {
+            16 * nelem as usize
+        }
+    }
+
+    // Represents a virtio queue ring. The only difference between the used and available rings,
+    // is the ring element type.
+    pub struct VirtqRing<'a, T> {
+        pub ring: VolatileSlice<'a>,
+        pub start: GuestAddress,
+        pub qsize: u16,
+        _marker: PhantomData<*const T>,
+    }
+
+    impl<'a, T> VirtqRing<'a, T>
+    where
+        T: vm_memory::ByteValued,
+    {
+        fn new(
+            start: GuestAddress,
+            mem: &'a GuestMemoryMmap,
+            qsize: u16,
+            alignment: GuestUsize,
+        ) -> Self {
+            assert_eq!(start.0 & (alignment - 1), 0);
+
+            let (region, addr) = mem.to_region_addr(start).unwrap();
+            let size = Self::ring_len(qsize);
+            let ring = region.get_slice(addr.0 as usize, size).unwrap();
+
+            let result = VirtqRing {
+                ring,
+                start,
+                qsize,
+                _marker: PhantomData,
+            };
+
+            result.flags().store(0);
+            result.idx().store(0);
+            result.event().store(0);
+            result
+        }
+
+        pub fn start(&self) -> GuestAddress {
+            self.start
+        }
+
+        pub fn end(&self) -> GuestAddress {
+            self.start.unchecked_add(self.ring.len() as GuestUsize)
+        }
+
+        pub fn flags(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(0).unwrap()
+        }
+
+        pub fn idx(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(2).unwrap()
+        }
+
+        fn ring_offset(i: u16) -> usize {
+            4 + mem::size_of::<T>() * (i as usize)
+        }
+
+        pub fn ring(&self, i: u16) -> VolatileRef<T> {
+            assert!(i < self.qsize);
+            self.ring.get_ref(Self::ring_offset(i)).unwrap()
+        }
+
+        pub fn event(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(Self::ring_offset(self.qsize)).unwrap()
+        }
+
+        fn ring_len(qsize: u16) -> usize {
+            Self::ring_offset(qsize) + 2
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    pub struct VirtqUsedElem {
+        pub id: u32,
+        pub len: u32,
+    }
+
+    unsafe impl vm_memory::ByteValued for VirtqUsedElem {}
+
+    pub type VirtqAvail<'a> = VirtqRing<'a, u16>;
+    pub type VirtqUsed<'a> = VirtqRing<'a, VirtqUsedElem>;
+
+    trait GuestAddressExt {
+        fn align_up(&self, x: GuestUsize) -> GuestAddress;
+    }
+    impl GuestAddressExt for GuestAddress {
+        fn align_up(&self, x: GuestUsize) -> GuestAddress {
+            Self((self.0 + (x - 1)) & !(x - 1))
+        }
+    }
+
+    pub struct VirtQueue<'a> {
+        pub start: GuestAddress,
+        pub dtable: VolatileSlice<'a>,
+        pub avail: VirtqAvail<'a>,
+        pub used: VirtqUsed<'a>,
+    }
+
+    impl<'a> VirtQueue<'a> {
+        // We try to make sure things are aligned properly :-s
+        pub fn new(start: GuestAddress, mem: &'a GuestMemoryMmap, qsize: u16) -> Self {
+            // power of 2?
+            assert!(qsize > 0 && qsize & (qsize - 1) == 0);
+
+            let (region, addr) = mem.to_region_addr(start).unwrap();
+            let dtable = region
+                .get_slice(addr.0 as usize, VirtqDesc::dtable_len(qsize))
+                .unwrap();
+
+            const AVAIL_ALIGN: GuestUsize = 2;
+
+            let avail_addr = start
+                .unchecked_add(VirtqDesc::dtable_len(qsize) as GuestUsize)
+                .align_up(AVAIL_ALIGN);
+            let avail = VirtqAvail::new(avail_addr, mem, qsize, AVAIL_ALIGN);
+
+            const USED_ALIGN: GuestUsize = 4;
+
+            let used_addr = avail.end().align_up(USED_ALIGN);
+            let used = VirtqUsed::new(used_addr, mem, qsize, USED_ALIGN);
+
+            VirtQueue {
+                start,
+                dtable,
+                avail,
+                used,
+            }
+        }
+
+        fn size(&self) -> u16 {
+            (self.dtable.len() / VirtqDesc::dtable_len(1)) as u16
+        }
+
+        pub fn dtable(&self, i: u16) -> VirtqDesc {
+            VirtqDesc::new(&self.dtable, i)
+        }
+
+        fn dtable_start(&self) -> GuestAddress {
+            self.start
+        }
+
+        fn avail_start(&self) -> GuestAddress {
+            self.avail.start()
+        }
+
+        fn used_start(&self) -> GuestAddress {
+            self.used.start()
+        }
+
+        // Creates a new QueueState, using the underlying memory regions represented by the VirtQueue.
+        pub fn create_queue(&self) -> QueueState {
+            let mut q = QueueState::new(self.size());
+
+            q.size = self.size();
+            q.ready = true;
+            q.desc_table = self.dtable_start();
+            q.avail_ring = self.avail_start();
+            q.used_ring = self.used_start();
+
+            q
+        }
+
+        pub fn start(&self) -> GuestAddress {
+            self.dtable_start()
+        }
+
+        pub fn end(&self) -> GuestAddress {
+            self.used.end()
+        }
     }
 }

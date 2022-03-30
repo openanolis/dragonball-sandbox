@@ -142,3 +142,133 @@ impl Default for TxBuf {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Error as IoError;
+    use std::io::Result as IoResult;
+    use std::io::{ErrorKind, Write};
+
+    struct TestSink {
+        data: Vec<u8>,
+        err: Option<IoError>,
+        capacity: usize,
+    }
+
+    impl TestSink {
+        const DEFAULT_CAPACITY: usize = 2 * TxBuf::SIZE;
+        fn new() -> Self {
+            Self {
+                data: Vec::with_capacity(Self::DEFAULT_CAPACITY),
+                err: None,
+                capacity: Self::DEFAULT_CAPACITY,
+            }
+        }
+    }
+
+    impl Write for TestSink {
+        fn write(&mut self, src: &[u8]) -> IoResult<usize> {
+            if self.err.is_some() {
+                return Err(self.err.take().unwrap());
+            }
+            let len_to_push = std::cmp::min(self.capacity - self.data.len(), src.len());
+            self.data.extend_from_slice(&src[..len_to_push]);
+            Ok(len_to_push)
+        }
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    impl TestSink {
+        fn clear(&mut self) {
+            self.data = Vec::with_capacity(self.capacity);
+            self.err = None;
+        }
+        fn set_err(&mut self, err: IoError) {
+            self.err = Some(err);
+        }
+        fn set_capacity(&mut self, capacity: usize) {
+            self.capacity = capacity;
+            if self.data.len() > self.capacity {
+                self.data.resize(self.capacity, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_push_nowrap() {
+        let mut txbuf = TxBuf::default();
+        let mut sink = TestSink::new();
+        assert!(txbuf.is_empty());
+
+        assert!(txbuf.data.is_none());
+        txbuf.push(&[1, 2, 3, 4]).unwrap();
+        txbuf.push(&[5, 6, 7, 8]).unwrap();
+        txbuf.flush_to(&mut sink).unwrap();
+        assert_eq!(sink.data, [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn test_push_wrap() {
+        let mut txbuf = TxBuf::default();
+        let mut sink = TestSink::new();
+        let mut tmp: Vec<u8> = Vec::new();
+
+        tmp.resize(TxBuf::SIZE - 2, 0);
+        txbuf.push(tmp.as_slice()).unwrap();
+        txbuf.flush_to(&mut sink).unwrap();
+        sink.clear();
+
+        txbuf.push(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 4);
+        assert_eq!(sink.data, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_push_error() {
+        let mut txbuf = TxBuf::default();
+        let mut tmp = Vec::with_capacity(TxBuf::SIZE);
+
+        tmp.resize(TxBuf::SIZE - 1, 0);
+        txbuf.push(tmp.as_slice()).unwrap();
+        match txbuf.push(&[1, 2]) {
+            Err(Error::TxBufFull) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_incomplete_flush() {
+        let mut txbuf = TxBuf::default();
+        let mut sink = TestSink::new();
+
+        sink.set_capacity(2);
+        txbuf.push(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 2);
+        assert_eq!(txbuf.len(), 2);
+        assert_eq!(sink.data, [1, 2]);
+
+        sink.set_capacity(4);
+        assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 2);
+        assert!(txbuf.is_empty());
+        assert_eq!(sink.data, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_flush_error() {
+        const EACCESS: i32 = 13;
+
+        let mut txbuf = TxBuf::default();
+        let mut sink = TestSink::new();
+
+        txbuf.push(&[1, 2, 3, 4]).unwrap();
+        let io_err = IoError::from_raw_os_error(EACCESS);
+        sink.set_err(io_err);
+        match txbuf.flush_to(&mut sink) {
+            Err(Error::TxBufFlush(ref err)) if err.kind() == ErrorKind::PermissionDenied => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+}

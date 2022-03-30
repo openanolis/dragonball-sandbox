@@ -307,3 +307,329 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+    use vmm_sys_util::epoll::EventSet;
+
+    use super::super::packet::VSOCK_PKT_HDR_SIZE;
+    use super::super::tests::TestContext;
+    use super::super::VsockError;
+    use super::*;
+
+    #[test]
+    fn test_irq() {
+        let test_ctx = TestContext::new();
+        let mut ctx = test_ctx.create_event_handler_context();
+        ctx.arti_activate(&test_ctx.mem);
+
+        assert!(ctx.signal_used_queue(0).is_ok());
+    }
+
+    #[test]
+    fn test_txq_event() {
+        // Test case:
+        // - the driver has something to send (there's data in the TX queue);
+        //   and
+        // - the backend has no pending RX data.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(false);
+            }
+            ctx.signal_txq_event();
+
+            // The available TX descriptor should have been used.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            // The available RX descriptor should be untouched.
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+        }
+
+        // Test case:
+        // - the driver has something to send (there's data in the TX queue);
+        //   and
+        // - the backend also has some pending RX data.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(true);
+            }
+            ctx.signal_txq_event();
+
+            // Both available RX and TX descriptors should have been used.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+        }
+
+        // Test case:
+        // - the driver has something to send (there's data in the TX queue);
+        //   and
+        // - the backend errors out and cannot process the TX queue.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(false);
+                epoll_handler.muxer.set_tx_err(Some(VsockError::NoData));
+            }
+            ctx.signal_txq_event();
+
+            // Both RX and TX queues should be untouched.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 0);
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+        }
+
+        // Test case:
+        // - the driver supplied a malformed TX buffer.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            // Invalidate the packet header descriptor, by setting its length to
+            // 0.
+            ctx.guest_txvq.dtable(0).len().store(0);
+            ctx.signal_txq_event();
+
+            // The available descriptor should have been consumed, but no packet
+            // should have reached the backend.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                assert_eq!(epoll_handler.muxer.tx_ok_cnt, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_rxq_event() {
+        // Test case:
+        // - there is pending RX data in the backend; and
+        // - the driver makes RX buffers available; and
+        // - the backend successfully places its RX data into the queue.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(true);
+                epoll_handler.muxer.set_rx_err(Some(VsockError::NoData));
+            }
+            ctx.signal_rxq_event();
+
+            // The available RX buffer should've been left untouched.
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+        }
+
+        // Test case:
+        // - there is pending RX data in the backend; and
+        // - the driver makes RX buffers available; and
+        // - the backend errors out, when attempting to receive data.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(true);
+            }
+            ctx.signal_rxq_event();
+
+            // The available RX buffer should have been used.
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+        }
+
+        // Test case: the driver provided a malformed RX descriptor chain.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            // Invalidate the packet header descriptor, by setting its length to 0.
+            ctx.guest_rxvq.dtable(0).len().store(0);
+
+            // The chain should've been processed, without employing the backend.
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.process_rx(&test_ctx.mem);
+                assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+                assert_eq!(epoll_handler.muxer.rx_ok_cnt, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_backend_event() {
+        // Test case:
+        // - a backend event is received; and
+        // - the backend has pending RX data.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(true);
+                epoll_handler
+                    .notify_backend_event(&Events::new_raw(0, EventSet::IN), &test_ctx.mem);
+
+                // The backend should've received this event
+                assert_eq!(epoll_handler.muxer.evset, Some(epoll::Events::EPOLLIN));
+            }
+
+            // TX queue processing should've been triggered.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            // RX queue processing should've been triggered.
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+        }
+
+        // Test case:
+        // - a backend event is received; and
+        // - the backend doesn't have any pending RX data.
+        {
+            let test_ctx = TestContext::new();
+            let mut ctx = test_ctx.create_event_handler_context();
+            ctx.arti_activate(&test_ctx.mem);
+
+            if let Some(epoll_handler) = &mut ctx.epoll_handler {
+                epoll_handler.muxer.set_pending_rx(false);
+                epoll_handler
+                    .notify_backend_event(&Events::new_raw(0, EventSet::IN), &test_ctx.mem);
+
+                // The backend should've received this event.
+                assert_eq!(epoll_handler.muxer.evset, Some(epoll::Events::EPOLLIN));
+            }
+            // TX queue processing should've been triggered.
+            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            // The RX queue should've been left untouched.
+            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+        }
+    }
+
+    // Creates an epoll handler context and attempts to assemble a VsockPkt from
+    // the descriptor chains available on the rx and tx virtqueues, but first it
+    // will set the addr and len of the descriptor specified by desc_idx to the
+    // provided values. We are only using this function for testing error cases,
+    // so the asserts always expect is_err() to be true. When desc_idx = 0 we
+    // are altering the header (first descriptor in the chain), and when
+    // desc_idx = 1 we are altering the packet buffer.
+    fn vsock_bof_helper(test_ctx: &mut TestContext, desc_idx: usize, addr: u64, len: u32) {
+        assert!(desc_idx <= 1);
+
+        {
+            // should error here, but it works
+            // let mut ctx = test_ctx.create_event_handler_context();
+            // ctx.guest_rxvq.dtable(desc_idx as u16).addr().store(addr);
+            // ctx.guest_rxvq.dtable(desc_idx as u16).len().store(len);
+            // // If the descriptor chain is already declared invalid, there's no
+            // // reason to assemble a packet.
+            // if let Some(mut rx_desc) = ctx.queues[defs::RXQ_EVENT as usize]
+            //     .iter(&mut test_ctx.mem)
+            //     .next()
+            // {
+            //     assert!(VsockPacket::from_rx_virtq_head(&mut rx_desc).is_err());
+            // }
+        }
+
+        {
+            let mut ctx = test_ctx.create_event_handler_context();
+
+            // When modifiyng the buffer descriptor, make sure the len field is altered in the
+            // vsock packet header descriptor as well.
+            if desc_idx == 1 {
+                // The vsock packet len field has offset 24 in the header.
+                let hdr_len_addr = GuestAddress(ctx.guest_txvq.dtable(0).addr().load() + 24);
+                test_ctx
+                    .mem
+                    .write_obj(len.to_le_bytes(), hdr_len_addr)
+                    .unwrap();
+            }
+
+            ctx.guest_txvq.dtable(desc_idx as u16).addr().store(addr);
+            ctx.guest_txvq.dtable(desc_idx as u16).len().store(len);
+
+            if let Some(mut tx_desc) = ctx.queues[defs::TXQ_EVENT as usize]
+                .queue_mut()
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+            {
+                assert!(VsockPacket::from_tx_virtq_head(&mut tx_desc).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn test_vsock_bof() {
+        const GAP_SIZE: usize = 768 << 20;
+        const FIRST_AFTER_GAP: usize = 1 << 32;
+        const GAP_START_ADDR: usize = FIRST_AFTER_GAP - GAP_SIZE;
+        const MIB: usize = 1 << 20;
+
+        let mut test_ctx = TestContext::new();
+        test_ctx.mem = GuestMemoryMmap::from_ranges(&[
+            (GuestAddress(0), 8 * MIB),
+            (GuestAddress((GAP_START_ADDR - MIB) as u64), MIB),
+            (GuestAddress(FIRST_AFTER_GAP as u64), MIB),
+        ])
+        .unwrap();
+
+        // The default configured descriptor chains are valid.
+        {
+            let mut ctx = test_ctx.create_event_handler_context();
+            let mut rx_desc = ctx.queues[defs::RXQ_EVENT as usize]
+                .queue_mut()
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap();
+            assert!(VsockPacket::from_rx_virtq_head(&mut rx_desc).is_ok());
+        }
+
+        {
+            let mut ctx = test_ctx.create_event_handler_context();
+            let mut tx_desc = ctx.queues[defs::TXQ_EVENT as usize]
+                .queue_mut()
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap();
+            assert!(VsockPacket::from_tx_virtq_head(&mut tx_desc).is_ok());
+        }
+
+        // Let's check what happens when the header descriptor is right before
+        // the gap.
+        vsock_bof_helper(
+            &mut test_ctx,
+            0,
+            GAP_START_ADDR as u64 - 1,
+            VSOCK_PKT_HDR_SIZE as u32,
+        );
+
+        // Let's check what happens when the buffer descriptor crosses into the
+        // gap, but does not go past its right edge.
+        vsock_bof_helper(
+            &mut test_ctx,
+            1,
+            GAP_START_ADDR as u64 - 4,
+            GAP_SIZE as u32 + 4,
+        );
+
+        // Let's modify the buffer descriptor addr and len such that it crosses
+        // over the MMIO gap, and check we cannot assemble the VsockPkts.
+        vsock_bof_helper(
+            &mut test_ctx,
+            1,
+            GAP_START_ADDR as u64 - 4,
+            GAP_SIZE as u32 + 100,
+        );
+    }
+}
