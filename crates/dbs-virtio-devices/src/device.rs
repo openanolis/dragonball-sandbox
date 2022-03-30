@@ -506,7 +506,10 @@ impl VirtioDeviceInfo {
     }
 
     /// Validate size of queues and queue eventfds.
-    pub fn check_queue_sizes(&self, queues: &[VirtioQueueConfig]) -> ActivateResult {
+    pub fn check_queue_sizes<Q: QueueStateT>(
+        &self,
+        queues: &[VirtioQueueConfig<Q>],
+    ) -> ActivateResult {
         if queues.is_empty() || queues.len() != self.queue_sizes.len() {
             error!(
                 "{}: invalid configuration: maximum {} queue(s), got {} queues",
@@ -796,7 +799,9 @@ pub(crate) mod tests {
         // test device info check_queue_sizes
         let queue_size = Vec::new();
         assert!(matches!(
-            device.device_info.check_queue_sizes(&queue_size),
+            device
+                .device_info
+                .check_queue_sizes::<QueueState>(&queue_size),
             Err(ActivateError::InvalidParam)
         ));
 
