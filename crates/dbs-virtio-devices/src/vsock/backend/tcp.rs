@@ -89,3 +89,82 @@ impl VsockBackend for VsockTcpBackend {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    use super::*;
+
+    #[test]
+    fn test_tcp_backend_bind() {
+        let tcp_sock_addr = String::from("127.0.0.2:9000");
+        assert!(VsockTcpBackend::new(tcp_sock_addr).is_ok());
+    }
+
+    #[test]
+    fn test_tcp_backend_accept() {
+        let tcp_sock_addr = String::from("127.0.0.2:9001");
+
+        let mut vsock_backend = VsockTcpBackend::new(tcp_sock_addr.clone()).unwrap();
+        let _stream = TcpStream::connect(&tcp_sock_addr).unwrap();
+
+        assert!(vsock_backend.accept().is_ok());
+    }
+
+    #[test]
+    fn test_tcp_backend_communication() {
+        let tcp_sock_addr = String::from("127.0.0.2:9002");
+        let test_string = String::from("TEST");
+        let mut buffer = [0; 10];
+
+        let mut vsock_backend = VsockTcpBackend::new(tcp_sock_addr.clone()).unwrap();
+        let mut stream_connect = TcpStream::connect(&tcp_sock_addr).unwrap();
+        stream_connect.set_nonblocking(true).unwrap();
+        let mut stream_backend = vsock_backend.accept().unwrap();
+
+        assert!(stream_connect
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_backend.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+
+        assert!(stream_backend
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_connect.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+    }
+
+    #[test]
+    fn test_tcp_backend_connect() {
+        let tcp_sock_addr = String::from("127.0.0.2:9003");
+        let vsock_backend = VsockTcpBackend::new(tcp_sock_addr).unwrap();
+        // tcp backend don't support peer connection
+        assert!(vsock_backend.connect(0).is_err());
+    }
+
+    #[test]
+    fn test_tcp_backend_type() {
+        let tcp_sock_addr = String::from("127.0.0.2:9004");
+        let vsock_backend = VsockTcpBackend::new(tcp_sock_addr).unwrap();
+        assert_eq!(vsock_backend.r#type(), VsockBackendType::Tcp);
+    }
+
+    #[test]
+    fn test_tcp_backend_vsock_stream() {
+        let tcp_sock_addr = String::from("127.0.0.2:9003");
+        let _vsock_backend = VsockTcpBackend::new(tcp_sock_addr.clone()).unwrap();
+        let vsock_stream = TcpStream::connect(&tcp_sock_addr).unwrap();
+
+        assert!(vsock_stream.set_nonblocking(true).is_ok());
+        assert!(vsock_stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .is_ok());
+        assert!(vsock_stream.set_read_timeout(None).is_ok());
+        assert!(vsock_stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .is_ok());
+    }
+}

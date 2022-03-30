@@ -90,3 +90,106 @@ impl VsockBackend for VsockUnixStreamBackend {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn test_unix_backend_bind() {
+        let host_sock_path = String::from("/tmp/host_sock_path_1");
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+
+        assert!(VsockUnixStreamBackend::new(host_sock_path.clone()).is_ok());
+
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_unix_backend_accept() {
+        let host_sock_path = String::from("/tmp/host_sock_path_2");
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+
+        let mut vsock_backend = VsockUnixStreamBackend::new(host_sock_path.clone()).unwrap();
+        let _stream = UnixStream::connect(&host_sock_path).unwrap();
+
+        assert!(vsock_backend.accept().is_ok());
+
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_unix_backend_communication() {
+        let host_sock_path = String::from("/tmp/host_sock_path_3");
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+        let test_string = String::from("TEST");
+        let mut buffer = [0; 10];
+
+        let mut vsock_backend = VsockUnixStreamBackend::new(host_sock_path.clone()).unwrap();
+        let mut stream_connect = UnixStream::connect(&host_sock_path).unwrap();
+        stream_connect.set_nonblocking(true).unwrap();
+        let mut stream_backend = vsock_backend.accept().unwrap();
+
+        assert!(stream_connect
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_backend.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+
+        assert!(stream_backend
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_connect.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_unix_backend_connect() {
+        let host_sock_path = String::from("/tmp/host_sock_path_4");
+        let local_server_port = 1;
+        let local_server_path = format!("{}_{}", host_sock_path, local_server_port);
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+        fs::remove_file(Path::new(&local_server_path)).unwrap_or_default();
+
+        let _local_listener = UnixListener::bind(&local_server_path).unwrap();
+        let vsock_backend = VsockUnixStreamBackend::new(host_sock_path.clone()).unwrap();
+
+        assert!(vsock_backend.connect(local_server_port).is_ok());
+
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+        fs::remove_file(Path::new(&local_server_path)).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_unix_backend_type() {
+        let host_sock_path = String::from("/tmp/host_sock_path_5");
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+
+        let vsock_backend = VsockUnixStreamBackend::new(host_sock_path.clone()).unwrap();
+        assert_eq!(vsock_backend.r#type(), VsockBackendType::UnixStream);
+
+        fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_unix_backend_vsock_stream() {
+        let (sock1, _sock2) = UnixStream::pair().unwrap();
+        let mut vsock_stream: Box<dyn VsockStream> = Box::new(sock1);
+
+        assert!(vsock_stream.set_nonblocking(true).is_ok());
+        assert!(vsock_stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .is_ok());
+        assert!(vsock_stream.set_read_timeout(None).is_ok());
+        assert!(vsock_stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .is_ok());
+    }
+}

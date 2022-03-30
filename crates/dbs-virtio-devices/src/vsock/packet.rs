@@ -445,3 +445,332 @@ impl VsockPacket {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+
+    use super::super::defs::MAX_PKT_BUF_SIZE;
+    use super::super::tests::{test_bytes, TestContext};
+    use super::defs::{RXQ_EVENT, TXQ_EVENT};
+    use super::*;
+    use crate::tests::{VirtqDesc as GuestQDesc, VIRTQ_DESC_F_WRITE};
+
+    const HDROFF_SRC_CID: usize = 0;
+    const HDROFF_DST_CID: usize = 8;
+    const HDROFF_SRC_PORT: usize = 16;
+    const HDROFF_DST_PORT: usize = 20;
+    const HDROFF_LEN: usize = 24;
+    const HDROFF_TYPE: usize = 28;
+    const HDROFF_OP: usize = 30;
+    const HDROFF_FLAGS: usize = 32;
+    const HDROFF_BUF_ALLOC: usize = 36;
+    const HDROFF_FWD_CNT: usize = 40;
+
+    macro_rules! create_context {
+        ($test_ctx:ident, $handler_ctx:ident) => {
+            let $test_ctx = TestContext::new();
+            let mut $handler_ctx = $test_ctx.create_event_handler_context();
+            // For TX packets, hdr.len should be set to a valid value.
+            set_pkt_len(1024, &$handler_ctx.guest_txvq.dtable(0), &$test_ctx.mem);
+        };
+    }
+
+    macro_rules! expect_asm_error {
+        (tx, $test_ctx:expr, $handler_ctx:expr, $err:pat) => {
+            expect_asm_error!($test_ctx, $handler_ctx, $err, from_tx_virtq_head, TXQ_EVENT);
+        };
+        (rx, $test_ctx:expr, $handler_ctx:expr, $err:pat) => {
+            expect_asm_error!($test_ctx, $handler_ctx, $err, from_rx_virtq_head, RXQ_EVENT);
+        };
+        ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq_index:ident) => {
+            match VsockPacket::$ctor(
+                &mut $handler_ctx.queues[$vq_index as usize]
+                    .queue_mut()
+                    .iter(&$test_ctx.mem)
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            ) {
+                Err($err) => (),
+                Ok(_) => panic!("Packet assembly should've failed!"),
+                Err(other) => panic!("Packet assembly failed with: {:?}", other),
+            }
+        };
+    }
+
+    fn set_pkt_len(len: u32, guest_desc: &GuestQDesc, mem: &GuestMemoryMmap) {
+        let hdr_gpa = guest_desc.addr();
+        let hdr_ptr = mem.get_host_address(GuestAddress(hdr_gpa.load())).unwrap();
+        let len_ptr = unsafe { hdr_ptr.add(HDROFF_LEN) };
+
+        unsafe { std::slice::from_raw_parts_mut(len_ptr, 4).copy_from_slice(&len.to_le_bytes()) };
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn test_tx_packet_assembly() {
+        // Test case: successful TX packet assembly.
+        {
+            create_context!(test_ctx, handler_ctx);
+            let pkt = VsockPacket::from_tx_virtq_head(
+                &mut handler_ctx.queues[TXQ_EVENT as usize]
+                    .queue_mut()
+                    .iter(&test_ctx.mem)
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
+            assert_eq!(
+                pkt.buf().unwrap().len(),
+                handler_ctx.guest_txvq.dtable(1).len().load() as usize
+            );
+        }
+
+        // Test case: error on write-only hdr descriptor.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx
+                .guest_txvq
+                .dtable(0)
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
+        }
+
+        // Test case: header descriptor has insufficient space to hold the packet header.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx
+                .guest_txvq
+                .dtable(0)
+                .len()
+                .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
+        }
+
+        // Test case: zero-length TX packet.
+        {
+            create_context!(test_ctx, handler_ctx);
+            set_pkt_len(0, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
+            let mut pkt = VsockPacket::from_tx_virtq_head(
+                &mut handler_ctx.queues[TXQ_EVENT as usize]
+                    .queue_mut()
+                    .iter(&test_ctx.mem)
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(pkt.buf().is_none());
+            assert!(pkt.buf_mut().is_none());
+        }
+
+        // Test case: TX packet has more data than we can handle.
+        {
+            create_context!(test_ctx, handler_ctx);
+            set_pkt_len(
+                MAX_PKT_BUF_SIZE as u32 + 1,
+                &handler_ctx.guest_txvq.dtable(0),
+                &test_ctx.mem,
+            );
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::InvalidPktLen(_));
+        }
+
+        // Test case:
+        // - packet header advertises some data length; and
+        // - the data descriptor is missing.
+        {
+            create_context!(test_ctx, handler_ctx);
+            set_pkt_len(1024, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
+            handler_ctx.guest_txvq.dtable(0).flags().store(0);
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescMissing);
+        }
+
+        // Test case: error on write-only buf descriptor.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx
+                .guest_txvq
+                .dtable(1)
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
+        }
+
+        // Test case: the buffer descriptor cannot fit all the data advertised by the the
+        // packet header `len` field.
+        {
+            create_context!(test_ctx, handler_ctx);
+            set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
+            handler_ctx.guest_txvq.dtable(1).len().store(4 * 1024);
+            expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescTooSmall);
+        }
+    }
+
+    #[test]
+    fn test_rx_packet_assembly() {
+        // Test case: successful RX packet assembly.
+        {
+            create_context!(test_ctx, handler_ctx);
+            let pkt = VsockPacket::from_rx_virtq_head(
+                &mut handler_ctx.queues[RXQ_EVENT as usize]
+                    .queue_mut()
+                    .iter(&test_ctx.mem)
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
+            assert_eq!(
+                pkt.buf().unwrap().len(),
+                handler_ctx.guest_rxvq.dtable(1).len().load() as usize
+            );
+        }
+
+        // Test case: read-only RX packet header.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx.guest_rxvq.dtable(0).flags().store(0);
+            expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::UnwritableDescriptor);
+        }
+
+        // Test case: RX descriptor head cannot fit the entire packet header.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx
+                .guest_rxvq
+                .dtable(0)
+                .len()
+                .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
+            expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
+        }
+
+        // Test case: RX descriptor chain is missing the packet buffer descriptor.
+        {
+            create_context!(test_ctx, handler_ctx);
+            handler_ctx
+                .guest_rxvq
+                .dtable(0)
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
+            expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::BufDescMissing);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn test_packet_hdr_accessors() {
+        const SRC_CID: u64 = 1;
+        const DST_CID: u64 = 2;
+        const SRC_PORT: u32 = 3;
+        const DST_PORT: u32 = 4;
+        const LEN: u32 = 5;
+        const TYPE: u16 = 6;
+        const OP: u16 = 7;
+        const FLAGS: u32 = 8;
+        const BUF_ALLOC: u32 = 9;
+        const FWD_CNT: u32 = 10;
+
+        create_context!(test_ctx, handler_ctx);
+        let mut pkt = VsockPacket::from_rx_virtq_head(
+            &mut handler_ctx.queues[RXQ_EVENT as usize]
+                .queue_mut()
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+
+        // Test field accessors.
+        pkt.set_src_cid(SRC_CID)
+            .set_dst_cid(DST_CID)
+            .set_src_port(SRC_PORT)
+            .set_dst_port(DST_PORT)
+            .set_len(LEN)
+            .set_type(TYPE)
+            .set_op(OP)
+            .set_flags(FLAGS)
+            .set_buf_alloc(BUF_ALLOC)
+            .set_fwd_cnt(FWD_CNT);
+
+        assert_eq!(pkt.src_cid(), SRC_CID);
+        assert_eq!(pkt.dst_cid(), DST_CID);
+        assert_eq!(pkt.src_port(), SRC_PORT);
+        assert_eq!(pkt.dst_port(), DST_PORT);
+        assert_eq!(pkt.len(), LEN);
+        assert_eq!(pkt.type_(), TYPE);
+        assert_eq!(pkt.op(), OP);
+        assert_eq!(pkt.flags(), FLAGS);
+        assert_eq!(pkt.buf_alloc(), BUF_ALLOC);
+        assert_eq!(pkt.fwd_cnt(), FWD_CNT);
+
+        // Test individual flag setting.
+        let flags = pkt.flags() | 0b1000;
+        pkt.set_flag(0b1000);
+        assert_eq!(pkt.flags(), flags);
+
+        // Test packet header as-slice access.
+        //
+
+        assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
+
+        test_bytes(&SRC_CID.to_le_bytes(), &pkt.hdr()[HDROFF_SRC_CID..]);
+        test_bytes(&DST_CID.to_le_bytes(), &pkt.hdr()[HDROFF_DST_CID..]);
+        test_bytes(&SRC_PORT.to_le_bytes(), &pkt.hdr()[HDROFF_SRC_PORT..]);
+        test_bytes(&DST_PORT.to_le_bytes(), &pkt.hdr()[HDROFF_DST_PORT..]);
+        test_bytes(&LEN.to_le_bytes(), &pkt.hdr()[HDROFF_LEN..]);
+        test_bytes(&TYPE.to_le_bytes(), &pkt.hdr()[HDROFF_TYPE..]);
+        test_bytes(&OP.to_le_bytes(), &pkt.hdr()[HDROFF_OP..]);
+        test_bytes(&FLAGS.to_le_bytes(), &pkt.hdr()[HDROFF_FLAGS..]);
+        test_bytes(&BUF_ALLOC.to_le_bytes(), &pkt.hdr()[HDROFF_BUF_ALLOC..]);
+        test_bytes(&FWD_CNT.to_le_bytes(), &pkt.hdr()[HDROFF_FWD_CNT..]);
+
+        assert_eq!(pkt.hdr_mut().len(), VSOCK_PKT_HDR_SIZE);
+        for b in pkt.hdr_mut() {
+            *b = 0;
+        }
+        assert_eq!(pkt.src_cid(), 0);
+        assert_eq!(pkt.dst_cid(), 0);
+        assert_eq!(pkt.src_port(), 0);
+        assert_eq!(pkt.dst_port(), 0);
+        assert_eq!(pkt.len(), 0);
+        assert_eq!(pkt.type_(), 0);
+        assert_eq!(pkt.op(), 0);
+        assert_eq!(pkt.flags(), 0);
+        assert_eq!(pkt.buf_alloc(), 0);
+        assert_eq!(pkt.fwd_cnt(), 0);
+    }
+
+    #[test]
+    fn test_packet_buf() {
+        create_context!(test_ctx, handler_ctx);
+        let mut pkt = VsockPacket::from_rx_virtq_head(
+            &mut handler_ctx.queues[RXQ_EVENT as usize]
+                .queue_mut()
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            pkt.buf().unwrap().len(),
+            handler_ctx.guest_rxvq.dtable(1).len().load() as usize
+        );
+        assert_eq!(
+            pkt.buf_mut().unwrap().len(),
+            handler_ctx.guest_rxvq.dtable(1).len().load() as usize
+        );
+
+        for i in 0..pkt.buf().unwrap().len() {
+            pkt.buf_mut().unwrap()[i] = (i % 0x100) as u8;
+            assert_eq!(pkt.buf().unwrap()[i], (i % 0x100) as u8);
+        }
+    }
+}

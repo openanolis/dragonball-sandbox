@@ -184,3 +184,163 @@ where
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use dbs_device::resources::DeviceResources;
+    use dbs_interrupt::NoopNotifier;
+    use kvm_ioctls::Kvm;
+    use virtio_queue::QueueState;
+    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
+
+    use super::super::defs::uapi;
+    use super::super::tests::{test_bytes, TestContext};
+    use super::*;
+    use crate::device::VirtioDeviceConfig;
+    use crate::VirtioQueueConfig;
+
+    impl<AS: DbsGuestAddressSpace, M: VsockGenericMuxer + 'static> Vsock<AS, M> {
+        pub fn mock_activate(
+            &mut self,
+            config: VirtioDeviceConfig<AS, QueueState, GuestRegionMmap>,
+        ) -> Result<VsockEpollHandler<AS, QueueState, GuestRegionMmap, M>> {
+            trace!(target: "virtio-vsock", "{}: VirtioDevice::activate_re()", self.id());
+
+            self.device_info
+                .check_queue_sizes(&config.queues[..])
+                .unwrap();
+            let handler: VsockEpollHandler<AS, QueueState, GuestRegionMmap, M> =
+                VsockEpollHandler::new(
+                    config,
+                    self.id().to_owned(),
+                    self.cid,
+                    // safe to unwrap, because we create muxer using New()
+                    self.muxer.take().unwrap(),
+                );
+
+            Ok(handler)
+        }
+    }
+
+    #[test]
+    fn test_virtio_device() {
+        let mut ctx = TestContext::new();
+        let device_features = VSOCK_AVAIL_FEATURES;
+        let driver_features: u64 = VSOCK_AVAIL_FEATURES | 1 | (1 << 32);
+        let device_pages = [
+            (device_features & 0xffff_ffff) as u32,
+            (device_features >> 32) as u32,
+        ];
+        let driver_pages = [
+            (driver_features & 0xffff_ffff) as u32,
+            (driver_features >> 32) as u32,
+        ];
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::device_type(
+                &ctx.device
+            ),
+            uapi::VIRTIO_ID_VSOCK
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(
+                &ctx.device, 0
+            ),
+            device_pages[0]
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(
+                &ctx.device, 1
+            ),
+            device_pages[1]
+        );
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(
+                &ctx.device, 2
+            ),
+            0
+        );
+
+        // Ack device features, page 0.
+        ctx.device
+            .device_info
+            .set_acked_features(0, driver_pages[0]);
+        // Ack device features, page 1.
+        ctx.device
+            .device_info
+            .set_acked_features(1, driver_pages[1]);
+        // Ack some bogus page (i.e. 2). This should have no side effect.
+        ctx.device.device_info.set_acked_features(2, 0);
+        // Attempt to un-ack the first feature page. This should have no side effect.
+        ctx.device
+            .device_info
+            .set_acked_features(0, !driver_pages[0]);
+        // Check that no side effect are present, and that the acked features are exactly the same
+        // as the device features.
+        assert_eq!(
+            ctx.device.device_info.acked_features(),
+            device_features & driver_features
+        );
+
+        // Test reading 32-bit chunks.
+        let mut data = [0u8; 8];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut ctx.device,
+            0,
+            &mut data[..4],
+        );
+        test_bytes(&data[..], &(ctx.cid & 0xffff_ffff).to_le_bytes());
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut ctx.device,
+            4,
+            &mut data[4..],
+        );
+        test_bytes(&data[4..], &((ctx.cid >> 32) & 0xffff_ffff).to_le_bytes());
+
+        // Test reading 64-bit.
+        let mut data = [0u8; 8];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut ctx.device,
+            0,
+            &mut data,
+        );
+        test_bytes(&data, &ctx.cid.to_le_bytes());
+
+        // Check out-of-bounds reading.
+        let mut data = [0u8, 1, 2, 3, 4, 5, 6, 7];
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+            &mut ctx.device,
+            2,
+            &mut data,
+        );
+        assert_eq!(data, [0u8, 0, 0, 0, 0, 0, 6, 7]);
+
+        // Just covering lines here, since the vsock device has no writable config.
+        // A warning is, however, logged, if the guest driver attempts to write any config data.
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::write_config(
+            &mut ctx.device,
+            0,
+            &data[..4],
+        );
+
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let queues = vec![
+            VirtioQueueConfig::<QueueState>::create(0, 0).unwrap(),
+            VirtioQueueConfig::<QueueState>::create(0, 0).unwrap(),
+            VirtioQueueConfig::<QueueState>::create(0, 0).unwrap(),
+        ];
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let resources = DeviceResources::new();
+        let config = VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>>::new(
+            Arc::new(mem),
+            vm_fd,
+            resources,
+            queues,
+            None,
+            Arc::new(NoopNotifier::new()),
+        );
+
+        // Test activation.
+        ctx.device.activate(config).unwrap();
+    }
+}

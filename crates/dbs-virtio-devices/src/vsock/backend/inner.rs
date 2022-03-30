@@ -433,3 +433,491 @@ impl VsockBackend for VsockInnerBackend {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Condvar, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn test_inner_backend_create() {
+        assert!(VsockInnerBackend::new().is_ok());
+    }
+
+    #[test]
+    fn test_inner_backend_accept() {
+        let mut vsock_backend = VsockInnerBackend::new().unwrap();
+        let connector = vsock_backend.get_connector();
+
+        // no connect request send, accept would return error
+        assert!(vsock_backend.accept().is_err());
+
+        // connect once, can accept once
+        connector.connect().unwrap();
+        assert!(vsock_backend.accept().is_ok());
+        assert!(vsock_backend.accept().is_err());
+
+        // connect twice, can accept twice
+        connector.connect().unwrap();
+        connector.connect().unwrap();
+        assert!(vsock_backend.accept().is_ok());
+        assert!(vsock_backend.accept().is_ok());
+        assert!(vsock_backend.accept().is_err());
+    }
+
+    #[test]
+    fn test_inner_backend_communication() {
+        let test_string = String::from("TEST");
+        let mut buffer = [0; 10];
+
+        let mut vsock_backend = VsockInnerBackend::new().unwrap();
+        let connector = vsock_backend.get_connector();
+        let mut stream_connect = connector.connect().unwrap();
+        stream_connect.set_nonblocking(true).unwrap();
+        let mut stream_backend = vsock_backend.accept().unwrap();
+
+        assert!(stream_connect
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_backend.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+
+        assert!(stream_backend
+            .write(&test_string.clone().into_bytes())
+            .is_ok());
+        assert!(stream_connect.read(&mut buffer).is_ok());
+        assert_eq!(&buffer[0..test_string.len()], test_string.as_bytes());
+    }
+
+    #[test]
+    fn test_inner_backend_connect() {
+        let vsock_backend = VsockInnerBackend::new().unwrap();
+        // inner backend don't support peer connection now
+        assert!(vsock_backend.connect(0).is_err());
+    }
+
+    #[test]
+    fn test_inner_backend_type() {
+        let vsock_backend = VsockInnerBackend::new().unwrap();
+        assert_eq!(vsock_backend.r#type(), VsockBackendType::Inner);
+    }
+
+    #[test]
+    fn test_inner_backend_vsock_stream() {
+        let vsock_backend = VsockInnerBackend::new().unwrap();
+        let connector = vsock_backend.get_connector();
+        let mut vsock_stream = connector.connect().unwrap();
+
+        assert!(vsock_stream.set_nonblocking(true).is_ok());
+        assert!(vsock_stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .is_ok());
+        assert!(vsock_stream.set_read_timeout(None).is_ok());
+        assert!(vsock_stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .is_ok());
+    }
+
+    fn get_inner_backend_stream_pair() -> (VsockInnerStream, VsockInnerStream) {
+        let vsock_backend = VsockInnerBackend::new().unwrap();
+        let connector = vsock_backend.get_connector();
+        let outer_stream = connector.connect_().unwrap();
+        let inner_stream = vsock_backend.accept_().unwrap();
+
+        (inner_stream, outer_stream)
+    }
+
+    #[test]
+    #[allow(clippy::unused_io_amount)]
+    fn test_inner_stream_nonblocking() {
+        // write once, read multi times
+        {
+            let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+            outer_stream.set_nonblocking(true).unwrap();
+
+            // write data into inner stream with length of 10
+            let wirter_buf = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+            inner_stream.write_all(&wirter_buf).unwrap();
+
+            // first, read data from outer stream with length of 5
+            let mut reader_buf1 = [0; 5];
+            outer_stream.read(&mut reader_buf1).unwrap();
+            assert_eq!(reader_buf1, [0, 1, 2, 3, 4]);
+            // test the unread data in outer stream
+            assert_eq!(outer_stream.read_buf, Some((Vec::from(&wirter_buf[..]), 5)));
+
+            // second, read more data in outer stream
+            let mut reader_buf2 = [0; 3];
+            outer_stream.read(&mut reader_buf2).unwrap();
+            assert_eq!(reader_buf2, [5, 6, 7]);
+            // test the unread data in outer stream
+            assert_eq!(outer_stream.read_buf, Some((Vec::from(&wirter_buf[..]), 8)));
+
+            // then, read the last data in outer stream
+            let mut reader_buf3 = [0; 2];
+            outer_stream.read(&mut reader_buf3).unwrap();
+            assert_eq!(reader_buf3, [8, 9]);
+            // there's no unread data in outer stream
+            assert_eq!(outer_stream.read_buf, None);
+
+            // last, try to read again, it would return error
+            let mut reader_buf3 = [0; 1];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf3).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+        }
+
+        // write multi times, read all
+        {
+            let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+            outer_stream.set_nonblocking(true).unwrap();
+
+            // first, write some data into inner stream
+            let writer_buf1 = [0, 1, 2, 3];
+            inner_stream.write_all(&writer_buf1).unwrap();
+
+            // second, write more data into inner stream
+            let writer_buf2 = [4, 5, 6];
+            inner_stream.write_all(&writer_buf2).unwrap();
+
+            // then, read all data from outer stream
+            let mut reader_buf1 = [0; 7];
+            outer_stream.read(&mut reader_buf1).unwrap();
+            assert_eq!(reader_buf1, [0, 1, 2, 3, 4, 5, 6]);
+            // there's no unread data in outer stream
+            assert_eq!(outer_stream.read_buf, None);
+
+            // last, try to read again, it would return error
+            let mut reader_buf2 = [0; 1];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf2).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+        }
+
+        // write multi times, then read multi times
+        {
+            let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+            outer_stream.set_nonblocking(true).unwrap();
+
+            // first, write some data into inner stream
+            let writer_buf1 = [0, 1, 2, 3];
+            inner_stream.write_all(&writer_buf1).unwrap();
+
+            // second, write more data into inner stream
+            let writer_buf2 = [4, 5];
+            inner_stream.write_all(&writer_buf2).unwrap();
+
+            // third, write more data into inner stream
+            let writer_buf3 = [6, 7, 8];
+            inner_stream.write_all(&writer_buf3).unwrap();
+
+            // forth, write more data into inner stream
+            let writer_buf4 = [9, 10];
+            inner_stream.write_all(&writer_buf4).unwrap();
+
+            // fifth, read some data from outer stream
+            let mut reader_buf1 = [0; 2];
+            outer_stream.read(&mut reader_buf1).unwrap();
+            assert_eq!(reader_buf1, [0, 1]);
+            // now, the content in read buf is writer buf1
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf1[..]), 2))
+            );
+
+            // sixth, continue read some data from outer steam
+            let mut reader_buf2 = [0; 3];
+            outer_stream.read(&mut reader_buf2).unwrap();
+            assert_eq!(reader_buf2, [2, 3, 4]);
+            // now, the content in read buf is writer buf2
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf2[..]), 1))
+            );
+
+            // seventh, continue read some data from outer steam
+            let mut reader_buf3 = [0; 5];
+            outer_stream.read(&mut reader_buf3).unwrap();
+            assert_eq!(reader_buf3, [5, 6, 7, 8, 9]);
+            // now, the content in read buf is writer buf4
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf4[..]), 1))
+            );
+
+            // then, read the rest data from outer stream
+            let mut reader_buf4 = [0; 3];
+            outer_stream.read(&mut reader_buf4).unwrap();
+            assert_eq!(reader_buf4, [10, 0, 0]);
+            // now, there's no unread data in outer stream
+            assert_eq!(outer_stream.read_buf, None);
+
+            // last, try to read again, it would return error
+            let mut reader_buf5 = [0; 5];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf5).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+        }
+
+        // write and read multi times
+        {
+            let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+            outer_stream.set_nonblocking(true).unwrap();
+
+            // first, try to read data, it would return error
+            let mut reader_buf1 = [0; 5];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf1).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+
+            // second, write some data into inner stream
+            let writer_buf1 = [0, 1, 2, 3];
+            inner_stream.write_all(&writer_buf1).unwrap();
+
+            // third, read some data from outer stream
+            let mut reader_buf2 = [0; 2];
+            outer_stream.read(&mut reader_buf2).unwrap();
+            assert_eq!(reader_buf2, [0, 1]);
+            // the content in read buf is writer buf1
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf1[..]), 2))
+            );
+
+            // forth, write some data into inner stream
+            let writer_buf2 = [4, 5];
+            inner_stream.write_all(&writer_buf2).unwrap();
+
+            // fifth, read some data from outer stream
+            let mut reader_buf3 = [0; 3];
+            outer_stream.read(&mut reader_buf3).unwrap();
+            assert_eq!(reader_buf3, [2, 3, 4]);
+            // the content in read buf is writer buf2
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf2[..]), 1))
+            );
+
+            // sixth, write some data twice into inner steam
+            let writer_buf3 = [6];
+            inner_stream.write_all(&writer_buf3).unwrap();
+            let writer_buf4 = [7, 8, 9];
+            inner_stream.write_all(&writer_buf4).unwrap();
+
+            // seventh, read all data from outer stream
+            let mut reader_buf4 = [0; 10];
+            outer_stream.read(&mut reader_buf4).unwrap();
+            assert_eq!(reader_buf4, [5, 6, 7, 8, 9, 0, 0, 0, 0, 0]);
+            // there's no unread data in outer stream
+            assert_eq!(outer_stream.read_buf, None);
+
+            // eighth, write some data again into inner stream
+            let writer_buf5 = [10, 11, 12];
+            inner_stream.write_all(&writer_buf5).unwrap();
+
+            // ninth, read some data from outer stream
+            let mut reader_buf5 = [0; 1];
+            outer_stream.read(&mut reader_buf5).unwrap();
+            assert_eq!(reader_buf5, [10]);
+            // the content in read buf is writer buf5
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf5[..]), 1))
+            );
+
+            // then, read all data from outer stream
+            let mut reader_buf6 = [0; 4];
+            outer_stream.read(&mut reader_buf6).unwrap();
+            assert_eq!(reader_buf6, [11, 12, 0, 0]);
+            // there's no unread data in outer stream
+            assert_eq!(outer_stream.read_buf, None);
+
+            // last, try to read again, it would return error
+            let mut reader_buf7 = [0; 1];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf7).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+        }
+
+        // write and read duplex multi times
+        {
+            let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+            outer_stream.set_nonblocking(true).unwrap();
+
+            // first, try to read data from outer and inner stream, they would
+            // return error
+            let mut reader_buf1 = [0; 1];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf1).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+            let mut reader_buf2 = [0; 1];
+            assert_eq!(
+                inner_stream.read(&mut reader_buf2).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+
+            // second, write some data into inner and outer stream
+            let writer_buf1 = [0, 1, 2];
+            inner_stream.write_all(&writer_buf1).unwrap();
+            let writer_buf2 = [0, 1];
+            outer_stream.write_all(&writer_buf2).unwrap();
+
+            // third, read all data from outer and inner stream
+            let mut reader_buf3 = [0; 5];
+            outer_stream.read(&mut reader_buf3).unwrap();
+            assert_eq!(reader_buf3, [0, 1, 2, 0, 0]);
+            assert_eq!(outer_stream.read_buf, None);
+            let mut reader_buf4 = [0; 5];
+            inner_stream.read(&mut reader_buf4).unwrap();
+            assert_eq!(reader_buf4, [0, 1, 0, 0, 0]);
+            assert_eq!(inner_stream.read_buf, None);
+
+            // forth, write data twicd into inner and outer stream
+            let writer_buf3 = [3, 4, 5, 6];
+            inner_stream.write_all(&writer_buf3).unwrap();
+            let writer_buf4 = [2, 3, 4];
+            outer_stream.write_all(&writer_buf4).unwrap();
+            let writer_buf5 = [7, 8];
+            inner_stream.write_all(&writer_buf5).unwrap();
+            let writer_buf6 = [5, 6, 7];
+            outer_stream.write_all(&writer_buf6).unwrap();
+
+            // fifth, read some data from outer and inner stream
+            let mut reader_buf5 = [0; 5];
+            outer_stream.read(&mut reader_buf5).unwrap();
+            assert_eq!(reader_buf5, [3, 4, 5, 6, 7]);
+            assert_eq!(
+                outer_stream.read_buf,
+                Some((Vec::from(&writer_buf5[..]), 1))
+            );
+            let mut reader_buf6 = [0; 5];
+            inner_stream.read(&mut reader_buf6).unwrap();
+            assert_eq!(reader_buf6, [2, 3, 4, 5, 6]);
+            assert_eq!(
+                inner_stream.read_buf,
+                Some((Vec::from(&writer_buf6[..]), 2))
+            );
+
+            // then, read all data from inner and outer stream
+            let mut reader_buf7 = [0; 5];
+            inner_stream.read(&mut reader_buf7).unwrap();
+            assert_eq!(reader_buf7, [7, 0, 0, 0, 0]);
+            assert_eq!(inner_stream.read_buf, None);
+            let mut reader_buf8 = [0; 5];
+            outer_stream.read(&mut reader_buf8).unwrap();
+            assert_eq!(reader_buf8, [8, 0, 0, 0, 0]);
+            assert_eq!(outer_stream.read_buf, None);
+
+            // last, read data from outer and inner stream again, they would
+            // return error
+            let mut reader_buf9 = [0; 1];
+            assert_eq!(
+                outer_stream.read(&mut reader_buf9).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+            let mut reader_buf10 = [0; 1];
+            assert_eq!(
+                inner_stream.read(&mut reader_buf10).unwrap_err().kind(),
+                ErrorKind::WouldBlock
+            );
+        }
+    }
+
+    #[test]
+    fn test_inner_stream_block() {
+        // outer stream is in block mode
+        let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+
+        let start_time = Instant::now();
+        let handler = thread::spawn(move || {
+            let mut reader_buf = [0; 5];
+            assert!(outer_stream.read_exact(&mut reader_buf).is_ok());
+            assert_eq!(reader_buf, [1, 2, 3, 4, 5]);
+            assert!(Instant::now().duration_since(start_time).as_millis() >= 500);
+        });
+
+        // sleep 500ms
+        thread::sleep(Duration::from_millis(500));
+        let writer_buf = [1, 2, 3, 4, 5];
+        inner_stream.write_all(&writer_buf).unwrap();
+
+        handler.join().unwrap();
+    }
+
+    #[test]
+    #[allow(clippy::mutex_atomic)]
+    fn test_inner_stream_timeout() {
+        // outer stream is in block mode
+        let (mut inner_stream, mut outer_stream) = get_inner_backend_stream_pair();
+        // set write timeout always return Ok, and no effect
+        assert!(outer_stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .is_ok());
+        // set read timeout always return ok, can take effect
+        assert!(outer_stream
+            .set_read_timeout(Some(Duration::from_millis(150)))
+            .is_ok());
+
+        let cond_pair = Arc::new((Mutex::new(false), Condvar::new()));
+        let cond_pair_2 = Arc::clone(&cond_pair);
+        let handler = thread::Builder::new()
+            .spawn(move || {
+                // notify handler thread start
+                let (lock, cvar) = &*cond_pair_2;
+                let mut started = lock.lock().unwrap();
+                *started = true;
+                cvar.notify_one();
+                drop(started);
+
+                let start_time1 = Instant::now();
+                let mut reader_buf = [0; 5];
+                // first read would timed out
+                assert_eq!(
+                    outer_stream.read_exact(&mut reader_buf).unwrap_err().kind(),
+                    ErrorKind::TimedOut
+                );
+                let end_time1 = Instant::now().duration_since(start_time1).as_millis();
+                assert!((150..200).contains(&end_time1));
+
+                // second read would ok
+                assert!(outer_stream.read_exact(&mut reader_buf).is_ok());
+                assert_eq!(reader_buf, [1, 2, 3, 4, 5]);
+
+                // cancel the read timeout
+                let start_time2 = Instant::now();
+                outer_stream.set_read_timeout(None).unwrap();
+                assert!(outer_stream.read_exact(&mut reader_buf).is_ok());
+                let end_time2 = Instant::now().duration_since(start_time2).as_millis();
+                assert!(end_time2 >= 500);
+            })
+            .unwrap();
+
+        // wait handler thread started
+        let (lock, cvar) = &*cond_pair;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+
+        // sleep 300ms, test timeout
+        thread::sleep(Duration::from_millis(300));
+        let writer_buf = [1, 2, 3, 4, 5];
+        inner_stream.write_all(&writer_buf).unwrap();
+
+        // sleep 500ms again, test cancel timeout
+        thread::sleep(Duration::from_millis(500));
+        let writer_buf = [1, 2, 3, 4, 5];
+        inner_stream.write_all(&writer_buf).unwrap();
+
+        handler.join().unwrap();
+    }
+}
