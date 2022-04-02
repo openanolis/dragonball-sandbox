@@ -1,3 +1,4 @@
+// Copyright 2022 Alibaba Cloud. All Rights Reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -5,6 +6,8 @@
 pub mod gicv2;
 /// Export gicv3 interface
 pub mod gicv3;
+/// Export ITS interface
+pub mod its;
 
 use std::{boxed::Box, result};
 
@@ -96,6 +99,11 @@ pub trait GICDevice: Send {
     /// Only gic-v3 has its
     fn attach_its(&mut self, _vm: &VmFd) -> Result<()> {
         Ok(())
+    }
+
+    /// Get ITS reg range
+    fn get_its_reg_range(&self, _its_type: &its::ItsType) -> Option<[u64; 2]> {
+        None
     }
 
     /// Initialize a GIC device
