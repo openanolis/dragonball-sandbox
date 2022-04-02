@@ -1,3 +1,4 @@
+// Copyright 2022 Alibaba Cloud. All Rights Reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -17,6 +18,8 @@ use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
 use super::layout::FDT_MAX_SIZE;
 use crate::InitrdConfig;
+use dbs_arch::gic::its::ItsType;
+use dbs_arch::gic::its::ItsType::{PciMsiIts, PlatformMsiIts};
 use dbs_arch::gic::GICDevice;
 use dbs_arch::{DeviceInfoForFDT, DeviceType};
 
@@ -24,6 +27,12 @@ use dbs_arch::{DeviceInfoForFDT, DeviceType};
 const GIC_PHANDLE: u32 = 1;
 // This is a value for uniquely identifying the FDT node containing the clock definition.
 const CLOCK_PHANDLE: u32 = 2;
+// This is a value for uniquely identifying the FDT node containing the plaform msi ITS definition.
+const GIC_PLATFORM_MSI_ITS_PHANDLE: u32 = 3;
+// This is a value for uniquely identifying the FDT node containing the pci msi ITS definition.
+const GIC_PCI_MSI_ITS_PHANDLE: u32 = 4;
+// According to the arm, gic-v3.txt document, ITS' #msi-cells is fixed at 1.
+const GIC_PLATFORM_MSI_ITS_CELLS_SIZE: u32 = 1;
 
 // Read the documentation specified when appending the root node to the FDT.
 const ADDRESS_CELLS: u32 = 0x2;
@@ -372,6 +381,44 @@ fn create_chosen_node(
     Ok(())
 }
 
+fn append_its_common_property(fdt: &mut Vec<u8>, registers_prop: &[u8]) -> Result<()> {
+    append_property_string(fdt, "compatible", "arm,gic-v3-its")?;
+    append_property_null(fdt, "msi-controller")?;
+    append_property(fdt, "reg", registers_prop)?;
+    Ok(())
+}
+
+fn create_its_node(
+    fdt: &mut Vec<u8>,
+    gic_device: &Box<dyn GICDevice>,
+    its_type: ItsType,
+) -> Result<()> {
+    let reg = gic_device.get_its_reg_range(&its_type);
+    if let Some(registers) = reg {
+        let registers_prop = generate_prop64(&registers);
+
+        // There are two types of its, pci_msi_its and platform_msi_its.
+        // If this is pci_msi_its, the fdt node of its is required to have no
+        // #msi-cells attribute. If this is platform_msi_its, the #msi-cells
+        // attribute of its fdt node is required, and the value is 1.
+        match its_type {
+            PlatformMsiIts => {
+                append_begin_node(fdt, "gic-platform-its")?;
+                append_its_common_property(fdt, &registers_prop)?;
+                append_property_u32(fdt, "phandle", GIC_PLATFORM_MSI_ITS_PHANDLE)?;
+                append_property_u32(fdt, "#msi-cells", GIC_PLATFORM_MSI_ITS_CELLS_SIZE)?;
+            }
+            PciMsiIts => {
+                append_begin_node(fdt, "gic-pci-its")?;
+                append_its_common_property(fdt, &registers_prop)?;
+                append_property_u32(fdt, "phandle", GIC_PCI_MSI_ITS_PHANDLE)?;
+            }
+        }
+        append_end_node(fdt)?;
+    }
+    Ok(())
+}
+
 fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &Box<dyn GICDevice>) -> Result<()> {
     let gic_reg_prop = generate_prop64(gic_device.device_properties());
 
@@ -395,6 +442,8 @@ fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &Box<dyn GICDevice>) -> Result
     let gic_intr_prop = generate_prop32(&gic_intr);
 
     append_property(fdt, "interrupts", &gic_intr_prop)?;
+    create_its_node(fdt, gic_device, PlatformMsiIts)?;
+    create_its_node(fdt, gic_device, PciMsiIts)?;
     append_end_node(fdt)?;
 
     Ok(())
