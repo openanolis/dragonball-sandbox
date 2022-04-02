@@ -1,11 +1,18 @@
+// Copyright 2022 Alibaba Cloud. All Rights Reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{boxed::Box, result};
 
-use kvm_ioctls::DeviceFd;
+use kvm_ioctls::{DeviceFd, VmFd};
 
 use super::{Error, GICDevice};
+
+use super::its::{ItsType, ITS};
+
+use super::its::ItsType::{PciMsiIts, PlatformMsiIts};
+
+use std::collections::HashMap;
 
 type Result<T> = result::Result<T, Error>;
 
@@ -19,6 +26,9 @@ pub struct GICv3 {
 
     /// Number of CPUs handled by the device
     vcpu_count: u64,
+
+    /// ITS instance of this gic control
+    its: HashMap<ItsType, ITS>,
 }
 
 impl GICv3 {
@@ -77,6 +87,13 @@ impl GICDevice for GICv3 {
         GICv3::ARCH_GIC_V3_MAINT_IRQ
     }
 
+    fn get_its_reg_range(&self, its_type: &ItsType) -> Option<[u64; 2]> {
+        match self.its.get(&its_type) {
+            Some(its) => Some(its.get_reg_range()),
+            _ => None,
+        }
+    }
+
     fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
         Box::new(GICv3 {
             fd: fd,
@@ -87,7 +104,16 @@ impl GICDevice for GICv3 {
                 GICv3::get_redists_size(vcpu_count),
             ],
             vcpu_count: vcpu_count,
+            its: HashMap::new(),
         })
+    }
+
+    fn attach_its(&mut self, vm: &VmFd) -> Result<()> {
+        let its = ITS::new(vm, &self, PlatformMsiIts)?;
+        self.its.insert(PlatformMsiIts, its);
+        let its = ITS::new(vm, &self, PciMsiIts)?;
+        self.its.insert(PciMsiIts, its);
+        Ok(())
     }
 
     fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()> {
