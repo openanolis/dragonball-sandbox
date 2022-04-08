@@ -7,6 +7,7 @@
 
 pub mod backend;
 pub mod csm;
+pub mod muxer;
 mod packet;
 
 use std::os::unix::io::AsRawFd;

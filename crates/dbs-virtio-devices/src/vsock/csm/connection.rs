@@ -106,15 +106,15 @@ pub struct VsockConnection {
     state: ConnState,
     /// The local CID. Most of the time this will be the constant `2` (the vsock
     /// host CID).
-    local_cid: u64,
+    pub(crate) local_cid: u64,
     /// The peer (guest) CID.
-    peer_cid: u64,
+    pub(crate) peer_cid: u64,
     /// The local (host) port.
-    local_port: u32,
+    pub(crate) local_port: u32,
     /// The peer (guest) port.
-    peer_port: u32,
+    pub(crate) peer_port: u32,
     /// The (connected) host-side stream.
-    stream: Box<dyn VsockStream>,
+    pub(crate) stream: Box<dyn VsockStream>,
     /// The TX buffer for this connection.
     tx_buf: TxBuf,
     /// Total number of bytes that have been successfully written to
