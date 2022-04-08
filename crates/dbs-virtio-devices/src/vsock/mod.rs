@@ -6,6 +6,7 @@
 // found in the THIRD-PARTY file.
 
 pub mod backend;
+pub mod csm;
 mod packet;
 
 use std::os::unix::io::AsRawFd;
@@ -141,4 +142,26 @@ pub trait VsockEpollListener: AsRawFd {
 
     /// Notify the listener that one ore more events have occured.
     fn notify(&mut self, evset: epoll::Events);
+}
+
+/// Any channel that handles vsock packet traffic: sending and receiving
+/// packets. Since we're implementing the device model here, our responsibility
+/// is to always process the sending of packets (i.e. the TX queue). So, any
+/// locally generated data, addressed to the driver (e.g. a connection response
+/// or RST), will have to be queued, until we get to processing the RX queue.
+///
+/// Note: `recv_pkt()` and `send_pkt()` are named analogous to `Read::read()`
+///       and `Write::write()`, respectively. I.e. - `recv_pkt()` will read data
+///       from the channel, and place it into a packet; and - `send_pkt()` will
+///       fetch data from a packet, and place it into the channel.
+pub trait VsockChannel {
+    /// Read/receive an incoming packet from the channel.
+    fn recv_pkt(&mut self, pkt: &mut VsockPacket) -> Result<()>;
+
+    /// Write/send a packet through the channel.
+    fn send_pkt(&mut self, pkt: &VsockPacket) -> Result<()>;
+
+    /// Checks weather there is pending incoming data inside the channel,
+    /// meaning that a subsequent call to `recv_pkt()` won't fail.
+    fn has_pending_rx(&self) -> bool;
 }
