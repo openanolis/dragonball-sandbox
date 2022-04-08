@@ -5,6 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+pub mod backend;
+
 use std::os::unix::io::AsRawFd;
 
 mod defs {
@@ -84,7 +86,11 @@ mod defs {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum VsockError {}
+pub enum VsockError {
+    /// vsock backend error
+    #[error("Vsock backend error: {0}")]
+    Backend(#[source] std::io::Error),
+}
 
 type Result<T> = std::result::Result<T, VsockError>;
 

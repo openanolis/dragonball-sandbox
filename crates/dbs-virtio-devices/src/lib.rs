@@ -119,6 +119,10 @@ pub enum Error {
     /// Error from Interrupt.
     #[error("Interrupt error: {0}")]
     InterruptError(IOError),
+
+    #[cfg(feature = "virtio-vsock")]
+    #[error("virtio-vsock error: {0}")]
+    VirtioVsockError(#[from] self::vsock::VsockError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
