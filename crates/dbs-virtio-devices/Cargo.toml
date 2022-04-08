@@ -15,6 +15,7 @@ byteorder = "1.4.3"
 dbs-device = { version = "0.1.0", path = "../dbs-device" }
 dbs-interrupt = { version = "0.1.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
 dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
+epoll = { version = ">=4.0.1" }
 kvm-bindings = "0.5.0"
 kvm-ioctls = "0.11.0"
 log = "0.4.14"
@@ -28,3 +29,4 @@ vm-memory = { version = "0.7.0", features = [ "backend-mmap", "backend-atomic" ]
 
 [features]
 virtio-mmio = []
+virtio-vsock = ["virtio-mmio"]

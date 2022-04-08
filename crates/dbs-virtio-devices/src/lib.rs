@@ -21,6 +21,9 @@ pub use self::notifier::*;
 #[cfg(feature = "virtio-mmio")]
 pub mod mmio;
 
+#[cfg(feature = "virtio-vsock")]
+pub mod vsock;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
