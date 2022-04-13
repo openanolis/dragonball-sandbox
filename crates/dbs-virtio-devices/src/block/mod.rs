@@ -13,7 +13,7 @@ pub(crate) use self::handler::*;
 mod request;
 pub(crate) use self::request::*;
 mod ufile;
-pub(crate) use self::ufile::*;
+pub use self::ufile::*;
 
 use dbs_utils::rate_limiter::BucketUpdate;
 
