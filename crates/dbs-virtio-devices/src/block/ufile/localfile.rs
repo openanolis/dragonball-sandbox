@@ -11,6 +11,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use log::{debug, error, info, warn};
 use virtio_bindings::bindings::virtio_blk::{VIRTIO_BLK_S_IOERR, VIRTIO_BLK_S_OK};
 use vmm_sys_util::aio::{IoContext, IoControlBlock, IoEvent, IOCB_FLAG_RESFD};
+use vmm_sys_util::aio::{IOCB_CMD_PREADV, IOCB_CMD_PWRITEV};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{IoDataDesc, Ufile};
@@ -134,22 +135,41 @@ impl Ufile for LocalFile {
         self.aio_evtfd.as_raw_fd()
     }
 
-    fn io_submit(
+    fn io_read_submit(
         &mut self,
-        opcode: u32,
-        offset: u64,
+        offset: i64,
         iovecs: &mut Vec<IoDataDesc>,
-        aio_data: u16,
+        user_data: u16,
     ) -> io::Result<usize> {
         let iocbs = [&mut IoControlBlock {
             aio_fildes: self.file.as_raw_fd() as u32,
-            aio_lio_opcode: opcode as u16,
+            aio_lio_opcode: IOCB_CMD_PREADV as u16,
             aio_resfd: self.aio_evtfd.as_raw_fd() as u32,
             aio_flags: IOCB_FLAG_RESFD,
             aio_buf: iovecs.as_mut_ptr() as u64,
             aio_offset: offset as i64,
             aio_nbytes: iovecs.len() as u64,
-            aio_data: aio_data as u64,
+            aio_data: user_data as u64,
+            ..Default::default()
+        }];
+        self.aio_context.submit(&iocbs[..])
+    }
+
+    fn io_write_submit(
+        &mut self,
+        offset: i64,
+        iovecs: &mut Vec<IoDataDesc>,
+        user_data: u16,
+    ) -> io::Result<usize> {
+        let iocbs = [&mut IoControlBlock {
+            aio_fildes: self.file.as_raw_fd() as u32,
+            aio_lio_opcode: IOCB_CMD_PWRITEV as u16,
+            aio_resfd: self.aio_evtfd.as_raw_fd() as u32,
+            aio_flags: IOCB_FLAG_RESFD,
+            aio_buf: iovecs.as_mut_ptr() as u64,
+            aio_offset: offset as i64,
+            aio_nbytes: iovecs.len() as u64,
+            aio_data: user_data as u64,
             ..Default::default()
         }];
         self.aio_context.submit(&iocbs[..])

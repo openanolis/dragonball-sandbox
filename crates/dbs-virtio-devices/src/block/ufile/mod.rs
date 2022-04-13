@@ -23,18 +23,25 @@ pub trait Ufile: Read + Write + Seek + Send {
     /// Get the raw event fd for data plane.
     fn get_data_evt_fd(&self) -> RawFd;
 
-    /// Submit asynchronous IO requests.
-    fn io_submit(
+    /// Submit asynchronous Read IO requests.
+    fn io_read_submit(
         &mut self,
-        opcode: u32,
-        offset: u64,
+        offset: i64,
         iovecs: &mut Vec<IoDataDesc>,
-        aio_data: u16,
+        user_data: u16,
+    ) -> io::Result<usize>;
+
+    /// Submit asynchronous Write IO requests.
+    fn io_write_submit(
+        &mut self,
+        offset: i64,
+        iovecs: &mut Vec<IoDataDesc>,
+        user_data: u16,
     ) -> io::Result<usize>;
 
     /// Poll for completed asynchronous IO requests.
     ///
-    /// For currently supported LocalFile and TdcFile backend, it must not return temporary errors
+    /// For currently supported LocalFile backend, it must not return temporary errors
     /// and may only return permanent errors. So the virtio-blk driver layer will not try to
     /// recover and only pass errors up onto the device manager. When changing the error handling
     /// policy, please do help to update BlockEpollHandler::io_complete().
