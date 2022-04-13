@@ -4,6 +4,8 @@
 mod localfile;
 pub use self::localfile::LocalFile;
 
+pub mod aio;
+
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::io::RawFd;
 
