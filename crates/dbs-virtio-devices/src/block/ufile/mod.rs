@@ -5,6 +5,7 @@ mod localfile;
 pub use self::localfile::LocalFile;
 
 pub mod aio;
+pub mod io_uring;
 
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::io::RawFd;
