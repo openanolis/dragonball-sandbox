@@ -18,7 +18,6 @@ use log::{debug, error, info, warn};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_queue::{QueueState, QueueStateT};
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryRegion, GuestRegionMmap};
-use vmm_sys_util::aio::{IOCB_CMD_PREADV, IOCB_CMD_PWRITEV};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
@@ -257,15 +256,6 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
             e
         })?;
 
-        let opcode = match req.request_type {
-            RequestType::In => IOCB_CMD_PREADV,
-            RequestType::Out => IOCB_CMD_PWRITEV,
-            _ => panic!(
-                "virtio-blk: unexpected request type {:?} in async I/O",
-                req.request_type
-            ),
-        };
-
         for io in data_descs {
             let host_addr = mem
                 .get_host_address(GuestAddress(io.data_addr))
@@ -282,9 +272,24 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
                 data_len: io.data_len,
             });
         }
-        match disk_image.io_submit(
-            opcode,
-            req.sector << SECTOR_SHIFT,
+
+        let submiter: fn(
+            &mut (dyn Ufile + 'static),
+            i64,
+            &mut Vec<IoDataDesc>,
+            u16,
+        ) -> std::io::Result<usize> = match req.request_type {
+            RequestType::In => Ufile::io_read_submit,
+            RequestType::Out => Ufile::io_write_submit,
+            _ => panic!(
+                "virtio-blk: unexpected request type {:?} in async I/O",
+                req.request_type
+            ),
+        };
+
+        match submiter(
+            disk_image.as_mut(),
+            (req.sector << SECTOR_SHIFT) as i64,
             iovecs,
             req.request_index,
         ) {
@@ -389,6 +394,9 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> EpollHelperHandler
                 }
             }
             END_IO_EVENT => {
+                // NOTE: Here we should drain io event fd, but different Ufile implementations
+                // may use different Events, and complete may depend on the count of reads from
+                // within io event. so leave it to IoEngine::complete to drain event fd.
                 // io_complete() only returns permanent errors.
                 self.io_complete()
                     .expect("virtio-blk: failed to complete IO requests");
