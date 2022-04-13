@@ -7,6 +7,8 @@ pub use self::localfile::LocalFile;
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::io::RawFd;
 
+use vmm_sys_util::eventfd::EventFd;
+
 use super::request::IoDataDesc;
 
 /// Traits for the virtio-blk driver to access backend storage devices, such as localfile.
@@ -46,4 +48,32 @@ pub trait Ufile: Read + Write + Seek + Send {
     /// recover and only pass errors up onto the device manager. When changing the error handling
     /// policy, please do help to update BlockEpollHandler::io_complete().
     fn io_complete(&mut self) -> io::Result<Vec<(u16, u32)>>;
+}
+
+/// Traits for the backend IO engine, such as aio or io-uring.
+pub trait IoEngine {
+    /// Returns the EventFd that will notify when something is ready.
+    fn event_fd(&self) -> &EventFd;
+
+    /// Submit asynchronous Read requests.
+    fn readv(
+        &mut self,
+        offset: i64,
+        iovecs: &mut Vec<IoDataDesc>,
+        user_data: u64,
+    ) -> io::Result<usize>;
+
+    /// Submit asynchronous Write requests.
+    fn writev(
+        &mut self,
+        offset: i64,
+        iovecs: &mut Vec<IoDataDesc>,
+        user_data: u64,
+    ) -> io::Result<usize>;
+
+    /// Poll for completed asynchronous IO requests.
+    ///
+    /// Return the vector of (user data, result code).
+    /// NOTE: complete need to drain the io event fd.
+    fn complete(&mut self) -> io::Result<Vec<(u64, i64)>>;
 }
