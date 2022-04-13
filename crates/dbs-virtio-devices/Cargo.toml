@@ -16,6 +16,7 @@ dbs-device = { version = "0.1.0", path = "../dbs-device" }
 dbs-interrupt = { version = "0.1.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
 dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
 epoll = "4.0.1"
+io-uring = "0.5.2"
 kvm-bindings = "0.5.0"
 kvm-ioctls = "0.11.0"
 libc = "0.2.39"
