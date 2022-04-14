@@ -1,4 +1,4 @@
-// Copyright (C) 2019 Alibaba Cloud. All rights reserved.
+// Copyright 2019 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 mod localfile;
