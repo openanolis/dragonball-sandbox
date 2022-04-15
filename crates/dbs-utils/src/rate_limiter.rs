@@ -847,14 +847,14 @@ mod tests {
         // check that after the minimum refill time, the timer was not
         // overwritten and the rate limiter is still blocked from the
         // borrowing we performed earlier
-        thread::sleep(Duration::from_millis(105));
+        thread::sleep(Duration::from_millis(90));
         assert!(l.event_handler().is_err());
         assert!(l.is_blocked());
         assert!(!l.consume(100, TokenType::Bytes));
 
         // after waiting out the full duration, rate limiter should be
         // availale again
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(210));
         assert!(l.event_handler().is_ok());
         assert!(!l.is_blocked());
         assert!(l.consume(100, TokenType::Bytes));
