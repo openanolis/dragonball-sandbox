@@ -1,5 +1,5 @@
-# Pending
-
 # v0.1.0
 
-Initial release
+## Added
+
+- This is the initial release for dbs-interrupt
