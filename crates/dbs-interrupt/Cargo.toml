@@ -7,7 +7,7 @@ license = "Apache-2.0"
 edition = "2018"
 homepage = "https://github.com/openanolis/dragonball-sandbox"
 repository = "https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-interrupt"
-keywords = ["dragonball", "secure-sandbox", "device", "interrupt", "MSI", "MSI-x", "legacy-irq"]
+keywords = ["dragonball", "secure-sandbox", "device", "interrupt"]
 readme = "README.md"
 
 [dependencies]
