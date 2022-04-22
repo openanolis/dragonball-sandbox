@@ -1145,7 +1145,7 @@ pub mod tests {
         )
         .unwrap();
 
-        assert!(fs.is_dax_on());
+        assert!(!fs.is_dax_on());
         assert_eq!(
             VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::device_type(&fs),
             TYPE_VIRTIO_FS
