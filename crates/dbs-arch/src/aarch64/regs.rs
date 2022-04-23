@@ -9,6 +9,7 @@ use std::{mem, result};
 
 use kvm_bindings::*;
 use kvm_ioctls::VcpuFd;
+use memoffset::offset_of;
 use vmm_sys_util;
 
 /// Errors thrown while setting aarch64 registers.
@@ -44,20 +45,6 @@ const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_
 // The core register are represented by the user_pt_regs structure. Look for it in
 // arch/arm64/include/uapi/asm/ptrace.h.
 
-// This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
-// an instance of that structure.
-// It uses a null pointer to retrieve the offset to the field.
-// Inspired by C solution: `#define offsetof(str, f) ((size_t)(&((str *)0)->f))`.
-// Doing `offset__of!(user_pt_regs, pstate)` in our rust code will trigger the following:
-// unsafe { &(*(0 as *const user_pt_regs)).pstate as *const _ as usize }
-// The dereference expression produces an lvalue, but that lvalue is not actually read from,
-// we're just doing pointer math on it, so in theory, it should safe.
-macro_rules! offset__of {
-    ($str:ty, $field:ident) => {
-        unsafe { &(*(0 as *const $str)).$field as *const _ as usize }
-    };
-}
-
 macro_rules! arm64_core_reg {
     ($reg: tt) => {
         // As per `kvm_arm_copy_reg_indices`, the id of a core register can be obtained like this:
@@ -85,7 +72,7 @@ macro_rules! arm64_core_reg {
         KVM_REG_ARM64 as u64
             | KVM_REG_SIZE_U64 as u64
             | u64::from(KVM_REG_ARM_CORE)
-            | ((offset__of!(user_pt_regs, $reg) / mem::size_of::<u32>()) as u64)
+            | ((offset_of!(user_pt_regs, $reg) / mem::size_of::<u32>()) as u64)
     };
 }
 
