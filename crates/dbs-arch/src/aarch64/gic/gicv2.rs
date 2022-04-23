@@ -1,13 +1,9 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{boxed::Box, result};
-
 use kvm_ioctls::DeviceFd;
 
-use super::{Error, GICDevice};
-
-type Result<T> = result::Result<T, Error>;
+use super::{GICDevice, Result};
 
 /// Represent a GIC v2 device
 pub struct GICv2 {
@@ -52,10 +48,6 @@ impl GICv2 {
 }
 
 impl GICDevice for GICv2 {
-    fn version() -> u32 {
-        kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V2
-    }
-
     fn device_fd(&self) -> &DeviceFd {
         &self.fd
     }
@@ -74,6 +66,10 @@ impl GICDevice for GICv2 {
 
     fn fdt_maint_irq(&self) -> u32 {
         GICv2::ARCH_GIC_V2_MAINT_IRQ
+    }
+
+    fn version() -> u32 {
+        kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V2
     }
 
     fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {

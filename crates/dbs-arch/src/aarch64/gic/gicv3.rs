@@ -2,19 +2,14 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{boxed::Box, result};
+use std::boxed::Box;
+use std::collections::HashMap;
 
 use kvm_ioctls::{DeviceFd, VmFd};
 
-use super::{Error, GICDevice};
-
-use super::its::{ItsType, ITS};
-
 use super::its::ItsType::{PciMsiIts, PlatformMsiIts};
-
-use std::collections::HashMap;
-
-type Result<T> = result::Result<T, Error>;
+use super::its::{ItsType, ITS};
+use super::{GICDevice, Result};
 
 /// GICv3 instance
 pub struct GICv3 {
@@ -63,10 +58,6 @@ impl GICv3 {
 }
 
 impl GICDevice for GICv3 {
-    fn version() -> u32 {
-        kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3
-    }
-
     fn device_fd(&self) -> &DeviceFd {
         &self.fd
     }
@@ -94,6 +85,18 @@ impl GICDevice for GICv3 {
         }
     }
 
+    fn attach_its(&mut self, vm: &VmFd) -> Result<()> {
+        let its = ITS::new(vm, &self, PlatformMsiIts)?;
+        self.its.insert(PlatformMsiIts, its);
+        let its = ITS::new(vm, &self, PciMsiIts)?;
+        self.its.insert(PciMsiIts, its);
+        Ok(())
+    }
+
+    fn version() -> u32 {
+        kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3
+    }
+
     fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
         Box::new(GICv3 {
             fd: fd,
@@ -106,14 +109,6 @@ impl GICDevice for GICv3 {
             vcpu_count: vcpu_count,
             its: HashMap::new(),
         })
-    }
-
-    fn attach_its(&mut self, vm: &VmFd) -> Result<()> {
-        let its = ITS::new(vm, &self, PlatformMsiIts)?;
-        self.its.insert(PlatformMsiIts, its);
-        let its = ITS::new(vm, &self, PciMsiIts)?;
-        self.its.insert(PciMsiIts, its);
-        Ok(())
     }
 
     fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()> {

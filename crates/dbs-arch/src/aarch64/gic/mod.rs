@@ -22,6 +22,7 @@ use gicv3::GICv3;
 // * less than 1023 and
 // * a multiple of 32.
 // We are setting up our interrupt controller to support a maximum of 128 interrupts.
+
 /// First usable interrupt on aarch64.
 pub const IRQ_BASE: u32 = 32;
 
@@ -49,8 +50,7 @@ pub enum Error {
 }
 type Result<T> = result::Result<T, Error>;
 
-/// Function that flushes
-/// RDIST pending tables into guest RAM.
+/// Function that flushes `RDIST` pending tables into guest RAM.
 ///
 /// The tables get flushed to guest RAM whenever the VM gets stopped.
 pub fn save_pending_tables(fd: &DeviceFd) -> Result<()> {
@@ -81,6 +81,16 @@ pub trait GICDevice: Send {
     /// Returns the maint_irq fdt property of the device
     fn fdt_maint_irq(&self) -> u32;
 
+    /// Get ITS reg range
+    fn get_its_reg_range(&self, _its_type: &its::ItsType) -> Option<[u64; 2]> {
+        None
+    }
+
+    /// Only gic-v3 has its
+    fn attach_its(&mut self, _vm: &VmFd) -> Result<()> {
+        Ok(())
+    }
+
     /// Returns the GIC version of the device
     fn version() -> u32
     where
@@ -95,16 +105,6 @@ pub trait GICDevice: Send {
     fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()>
     where
         Self: Sized;
-
-    /// Only gic-v3 has its
-    fn attach_its(&mut self, _vm: &VmFd) -> Result<()> {
-        Ok(())
-    }
-
-    /// Get ITS reg range
-    fn get_its_reg_range(&self, _its_type: &its::ItsType) -> Option<[u64; 2]> {
-        None
-    }
 
     /// Initialize a GIC device
     fn init_device(vm: &VmFd) -> Result<DeviceFd>

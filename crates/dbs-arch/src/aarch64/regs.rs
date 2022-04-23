@@ -161,6 +161,7 @@ pub fn is_system_register(regid: u64) -> bool {
     }
     true
 }
+
 /// Read the MPIDR - Multiprocessor Affinity Register.
 ///
 /// # Arguments
