@@ -3,12 +3,8 @@
 
 #![deny(missing_docs)]
 
-//! CPU architecture specific constants and utilities.
-//!
-//! This crate provides CPU architecture specific constants and utilities to abstract away CPU
-//! architecture specific details from the Dragonball Sandbox or other VMMs.
+//! Constants, Structs and Utilities to setup boot environment for virtual machines.
 
-use std::result;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 #[cfg(target_arch = "x86_64")]
@@ -19,6 +15,9 @@ mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::*;
 
+/// Specialized [std::result::Result] for boot related operations.
+pub type Result<T> = std::result::Result<T, Error>;
+
 /// Type for passing information about the initrd in the guest memory.
 pub struct InitrdConfig {
     /// Load address of initrd in guest memory
@@ -26,6 +25,3 @@ pub struct InitrdConfig {
     /// Size of initrd in guest memory
     pub size: usize,
 }
-
-/// Type for returning public functions outcome.
-pub type Result<T> = result::Result<T, Error>;

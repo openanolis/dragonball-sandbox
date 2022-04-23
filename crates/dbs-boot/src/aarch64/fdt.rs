@@ -6,24 +6,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+//! Create Flatten Device Tree (FDT) for ARM64 systems.
+
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 use std::io;
 use std::ptr::null;
 
+use dbs_arch::gic::its::ItsType::{self, PciMsiIts, PlatformMsiIts};
+use dbs_arch::gic::GICDevice;
+use dbs_arch::{DeviceInfoForFDT, DeviceType};
 use libc::{c_char, c_int, c_void};
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
 use super::layout::FDT_MAX_SIZE;
 use super::Error;
-use crate::InitrdConfig;
-use crate::Result;
-use dbs_arch::gic::its::ItsType;
-use dbs_arch::gic::its::ItsType::{PciMsiIts, PlatformMsiIts};
-use dbs_arch::gic::GICDevice;
-use dbs_arch::{DeviceInfoForFDT, DeviceType};
+use crate::{InitrdConfig, Result};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
