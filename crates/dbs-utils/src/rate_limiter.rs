@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(tb.reduce(capacity), BucketReduction::Failure);
 
         // Since the CI machine might be slow, we should sleep less milliseconds here than desired 123 ms to avoid errors caused by CI machines.
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(80));
         assert_eq!(tb.reduce(1), BucketReduction::Success);
         assert_eq!(tb.reduce(100), BucketReduction::Success);
         assert_eq!(tb.reduce(capacity), BucketReduction::Failure);
