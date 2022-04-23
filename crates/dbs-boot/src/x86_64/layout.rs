@@ -1,5 +1,4 @@
 // Copyright 2021-2022 Alibaba Cloud. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -10,6 +9,11 @@
 use lazy_static::lazy_static;
 
 /// Magic addresses externally used to lay out x86_64 VMs.
+
+/// Global Descriptor Table Offset
+pub const BOOT_GDT_OFFSET: u64 = 0x500;
+/// Interrupt Descriptor Table Offset
+pub const BOOT_IDT_OFFSET: u64 = 0x520;
 
 /// Address of Global Descriptor Table (GDT)
 pub const BOOT_GDT_ADDRESS: u64 = 0x500;
@@ -53,11 +57,6 @@ pub const IRQ_MAX: u32 = 15;
 
 /// Address for the TSS setup.
 pub const KVM_TSS_ADDRESS: u64 = 0xfffb_d000;
-
-/// Global Descriptor Table Offset
-pub const BOOT_GDT_OFFSET: u64 = 0x500;
-/// Interrupt Descriptor Table Offset
-pub const BOOT_IDT_OFFSET: u64 = 0x520;
 
 /// Where BIOS/VGA magic would live on a real PC.
 pub const EBDA_START: u64 = 0x9fc00;

@@ -1,5 +1,10 @@
 // Copyright 2021 Alibaba Cloud. All Rights Reserved.
+// Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the THIRD-PARTY file.
 
 //! VM boot related constants and utilities for `x86_64` architecture.
 
@@ -7,6 +12,7 @@ use dbs_arch::gdt::gdt_entry;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryRegion};
 
 use self::layout::{BOOT_GDT_ADDRESS, BOOT_GDT_MAX, BOOT_IDT_ADDRESS};
+use super::Result;
 
 /// Magic addresses externally used to lay out x86_64 VMs.
 pub mod layout;
@@ -81,25 +87,56 @@ pub enum Error {
 }
 
 /// Initialize the 1:1 identity mapping table for guest memory range [0..1G).
-pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<(), vm_memory::GuestMemoryError> {
+pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<()> {
     // Puts PML4 right after zero page but aligned to 4k.
     let boot_pml4_addr = GuestAddress(layout::PML4_START);
     let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
     let boot_pde_addr = GuestAddress(layout::PDE_START);
 
     // Entry covering VA [0..512GB)
-    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)?;
+    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
+        .map_err(|_| Error::WritePML4Address)?;
 
     // Entry covering VA [0..1GB)
-    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)?;
+    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
+        .map_err(|_| Error::WritePDPTEAddress)?;
 
     // 512 2MB entries together covering VA [0..1GB). Note we are assuming
     // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
     for i in 0..512 {
-        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))?;
+        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
+            .map_err(|_| Error::WritePDEAddress)?;
     }
 
     Ok(())
+}
+
+/// Helps to initialize BP page table information for vcpu.
+///
+/// Also, return the pml4 address for sregs setting and AP boot
+pub fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<GuestAddress> {
+    // Puts PML4 right after zero page but aligned to 4k.
+    let boot_pml4_addr = GuestAddress(layout::PML4_START);
+    let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
+    let boot_pde_addr = GuestAddress(layout::PDE_START);
+
+    // Entry covering VA [0..512GB)
+    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
+        .map_err(|_| Error::WritePML4Address)?;
+
+    // Entry covering VA [0..1GB)
+    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
+        .map_err(|_| Error::WritePDPTEAddress)?;
+
+    // 512 2MB entries together covering VA [0..1GB). Note we are assuming
+    // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
+    for i in 0..512 {
+        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
+            .map_err(|_| Error::WritePDEAddress)?;
+    }
+
+    // return the pml4 address that could be used for AP boot up and later sreg setting process.
+    Ok(boot_pml4_addr)
 }
 
 /// Get information to configure GDT/IDT.
@@ -115,7 +152,7 @@ pub fn get_descriptor_config_info() -> ([u64; BOOT_GDT_MAX], u64, u64) {
 }
 
 /// Returns the memory address where the initrd could be loaded.
-pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> Result<u64, Error> {
+pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> Result<u64> {
     let lowmem_size = guest_mem
         .find_region(GuestAddress(0))
         .ok_or(Error::InitrdAddress)
@@ -130,32 +167,6 @@ pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> Resu
     Ok(align_to_pagesize(lowmem_size - initrd_size))
 }
 
-/// Helps to initialize BP page table information for vcpu.
-/// Also, return the pml4 address for sregs setting and AP boot
-pub fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<GuestAddress, Error> {
-    // Puts PML4 right after zero page but aligned to 4k.
-    let boot_pml4_addr = GuestAddress(layout::PML4_START);
-    let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
-    let boot_pde_addr = GuestAddress(layout::PDE_START);
-
-    // Entry covering VA [0..512GB)
-    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
-        .map_err(|_| Error::WritePML4Address)?;
-
-    // Entry covering VA [0..1GB)
-    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
-        .map_err(|_| Error::WritePDPTEAddress)?;
-    // 512 2MB entries together covering VA [0..1GB). Note we are assuming
-    // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
-    for i in 0..512 {
-        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
-            .map_err(|_| Error::WritePDEAddress)?;
-    }
-
-    // return the pml4 address that could be used for AP boot up and later sreg setting process.
-    Ok(boot_pml4_addr)
-}
-
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> u64 {
     layout::HIMEM_START
@@ -168,7 +179,7 @@ pub fn add_e820_entry(
     addr: u64,
     size: u64,
     mem_type: u32,
-) -> super::Result<()> {
+) -> Result<()> {
     if params.e820_entries >= params.e820_table.len() as u8 {
         return Err(Error::E820Configuration);
     }
