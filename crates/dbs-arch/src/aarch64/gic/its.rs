@@ -1,12 +1,10 @@
 // Copyright 2022 Alibaba Cloud. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::gicv3::GICv3;
-use super::{Error, GICDevice};
 use kvm_ioctls::{DeviceFd, VmFd};
-use std::result;
 
-type Result<T> = result::Result<T, Error>;
+use super::gicv3::GICv3;
+use super::{Error, GICDevice, Result};
 
 // ITS register range
 const REG_RANGE_LEN: u64 = 0x20000;
