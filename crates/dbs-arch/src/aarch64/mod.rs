@@ -94,7 +94,12 @@ impl DeviceInfoForFDT for MMIODeviceInfo {
         if self.irqs.len() != MMIO_DEVICE_LEGACY_IRQ_NUMBER {
             return Err(Error::MMIODeviceInfoError);
         }
-        Ok(self.irqs[0])
+        let irq = self.irqs[0];
+        if irq < gic::IRQ_BASE || irq > gic::IRQ_MAX {
+            return Err(Error::MMIODeviceInfoError);
+        }
+
+        Ok(irq)
     }
 
     fn get_device_id(&self) -> Option<u32> {
@@ -123,6 +128,10 @@ mod tests {
         let info = MMIODeviceInfo::new(0x1000, 0x1000, vec![], None);
         assert!(info.irq().is_err());
         let info = MMIODeviceInfo::new(0x1000, 0x1000, vec![1, 2], None);
+        assert!(info.irq().is_err());
+        let info = MMIODeviceInfo::new(0x1000, 0x1000, vec![gic::IRQ_BASE - 1], None);
+        assert!(info.irq().is_err());
+        let info = MMIODeviceInfo::new(0x1000, 0x1000, vec![gic::IRQ_MAX + 1], None);
         assert!(info.irq().is_err());
     }
 }
