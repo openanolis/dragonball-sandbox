@@ -1,52 +1,56 @@
-// Copyright (C) 2019 Alibaba Cloud. All rights reserved.
+// Copyright (C) 2019, 2022 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic algorithms for VMM resource management.
+//! Data structures and algorithms to support resource allocation and management.
+//!
+//! The `dbs-allocator` crate provides data structures and algorithms to manage and allocate
+//! integer identifiable resources. The resource manager in virtual machine monitor (VMM) may
+//! manage and allocate resources for virtual machines by using:
+//! - [Constraint]: Struct to declare constraints for resource allocation.
+//! - [IntervalTree]: An interval tree implementation specialized for VMM resource management.
 
 #![deny(missing_docs)]
 
-mod interval_tree;
+pub mod interval_tree;
 pub use interval_tree::{IntervalTree, NodeState, Range};
-use std::result;
-use thiserror::Error;
 
-/// Error conditions that may appear during `Allocator` related operations.
-#[derive(Error, Debug, PartialEq)]
+/// Error codes for resource allocation operations.
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum Error {
-    /// Invalid Constraint Max and Min
-    #[error("invalid constraint max ({0}) and min ({1})")]
+    /// Invalid boundary for resource allocation.
+    #[error("invalid boundary constraint: min ({0}), max ({1})")]
     InvalidBoundary(u64, u64),
 }
 
-/// Policy for resource allocation.
+/// Specialized version of [`std::result::Result`] for resource allocation operations.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Resource allocation policies.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum AllocPolicy {
-    /// Default allocation policy.
+    /// Default resource allocation policy.
     Default,
-    /// Allocate from the first matched entry.
+    /// Return the first available resource matching the allocation constraints.
     FirstMatch,
 }
 
-/// Struct to describe resource allocation constraints.
+/// Struct to declare resource allocation constraints.
 #[derive(Copy, Clone, Debug)]
 pub struct Constraint {
-    /// Size to allocate.
+    /// Size of resource to allocate.
     pub size: u64,
-    /// Lower boundary for the allocated resource.
+    /// Lower boundary for resource allocation.
     pub min: u64,
-    /// Upper boundary for the allocated resource.
+    /// Upper boundary for resource allocation.
     pub max: u64,
-    /// Alignment for the allocated resource.
+    /// Alignment for allocated resource.
     pub align: u64,
-    /// Resource allocation policy.
+    /// Policy for resource allocation.
     pub policy: AllocPolicy,
 }
 
-/// Generic result type that may return `Allocator` errors.
-pub type Result<T> = result::Result<T, Error>;
-
 impl Constraint {
-    /// Create a new constraint object with default settings.
+    /// Create a new instance of [`Constraint`] with default settings.
     pub fn new<T>(size: T) -> Self
     where
         u64: From<T>,
@@ -54,13 +58,13 @@ impl Constraint {
         Constraint {
             size: u64::from(size),
             min: 0,
-            max: std::u64::MAX,
+            max: u64::MAX,
             align: 1,
             policy: AllocPolicy::Default,
         }
     }
 
-    /// Set the min constraint.
+    /// Set the lower boundary constraint for resource allocation.
     pub fn min<T>(mut self, min: T) -> Self
     where
         u64: From<T>,
@@ -69,7 +73,7 @@ impl Constraint {
         self
     }
 
-    /// Set the max constraint.
+    /// Set the upper boundary constraint for resource allocation.
     pub fn max<T>(mut self, max: T) -> Self
     where
         u64: From<T>,
@@ -78,7 +82,7 @@ impl Constraint {
         self
     }
 
-    /// Set the alignment constraint.
+    /// Set the alignment constraint for allocated resource.
     pub fn align<T>(mut self, align: T) -> Self
     where
         u64: From<T>,
@@ -87,16 +91,16 @@ impl Constraint {
         self
     }
 
-    /// Set the allocation policy.
+    /// Set the resource allocation policy.
     pub fn policy(mut self, policy: AllocPolicy) -> Self {
         self.policy = policy;
         self
     }
 
-    /// Validate the constraint
+    /// Validate the resource allocation constraints.
     pub fn validate(&self) -> Result<()> {
         if self.max < self.min {
-            return Err(Error::InvalidBoundary(self.max, self.min));
+            return Err(Error::InvalidBoundary(self.min, self.max));
         }
         Ok(())
     }
@@ -149,7 +153,7 @@ mod tests {
         let constraint = Constraint::new(2_u64).max(999_u64).min(1000_u64);
         assert_eq!(
             constraint.validate(),
-            Err(Error::InvalidBoundary(999_u64, 1000_u64))
+            Err(Error::InvalidBoundary(1000u64, 999u64))
         )
     }
 }
