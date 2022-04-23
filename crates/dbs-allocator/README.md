@@ -2,56 +2,32 @@
 
 ## Design
 
-dbs-allocator is designed as a resource allocator for Dragonball VMM. It provides allocation and release strategy of different kinds of resources that might be used by VM, such as memory-mapped I/O address space, port I/O address space, legacy IRQ numbers, MSI/MSI-X vectors, device instance id, etc. All these kinds of resource should be allocated and released by dbs-allocator in order to make VMM easier to construct and resource allocation easier to track and maintain.
-Main components are:   
-Constraints: describe resource allocation constraints.
-IntervalTree: An VMM specified interval tree responsible for allocating and releasing resources.
+The resource manager in the `Dragonball Sandbox` needs to manage and allocate different kinds of resource for the
+sandbox (virtual machine), such as memory-mapped I/O address space, port I/O address space, legacy IRQ numbers,
+MSI/MSI-X vectors, device instance id, etc. The `dbs-allocator` crate is designed to help the resource manager
+to track and allocate these types of resources.
 
+Main components are:   
+- *Constraints*: Struct to declare constraints for resource allocation.
 ```rust
+#[derive(Copy, Clone, Debug)]
 pub struct Constraint {
-    /// Size to allocate.
+    /// Size of resource to allocate.
     pub size: u64,
-    /// Lower boundary for the allocated resource.
+    /// Lower boundary for resource allocation.
     pub min: u64,
-    /// Upper boundary for the allocated resource.
+    /// Upper boundary for resource allocation.
     pub max: u64,
-    /// Alignment for the allocated resource.
+    /// Alignment for allocated resource.
     pub align: u64,
-    /// Resource allocation policy.
+    /// Policy for resource allocation.
     pub policy: AllocPolicy,
 }
 ```
-
-Struct Constraint is used to describe the overall information of the resource needed to be allocated and IntervalTree could use the Constraint information to know where and how to allocate the resource.
+- *IntervalTree*: An interval tree implementation specialized for VMM resource management.
 ```rust
 pub struct IntervalTree<T> {
     pub(crate) root: Option<Node<T>>,
-}
-​
-pub(crate) struct Node<T>(pub(crate) Box<InnerNode<T>>);
-​
-pub(crate) struct InnerNode<T> {
-    /// Interval handled by this node.
-    pub(crate) key: Range,
-    /// Optional contained data, None if the node is free.
-    pub(crate) data: NodeState<T>,
-    /// Optional left child of current node.
-    pub(crate) left: Option<Node<T>>,
-    /// Optional right child of current node.
-    pub(crate) right: Option<Node<T>>,
-    /// Cached height of the node.
-    pub(crate) height: u32,
-    /// Cached maximum valued covered by this node.
-    pub(crate) max_key: u64,
-}
-​
-pub enum NodeState<T> {
-    /// Node is free
-    Free,
-    /// Node is allocated but without associated data
-    Allocated,
-    /// Node is allocated with associated data.
-    Valued(T),
 }
 ​
 pub fn allocate(&mut self, constraint: &Constraint) -> Option<Range>
@@ -60,16 +36,8 @@ pub fn insert(&mut self, key: Range, data: Option<T>) -> Self
 pub fn update(&mut self, key: &Range, data: T) -> Option<T>
 pub fn delete(&mut self, key: &Range) -> Option<T> 
 pub fn get(&self, key: &Range) -> Option<NodeState<&T>>
-
 ```
-With the interval tree developed for VMM, we introduce 2 VMM specified functions - Allocate and Free.  We could do resource allocation and release with better query and creation performance, safe boundary check and better abstraction APIs.
-We should assign a maximum resource range that the IntervalTree could hold as the root node. Then we could use different functions in allocator.
-Allocate with constraint coule be used to allocate a range for specific resource in the interval tree. 
-Free could be used to release an allocated range and return the associated resource.
-Update could be used to update an existing entry and return the old value.
-Insert could be used to insert specific resource into some range if we know exact range and resource to put and ensure there is no risk.
-Delete could be used to remove the range from the tree and return the associated data.
-Get could be used to get the data item associated with the range, or return None if no match found.
+
 ## Usage
 The concept of Interval Tree may seem complicated, but using dbs-allocator to do resource allocation and release is simple and straightforward. 
 You can following these steps to allocate your VMM resource.

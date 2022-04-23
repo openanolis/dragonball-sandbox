@@ -4,7 +4,8 @@
 //! An interval tree implementation specialized for VMM resource management.
 //!
 //! It's not designed as a generic interval tree, but specialized for VMM resource management.
-//! In addition to the normal get/insert/delete/update operations, it also implements allocate/free.
+//! In addition to the normal get()/insert()/delete()/update() tree operations, it also implements
+//! allocate()/free() for resource allocation.
 //!
 //! # Examples
 //! ```rust
@@ -46,7 +47,7 @@ use std::cmp::{max, min, Ordering};
 
 use crate::{AllocPolicy, Constraint};
 
-/// A closed interval range [min, max].
+/// Represent a closed range `[min, max]`.
 #[allow(missing_docs)]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Range {
@@ -61,16 +62,18 @@ impl std::fmt::Debug for Range {
 }
 
 impl Range {
-    /// Create a new Range object.
+    /// Create a instance of [`Range`] with given `min` and `max`.
     ///
-    /// Note: panic if encounters invalid parameters.
+    /// ## Panic
+    /// - if min is bigger than max
+    /// - if min == 0 && max == u64:MAX
     pub fn new<T>(min: T, max: T) -> Self
     where
         u64: From<T>,
     {
         let umin = u64::from(min);
         let umax = u64::from(max);
-        if umin > umax || (umin == 0 && umax == std::u64::MAX) {
+        if umin > umax || (umin == 0 && umax == u64::MAX) {
             panic!("interval_tree: Range({}, {}) is invalid", umin, umax);
         }
         Range {
@@ -79,9 +82,11 @@ impl Range {
         }
     }
 
-    /// Create a new Range object.
+    /// Create a instance of [`Range`] with given base and size.
     ///
-    /// Note: panic if encounters invalid parameters.
+    /// ## Panic
+    /// - if base + size wraps around
+    /// - if base == 0 && size == u64::MAX
     pub fn with_size<T>(base: T, size: T) -> Self
     where
         u64: From<T>,
@@ -97,7 +102,7 @@ impl Range {
         }
     }
 
-    /// Create a new Range object containing just a point.
+    /// Create a instance of [`Range`] containing only the point `value`.
     pub fn new_point<T>(value: T) -> Self
     where
         u64: From<T>,
@@ -106,7 +111,7 @@ impl Range {
         Range { min: val, max: val }
     }
 
-    /// Get length of the range.
+    /// Get size of the range.
     pub fn len(&self) -> u64 {
         self.max - self.min + 1
     }
@@ -121,12 +126,12 @@ impl Range {
         max(self.min, other.min) <= min(self.max, other.max)
     }
 
-    /// Check whether the key is fully covered.
+    /// Check whether another [Range] object is fully covered by this range.
     pub fn contain(&self, other: &Range) -> bool {
         self.min <= other.min && self.max >= other.max
     }
 
-    /// Create a new Range object with min aligned to `align`.
+    /// Create a new instance of [Range] with `min` aligned to `align`.
     ///
     /// # Examples
     /// ```rust
@@ -179,17 +184,17 @@ impl Ord for Range {
     }
 }
 
-/// Node state for interval tree nodes.
+/// State of interval tree node.
 ///
-/// Valid state transition:
-/// - None -> Free: IntervalTree::insert()
-/// - None -> Valued: IntervalTree::insert()
-/// - Free -> Allocated: IntervalTree::allocate()
-/// - Allocated -> Valued(T): IntervalTree::update()
-/// - Valued -> Valued(T): IntervalTree::update()
-/// - Allocated -> Free: IntervalTree::free()
-/// - Valued(T) -> Free: IntervalTree::free()
-/// - * -> None: IntervalTree::delete()
+/// Valid state transitions:
+/// - None -> Free: [IntervalTree::insert()]
+/// - None -> Valued: [IntervalTree::insert()]
+/// - Free -> Allocated: [IntervalTree::allocate()]
+/// - Allocated -> Valued(T): [IntervalTree::update()]
+/// - Valued -> Valued(T): [IntervalTree::update()]
+/// - Allocated -> Free: [IntervalTree::free()]
+/// - Valued(T) -> Free: [IntervalTree::free()]
+/// - * -> None: [IntervalTree::delete()]
 #[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub enum NodeState<T> {
     /// Node is free
@@ -579,7 +584,7 @@ pub struct IntervalTree<T> {
 }
 
 impl<T> IntervalTree<T> {
-    /// Construct a new empty IntervalTree.
+    /// Construct a default empty [IntervalTree] object.
     ///
     /// # Examples
     /// ```rust
