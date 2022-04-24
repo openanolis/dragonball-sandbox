@@ -6,15 +6,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 use std::io::Write;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use dbs_device::{DeviceIoMut, IoAddress, PioAddress};
 use dbs_utils::metric::{IncMetric, SharedIncMetric};
 use log::error;
 use serde::Serialize;
 use vm_superio::{serial::SerialEvents, Serial, Trigger};
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::EventFdTrigger;
+
+/// Trait for devices that handle raw non-blocking I/O requests.
+pub trait ConsoleHandler {
+    /// Send raw input to this emulated device.
+    fn raw_input(&mut self, _data: &[u8]) -> std::io::Result<usize> {
+        Ok(0)
+    }
+
+    /// Set the stream to receive raw output from this emulated device.
+    fn set_output_stream(&mut self, out: Option<Box<dyn Write + Send>>);
+}
 
 /// Metrics specific to the UART device.
 #[derive(Default, Serialize)]
@@ -66,15 +78,44 @@ impl SerialEvents for SerialEventsWrapper {
     }
 }
 
-pub type SerialDevice = SerialWrapper<EventFdTrigger, SerialEventsWrapper, Box<dyn Write + Send>>;
+pub type SerialDevice = SerialWrapper<EventFdTrigger, SerialEventsWrapper>;
 
-pub struct SerialWrapper<T: Trigger, EV: SerialEvents, W: Write> {
-    pub serial: Serial<T, EV, W>,
+impl SerialDevice {
+    /// Creates a new SerialDevice instance.
+    pub fn new(event: EventFd) -> Self {
+        let out = Arc::new(Mutex::new(None));
+        Self {
+            serial: Serial::with_events(
+                EventFdTrigger::new(event),
+                SerialEventsWrapper {
+                    metrics: Arc::new(SerialDeviceMetrics::default()),
+                    buffer_ready_event_fd: None,
+                },
+                AdapterWriter(out.clone()),
+            ),
+            out,
+        }
+    }
 }
 
-impl<W: Write + Send + 'static> DeviceIoMut
-    for SerialWrapper<EventFdTrigger, SerialEventsWrapper, W>
-{
+pub struct SerialWrapper<T: Trigger, EV: SerialEvents> {
+    pub serial: Serial<T, EV, AdapterWriter>,
+    pub out: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
+}
+
+impl ConsoleHandler for SerialWrapper<EventFdTrigger, SerialEventsWrapper> {
+    fn raw_input(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.serial
+            .enqueue_raw_bytes(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))
+    }
+
+    fn set_output_stream(&mut self, out: Option<Box<dyn Write + Send>>) {
+        *self.out.lock().unwrap() = out;
+    }
+}
+
+impl DeviceIoMut for SerialWrapper<EventFdTrigger, SerialEventsWrapper> {
     fn pio_read(&mut self, _base: PioAddress, offset: PioAddress, data: &mut [u8]) {
         if data.len() != 1 {
             self.serial.events().metrics.missed_read_count.inc();
@@ -112,24 +153,35 @@ impl<W: Write + Send + 'static> DeviceIoMut
     }
 }
 
+pub struct AdapterWriter(pub Arc<Mutex<Option<Box<dyn Write + Send>>>>);
+
+impl Write for AdapterWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(w) = self.0.lock().unwrap().as_mut() {
+            w.write(buf)
+        } else {
+            Ok(buf.len())
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(w) = self.0.lock().unwrap().as_mut() {
+            w.flush()
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io;
     use std::sync::{Arc, Mutex};
-    use vmm_sys_util::eventfd::EventFd;
 
     #[derive(Clone)]
     struct SharedBuffer {
         buf: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl SharedBuffer {
-        fn new() -> SharedBuffer {
-            SharedBuffer {
-                buf: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
     }
 
     impl io::Write for SharedBuffer {
@@ -143,20 +195,17 @@ mod tests {
 
     #[test]
     fn test_serial_bus_write() {
-        let serial_out = SharedBuffer::new();
-        let intr_evt = EventFdTrigger::new(EventFd::new(libc::EFD_NONBLOCK).unwrap());
+        let serial_out_buf = Arc::new(Mutex::new(Vec::new()));
+        let serial_out = Box::new(SharedBuffer {
+            buf: serial_out_buf.clone(),
+        });
+        let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
 
-        let metrics = Arc::new(SerialDeviceMetrics::default());
-        let mut serial = SerialDevice {
-            serial: Serial::with_events(
-                intr_evt,
-                SerialEventsWrapper {
-                    metrics: metrics.clone(),
-                    buffer_ready_event_fd: None,
-                },
-                Box::new(serial_out.clone()),
-            ),
-        };
+        let mut serial = SerialDevice::new(intr_evt);
+        let metrics = serial.serial.events().metrics.clone();
+
+        serial.set_output_stream(Some(serial_out));
+
         let invalid_writes_before = serial.serial.events().metrics.missed_write_count.count();
         <dyn DeviceIoMut>::pio_write(&mut serial, PioAddress(0), PioAddress(0), &[b'x', b'y']);
         let writes_before = metrics.write_count.count();
@@ -164,9 +213,9 @@ mod tests {
         let invalid_writes_after = metrics.missed_write_count.count();
         assert_eq!(invalid_writes_before + 1, invalid_writes_after);
 
-        assert_eq!(serial_out.buf.lock().unwrap().as_slice().len(), 0);
+        assert_eq!(serial_out_buf.lock().unwrap().as_slice().len(), 0);
         <dyn DeviceIoMut>::write(&mut serial, IoAddress(0), IoAddress(0), &[b'x', b'y']);
-        assert_eq!(serial_out.buf.lock().unwrap().as_slice().len(), 0);
+        assert_eq!(serial_out_buf.lock().unwrap().as_slice().len(), 0);
 
         let invalid_writes_after = metrics.missed_write_count.count();
         assert_eq!(invalid_writes_before + 2, invalid_writes_after);
@@ -175,7 +224,7 @@ mod tests {
         <dyn DeviceIoMut>::pio_write(&mut serial, PioAddress(0), PioAddress(0), &[b'b']);
         <dyn DeviceIoMut>::write(&mut serial, IoAddress(0), IoAddress(0), &[b'c']);
         assert_eq!(
-            serial_out.buf.lock().unwrap().as_slice(),
+            serial_out_buf.lock().unwrap().as_slice(),
             &[b'a', b'b', b'c']
         );
 
@@ -192,6 +241,8 @@ mod tests {
 
         let metrics = Arc::new(SerialDeviceMetrics::default());
 
+        let out: Arc<Mutex<Option<Box<(dyn std::io::Write + Send + 'static)>>>> =
+            Arc::new(Mutex::new(Some(Box::new(std::io::sink()))));
         let mut serial = SerialDevice {
             serial: Serial::with_events(
                 intr_evt,
@@ -199,8 +250,9 @@ mod tests {
                     metrics: metrics.clone(),
                     buffer_ready_event_fd: None,
                 },
-                Box::new(std::io::sink()),
+                AdapterWriter(out.clone()),
             ),
+            out,
         };
         serial
             .serial
