@@ -7,7 +7,7 @@ edition = "2018"
 description = "A collection of CPU architecture specific constants and utilities."
 homepage = "https://github.com/openanolis/dragonball-sandbox"
 repository = "https://github.com/openanolis/dragonball-sandbox"
-keywords = ["dragonball", "secure-sandbox", "arch", "ARM64", "x86", "VMM"]
+keywords = ["dragonball", "secure-sandbox", "arch", "ARM64", "x86"]
 readme = "README.md"
 
 [dependencies]
