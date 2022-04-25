@@ -82,8 +82,24 @@ ln <path_to_the_root_of_the_repository>/LICENSE-BSD-3-Clause \
 
 6. Commit the symlinks together with the `Cargo.toml` and `CHANGELOG.md` updates.
 
-7. Once the pull request is merged, create a tag. Use the new version's changelog section for the tag text.
-   Don't forget to remove the #s here, otherwise those lines won't appear in the tag message.
+7. To double-check what's being published, do a dry run first and fix warnings and errors.
+   NOTE: Running this command requires closing the crates repository mirror. See
+   [Cannot publish crates with crates repository mirrored](https://github.com/rust-lang/crates.io/issues/2249) for details.
+
+```bash
+cargo publish --dry-run
+```
+   Checklist:
+
+   * crates.io has a maximum of 5 keywords. Each keyword must be ASCII text, start with a letter,
+     and only contain letters, numbers, _ or -, and have at most 20 characters.
+   * crates.io requires the description to be set.
+   * crates.io requires either license or license-file to be set.
+
+8. Once the pull request is merged, create a tag. Use the new version's changelog section for the tag text.
+   Don't forget to remove the #s here, otherwise those lines won't appear in the tag message. The tag message here
+   is not the release message. in the next step we will set the release message.
+
    Example for releasing v1.2.0:
 
 ```bash
@@ -104,24 +120,22 @@ Fixed
 - Fixed #42, the worst bug ever.
 ```
 
-8. Push the tag to the upstream repository: `git push upstream --tags`. In this example, the upstream remote points
+9. Push the tag to the upstream repository: `git push upstream --tags`. In this example, the upstream remote points
    to the original repository (not your fork).
 
-9. Create as GitHub release. Go to the Releases page in the crate's repository and click Draft a new release
+10. Create as GitHub release. Go to the Releases page in the crate's repository and click Draft a new release
    (button on the right). In Tag version, pick the newly pushed tag. In Release title, write the tag name including v
-    (example: v1.2.3). The description should be the new version's changelog section. Click Publish release.
+    (example: dbs-interrupt-v1.2.3). The description should be the new version's changelog section. Click Publish release.
 
-10. Publish the new version to crates.io. To double-check what's being
-    published, do a dry run first. Make sure your HEAD is on the release tag,
+11. Publish the new version to crates.io. Make sure your HEAD is on the release tag,
     and you run the following commands from the root of the crate, and not of
     the workspace.
 
 ```bash
-cargo publish --dry-run
 cargo publish
 ```
 
-11. Add Dragonball administrator team as the owner of the new crate.
+12. Add Dragonball administrator team as the owner of the new crate.
 
 ```bash
 cargo owner --add github:openanolis:dragonball
