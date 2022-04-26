@@ -34,7 +34,7 @@ pub struct I8042Wrapper<T: Trigger> {
     pub metrics: Arc<I8042DeviceMetrics>,
 }
 
-impl I8042Wrapper<EventFdTrigger> {
+impl I8042Device {
     pub fn new(event: EventFdTrigger, metrics: Arc<I8042DeviceMetrics>) -> Self {
         Self {
             device: I8042Dev::new(event),
@@ -71,8 +71,9 @@ impl DeviceIoMut for I8042Wrapper<EventFdTrigger> {
 mod tests {
     use std::os::unix::prelude::FromRawFd;
 
-    use super::*;
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const COMMAND_OFFSET: u8 = 4;
     const CMD_RESET_CPU: u8 = 0xFE;
