@@ -609,6 +609,10 @@ pub(crate) mod tests {
         fn as_any(&self) -> &dyn Any {
             self
         }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
     }
 
     pub fn set_driver_status(
