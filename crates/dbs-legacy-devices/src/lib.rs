@@ -7,11 +7,11 @@
 // found in the THIRD-PARTY file.
 
 //! Emulates virtual and hardware devices.
-pub mod serial;
-pub use self::serial::{SerialDevice, SerialWrapper};
+mod serial;
+pub use self::serial::*;
 
 mod i8042;
-pub use self::i8042::I8042Device;
+pub use self::i8042::*;
 
 use vm_superio::Trigger;
 use vmm_sys_util::eventfd::EventFd;
