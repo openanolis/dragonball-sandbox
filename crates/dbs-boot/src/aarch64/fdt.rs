@@ -7,17 +7,19 @@
 // found in the THIRD-PARTY file.
 
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, NulError};
+use std::ffi::{CStr, CString};
 use std::fmt::Debug;
+use std::io;
 use std::ptr::null;
-use std::{io, result};
 
 use libc::{c_char, c_int, c_void};
 use vm_memory::GuestMemoryRegion;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
 use super::layout::FDT_MAX_SIZE;
+use super::Error;
 use crate::InitrdConfig;
+use crate::Result;
 use dbs_arch::gic::its::ItsType;
 use dbs_arch::gic::its::ItsType::{PciMsiIts, PlatformMsiIts};
 use dbs_arch::gic::GICDevice;
@@ -63,26 +65,6 @@ extern "C" {
     fn fdt_finish(fdt: *const c_void) -> c_int;
     fn fdt_pack(fdt: *mut c_void) -> c_int;
 }
-
-/// Errors thrown while configuring the Flattened Device Tree for aarch64.
-#[derive(Debug)]
-pub enum Error {
-    /// Failed to append node to the FDT.
-    AppendFDTNode(io::Error),
-    /// Failed to append a property to the FDT.
-    AppendFDTProperty(io::Error),
-    /// Syscall for creating FDT failed.
-    CreateFDT(io::Error),
-    /// Failed to obtain a C style string.
-    CstringFDTTransform(NulError),
-    /// Failure in calling syscall for terminating this FDT.
-    FinishFDTReserveMap(io::Error),
-    /// Failure in writing FDT in memory.
-    WriteFDTToMemory(GuestMemoryError),
-    /// Invalid arguments
-    InvalidArguments,
-}
-type Result<T> = result::Result<T, Error>;
 
 // Auxiliary function to get the address where the device tree blob is loaded.
 fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
@@ -620,7 +602,7 @@ mod tests {
         fn addr(&self) -> u64 {
             self.addr
         }
-        fn irq(&self) -> result::Result<u32, dbs_arch::Error> {
+        fn irq(&self) -> std::result::Result<u32, dbs_arch::Error> {
             Ok(self.irq)
         }
         fn length(&self) -> u64 {
