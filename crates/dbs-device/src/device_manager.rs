@@ -23,6 +23,7 @@
 //!
 //! ```
 //! use std::sync::Arc;
+//! use std::any::Any;
 //!
 //! use dbs_device::device_manager::IoManager;
 //! use dbs_device::resources::{DeviceResources, Resource};
@@ -61,6 +62,10 @@
 //!             base.raw_value(),
 //!             offset.raw_value()
 //!         );
+//!     }
+//!
+//!     fn as_any(&self) -> &dyn Any {
+//!         self
 //!     }
 //! }
 //!
@@ -466,6 +471,9 @@ mod tests {
         fn pio_write(&self, _base: PioAddress, _offset: PioAddress, data: &[u8]) {
             let mut config = self.config.lock().expect("failed to acquire lock");
             *config = u32::from(data[0]) & 0xff;
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 
