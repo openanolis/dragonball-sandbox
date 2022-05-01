@@ -886,7 +886,7 @@ mod tests {
                     ErrorKind::TimedOut
                 );
                 let end_time1 = Instant::now().duration_since(start_time1).as_millis();
-                assert!((150..200).contains(&end_time1));
+                assert!((150..250).contains(&end_time1));
 
                 // second read would ok
                 assert!(outer_stream.read_exact(&mut reader_buf).is_ok());
