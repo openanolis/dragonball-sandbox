@@ -87,34 +87,9 @@ pub enum Error {
 }
 
 /// Initialize the 1:1 identity mapping table for guest memory range [0..1G).
-pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<()> {
-    // Puts PML4 right after zero page but aligned to 4k.
-    let boot_pml4_addr = GuestAddress(layout::PML4_START);
-    let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
-    let boot_pde_addr = GuestAddress(layout::PDE_START);
-
-    // Entry covering VA [0..512GB)
-    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
-        .map_err(|_| Error::WritePML4Address)?;
-
-    // Entry covering VA [0..1GB)
-    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
-        .map_err(|_| Error::WritePDPTEAddress)?;
-
-    // 512 2MB entries together covering VA [0..1GB). Note we are assuming
-    // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
-    for i in 0..512 {
-        mem.write_obj((i << 21) + 0x83u64, boot_pde_addr.unchecked_add(i * 8))
-            .map_err(|_| Error::WritePDEAddress)?;
-    }
-
-    Ok(())
-}
-
-/// Helps to initialize BP page table information for vcpu.
 ///
 /// Also, return the pml4 address for sregs setting and AP boot
-pub fn setup_bp_page_tables<M: GuestMemory>(mem: &M) -> Result<GuestAddress> {
+pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<GuestAddress> {
     // Puts PML4 right after zero page but aligned to 4k.
     let boot_pml4_addr = GuestAddress(layout::PML4_START);
     let boot_pdpte_addr = GuestAddress(layout::PDPTE_START);
@@ -294,7 +269,7 @@ mod tests {
             gdt_entry(0x808b, 0, 0xfffff), // TSS
         ];
 
-        let page_address = setup_bp_page_tables(&gm).unwrap();
+        let page_address = setup_identity_mapping(&gm).unwrap();
         dbs_arch::regs::setup_sregs(
             &gm,
             &vcpu,
