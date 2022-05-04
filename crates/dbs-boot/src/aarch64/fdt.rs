@@ -469,7 +469,7 @@ mod tests {
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
-        let mut dtb = create_fdt(
+        let dtb = create_fdt(
             &mem,
             vec![0],
             "console=tty0",
@@ -502,7 +502,6 @@ mod tests {
         buf.extend_from_slice(bytes);
 
         set_size(&mut buf, pos, val);
-        set_size(&mut dtb, pos, val);
         let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
         let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
         assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
@@ -520,7 +519,7 @@ mod tests {
             size: 0x1000,
         };
 
-        let mut dtb = create_fdt(
+        let dtb = create_fdt(
             &mem,
             vec![0],
             "console=tty0",
@@ -553,7 +552,6 @@ mod tests {
         buf.extend_from_slice(bytes);
 
         set_size(&mut buf, pos, val);
-        set_size(&mut dtb, pos, val);
         let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
         let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
         assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
