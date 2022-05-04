@@ -17,6 +17,7 @@ lazy_static = "1"
 libc = "0.2.39"
 thiserror = "1"
 vm-memory = "0.7.0"
+vm-fdt = "0.2.0"
 
 [dev-dependencies]
 vm-memory = { version = "0.7.0", features = ["backend-mmap"] }
