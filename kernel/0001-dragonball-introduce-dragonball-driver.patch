@@ -1,0 +1,75 @@
+From da16a5f543ddef86382d9e843ef402a4616ebff5 Mon Sep 17 00:00:00 2001
+From: Chao Wu <chaowu@linux.alibaba.com>
+Date: Thu, 12 May 2022 12:03:20 +0800
+Subject: [PATCH] dragonball: introduce dragonball driver
+
+This patch introduces dragonball driver so that we can introduce more
+features through the driver.
+
+Signed-off-by: Chao Wu <chaowu@linux.alibaba.com>
+---
+ drivers/misc/Kconfig             |  1 +
+ drivers/misc/Makefile            |  1 +
+ drivers/misc/dragonball/Kconfig  | 18 ++++++++++++++++++
+ drivers/misc/dragonball/Makefile |  4 ++++
+ 4 files changed, 24 insertions(+)
+ create mode 100644 drivers/misc/dragonball/Kconfig
+ create mode 100644 drivers/misc/dragonball/Makefile
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 3726eacdf65d..d5278b085290 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -527,4 +527,5 @@ source "drivers/misc/echo/Kconfig"
+ source "drivers/misc/cxl/Kconfig"
+ source "drivers/misc/ocxl/Kconfig"
+ source "drivers/misc/cardreader/Kconfig"
++source "drivers/misc/dragonball/Kconfig"
+ endmenu
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index af22bbc3d00c..d2f09c6d7ce9 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -58,3 +58,4 @@ obj-$(CONFIG_ASPEED_LPC_SNOOP)	+= aspeed-lpc-snoop.o
+ obj-$(CONFIG_PCI_ENDPOINT_TEST)	+= pci_endpoint_test.o
+ obj-$(CONFIG_OCXL)		+= ocxl/
+ obj-$(CONFIG_MISC_RTSX)		+= cardreader/
++obj-$(CONFIG_DRAGONBALL_DRIVERS)       += dragonball/
+diff --git a/drivers/misc/dragonball/Kconfig b/drivers/misc/dragonball/Kconfig
+new file mode 100644
+index 000000000000..458af56452f6
+--- /dev/null
++++ b/drivers/misc/dragonball/Kconfig
+@@ -0,0 +1,18 @@
++#
++# Alibaba Dragonball Secure Container Runtime Drivers
++#
++
++menuconfig DRAGONBALL_DRIVERS
++	bool "Alibaba Dragonball Secure Container Runtime Drivers"
++	depends on X86_64 || ARM64
++	default n
++	help
++	  Alibaba Dragonball is a secure container runtime with an embedded micro-vmm
++	  to securely isolate container workloads.
++
++	  Say Y here to get to see options for various misc drivers to support the
++	  Alibaba Dragonball secure container runtime. This option alone does not
++	  add any kernel code.
++
++	  If unsure, say N.
++
+diff --git a/drivers/misc/dragonball/Makefile b/drivers/misc/dragonball/Makefile
+new file mode 100644
+index 000000000000..5c4160971cbe
+--- /dev/null
++++ b/drivers/misc/dragonball/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0
++#
++# Makefile for Dragonball misc drivers
++#
+\ No newline at end of file
+-- 
+2.19.1.6.gb485710b
+
