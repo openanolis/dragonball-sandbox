@@ -8,7 +8,7 @@ We have accomplished device hotplug / hot-unplug directly through upcall in orde
 
 ### Server Design
 
-The server side of upcall is a driver in guest kernel.
+The server side of upcall is a driver in guest kernel and the vsock port is 0xDB.
 After the vsock is connected, upcall related service will be registered and a kthread providing corresponding service will be created.
 The upcall service thread will first send a message with message type Connect to try to connect with the client side (VMM). After service successfully connects, the service thread will get into a loop for continuously receiving requests from the client side and processing the requests until the service stops.
 
