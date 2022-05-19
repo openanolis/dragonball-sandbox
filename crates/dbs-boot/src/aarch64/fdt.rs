@@ -19,7 +19,6 @@ use vm_fdt::FdtWriter;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
-use super::layout::FDT_MAX_SIZE;
 use super::Error;
 use crate::{InitrdConfig, Result};
 
@@ -47,20 +46,6 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 // From https://elixir.bootlin.com/linux/v4.9.62/source/include/dt-bindings/interrupt-controller/irq.h#L17
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
-
-// Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
-    // If the memory allocated is smaller than the size allocated for the FDT,
-    // we return the start of the DRAM so that
-    // we allow the code to try and load the FDT.
-
-    if let Some(offset) = mem.last_addr().checked_sub(FDT_MAX_SIZE as u64 - 1) {
-        if mem.address_in_range(offset) {
-            return offset.raw_value();
-        }
-    }
-    crate::layout::DRAM_MEM_START
-}
 
 /// Creates the flattened device tree for this aarch64 microVM.
 pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
@@ -103,10 +88,8 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     let fdt_final = fdt.finish()?;
 
     // Write FDT to memory.
-    let fdt_address = GuestAddress(get_fdt_addr(guest_mem));
-    guest_mem
-        .write_slice(fdt_final.as_slice(), fdt_address)
-        .map_err(Error::WriteFDTToMemory)?;
+    let fdt_address = GuestAddress(super::get_fdt_addr(guest_mem));
+    guest_mem.write_slice(fdt_final.as_slice(), fdt_address)?;
     Ok(fdt_final)
 }
 
