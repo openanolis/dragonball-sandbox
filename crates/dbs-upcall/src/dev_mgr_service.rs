@@ -45,10 +45,10 @@ struct DevMgrMsgHeader {
     pub msg_flags: u32,
 }
 
-/// Command struct to add a MMIO Virtio Device.
+/// Command struct to add/del a MMIO Virtio Device.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct AddMmioDevRequest {
+pub struct MmioDevRequest {
     /// base address of the virtio MMIO configuration window.
     pub mmio_base: u64,
     /// size of the virtio MMIO configuration window.
@@ -104,7 +104,9 @@ impl fmt::Debug for CpuDevRequest {
 #[derive(Clone, PartialEq, Debug)]
 pub enum DevMgrRequest {
     /// Add a MMIO virtio device
-    AddMmioDev(AddMmioDevRequest),
+    AddMmioDev(MmioDevRequest),
+    /// Del a MMIO device device
+    DelMmioDev(MmioDevRequest),
     /// Add a VCPU
     AddVcpu(CpuDevRequest),
     /// Del a VCPU
@@ -124,9 +126,16 @@ impl DevMgrRequest {
         match self {
             DevMgrRequest::AddMmioDev(s) => {
                 msg_hdr.msg_type = DevMgrMsgType::AddMmio as u32;
-                msg_hdr.msg_size = mem::size_of::<AddMmioDevRequest>() as u32;
+                msg_hdr.msg_size = mem::size_of::<MmioDevRequest>() as u32;
                 let mmio_dev =
-                    unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut AddMmioDevRequest) };
+                    unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut MmioDevRequest) };
+                *mmio_dev = *s;
+            }
+            DevMgrRequest::DelMmioDev(s) => {
+                msg_hdr.msg_type = DevMgrMsgType::DelMmio as u32;
+                msg_hdr.msg_size = mem::size_of::<MmioDevRequest>() as u32;
+                let mmio_dev =
+                    unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut MmioDevRequest) };
                 *mmio_dev = *s;
             }
             DevMgrRequest::AddVcpu(s) => {
@@ -280,7 +289,7 @@ mod tests {
         let size_hdr = mem::size_of::<DevMgrMsgHeader>();
         // add mmio dev request
         {
-            let add_mmio_dev_request = AddMmioDevRequest {
+            let add_mmio_dev_request = MmioDevRequest {
                 mmio_base: 0,
                 mmio_size: 1,
                 mmio_irq: 2,
@@ -296,11 +305,11 @@ mod tests {
             assert_eq!(msg_hdr.magic_version, DEV_MGR_MAGIC_VERSION);
             assert_eq!(msg_hdr.msg_flags, 0);
             assert_eq!(msg_hdr.msg_type, DevMgrMsgType::AddMmio as u32);
-            assert_eq!(msg_hdr.msg_size, mem::size_of::<AddMmioDevRequest>() as u32);
+            assert_eq!(msg_hdr.msg_size, mem::size_of::<MmioDevRequest>() as u32);
 
             // valid request
             let mmio_dev_req =
-                unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut AddMmioDevRequest) };
+                unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut MmioDevRequest) };
             assert_eq!(mmio_dev_req, &add_mmio_dev_request);
         }
 
@@ -479,7 +488,7 @@ mod tests {
         let (mut inner_stream, mut outer_stream) = get_vsock_inner_backend_stream_pair();
         let dev_mgr_service = DevMgrService {};
 
-        let add_mmio_dev_request = DevMgrRequest::AddMmioDev(AddMmioDevRequest {
+        let add_mmio_dev_request = DevMgrRequest::AddMmioDev(MmioDevRequest {
             mmio_base: 0,
             mmio_size: 1,
             mmio_irq: 2,
