@@ -694,7 +694,7 @@ mod tests {
             .is_ok());
         assert!(info.lock().unwrap().result_callback.is_some());
 
-        let mut read_buffer = vec![0; 10];
+        let mut read_buffer = vec![0; 8];
         assert!(inner_stream.read_exact(&mut read_buffer).is_ok());
 
         let writer_buffer = String::from("TEST RESP").into_bytes();
@@ -726,7 +726,7 @@ mod tests {
             .is_ok());
         assert!(info.lock().unwrap().result_callback.is_none());
 
-        let mut read_buffer = vec![0; 10];
+        let mut read_buffer = vec![0; 8];
         assert!(inner_stream.read_exact(&mut read_buffer).is_ok());
 
         let writer_buffer = String::from("TEST RESP").into_bytes();
