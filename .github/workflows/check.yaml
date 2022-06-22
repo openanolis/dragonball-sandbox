@@ -11,17 +11,23 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
+          target: ${{ matrix.arch }}-unknown-linux-gnu
           override: true
       - uses: actions-rs/cargo@v1
         with:
+          use-cross: true
           command: check
-          args: --all-features
+          args: --all-features --target ${{ matrix.arch }}-unknown-linux-gnu
 
   fmt:
     name: Rustfmt
@@ -42,17 +48,23 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           components: clippy
+          target: ${{ matrix.arch }}-unknown-linux-gnu
           override: true
       - uses: actions-rs/clippy-check@v1
         with:
+          use-cross: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          args: --all-features --all-targets --target ${{ matrix.arch }}-unknown-linux-gnu -- -D warnings
           name: Clippy Output
 
   deny:
