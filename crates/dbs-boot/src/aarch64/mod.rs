@@ -55,9 +55,9 @@ pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> supe
     match GuestAddress(get_fdt_addr(guest_mem)).checked_sub(round_to_pagesize(initrd_size) as u64) {
         Some(offset) => {
             if guest_mem.address_in_range(offset) {
-                return Ok(offset.raw_value());
+                Ok(offset.raw_value())
             } else {
-                return Err(Error::InitrdAddress);
+                Err(Error::InitrdAddress)
             }
         }
         None => Err(Error::InitrdAddress),
