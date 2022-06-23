@@ -384,14 +384,13 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
     pub fn set_msi_device_id(&mut self, index: u32) -> Result<()> {
         if (index as usize) < self.msi_config.len() {
             if let InterruptSourceConfig::MsiIrq(ref mut msi) = self.msi_config[index as usize] {
-                msi.device_id = match self.device_id {
+                msi.device_id = self.device_id.map(|dev_id| {
                     // An pci device attach to ITS will have a new device id which is use for msi
                     // irq routing.  It is calculated according to kernel function PCI_DEVID(),
                     // new_dev_id = (bus << 8) | devfn. In addition, devfn = device_id << 3,
                     // according to pci-host-ecam-generic's spec, and we implement bus = 0.
-                    Some(dev_id) => Some(dev_id << MSI_DEVICE_ID_SHIFT),
-                    None => None,
-                };
+                    dev_id << MSI_DEVICE_ID_SHIFT
+                });
                 return Ok(());
             }
         }
