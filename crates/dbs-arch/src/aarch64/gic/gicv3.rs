@@ -79,16 +79,13 @@ impl GICDevice for GICv3 {
     }
 
     fn get_its_reg_range(&self, its_type: &ItsType) -> Option<[u64; 2]> {
-        match self.its.get(&its_type) {
-            Some(its) => Some(its.get_reg_range()),
-            _ => None,
-        }
+        self.its.get(its_type).map(|its| its.get_reg_range())
     }
 
     fn attach_its(&mut self, vm: &VmFd) -> Result<()> {
-        let its = ITS::new(vm, &self, PlatformMsiIts)?;
+        let its = ITS::new(vm, self, PlatformMsiIts)?;
         self.its.insert(PlatformMsiIts, its);
-        let its = ITS::new(vm, &self, PciMsiIts)?;
+        let its = ITS::new(vm, self, PciMsiIts)?;
         self.its.insert(PciMsiIts, its);
         Ok(())
     }
@@ -99,26 +96,26 @@ impl GICDevice for GICv3 {
 
     fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
         Box::new(GICv3 {
-            fd: fd,
+            fd,
             properties: [
                 GICv3::get_dist_addr(),
                 GICv3::get_dist_size(),
                 GICv3::get_redists_addr(vcpu_count),
                 GICv3::get_redists_size(vcpu_count),
             ],
-            vcpu_count: vcpu_count,
+            vcpu_count,
             its: HashMap::new(),
         })
     }
 
-    fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()> {
+    fn init_device_attributes(gic_device: &dyn GICDevice) -> Result<()> {
         /* Setting up the distributor attribute.
          We are placing the GIC below 1GB so we need to substract the size of the distributor.
         */
         Self::set_device_attribute(
-            &gic_device.device_fd(),
+            gic_device.device_fd(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
-            u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
+            kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST.into(),
             &GICv3::get_dist_addr() as *const u64 as u64,
             0,
         )?;
@@ -127,10 +124,10 @@ impl GICDevice for GICv3 {
         We are calculating here the start of the redistributors address. We have one per CPU.
         */
         Self::set_device_attribute(
-            &gic_device.device_fd(),
+            gic_device.device_fd(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
-            u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
-            &GICv3::get_redists_addr(u64::from(gic_device.vcpu_count())) as *const u64 as u64,
+            kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST.into(),
+            &GICv3::get_redists_addr(gic_device.vcpu_count()) as *const u64 as u64,
             0,
         )?;
 

@@ -102,7 +102,7 @@ pub trait GICDevice: Send {
         Self: Sized;
 
     /// Setup the device-specific attributes
-    fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()>
+    fn init_device_attributes(gic_device: &dyn GICDevice) -> Result<()>
     where
         Self: Sized;
 
@@ -132,10 +132,10 @@ pub trait GICDevice: Send {
         Self: Sized,
     {
         let attr = kvm_bindings::kvm_device_attr {
-            group: group,
-            attr: attr,
-            addr: addr,
-            flags: flags,
+            group,
+            attr,
+            addr,
+            flags,
         };
         fd.set_device_attr(&attr)
             .map_err(Error::SetDeviceAttribute)?;
@@ -144,7 +144,7 @@ pub trait GICDevice: Send {
     }
 
     /// Finalize the setup of a GIC device
-    fn finalize_device(gic_device: &Box<dyn GICDevice>) -> Result<()>
+    fn finalize_device(gic_device: &dyn GICDevice) -> Result<()>
     where
         Self: Sized,
     {
@@ -175,6 +175,7 @@ pub trait GICDevice: Send {
         Ok(())
     }
 
+    #[allow(clippy::new_ret_no_self)]
     /// Method to initialize the GIC device
     fn new(vm: &VmFd, vcpu_count: u64) -> Result<Box<dyn GICDevice>>
     where
@@ -186,9 +187,9 @@ pub trait GICDevice: Send {
 
         device.attach_its(vm)?;
 
-        Self::init_device_attributes(&device)?;
+        Self::init_device_attributes(device.as_ref())?;
 
-        Self::finalize_device(&device)?;
+        Self::finalize_device(device.as_ref())?;
 
         Ok(device)
     }
