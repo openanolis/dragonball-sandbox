@@ -40,6 +40,12 @@ pub struct RTCDevice {
     pub rtc: Rtc<RTCDeviceMetrics>,
 }
 
+impl Default for RTCDevice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RTCDevice {
     pub fn new() -> Self {
         let metrics = RTCDeviceMetrics::default();
