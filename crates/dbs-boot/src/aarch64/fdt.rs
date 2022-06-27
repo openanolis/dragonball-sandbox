@@ -19,7 +19,6 @@ use vm_fdt::FdtWriter;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
-use super::layout::FDT_MAX_SIZE;
 use super::Error;
 use crate::{InitrdConfig, Result};
 
@@ -48,20 +47,7 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
 
-// Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
-    // If the memory allocated is smaller than the size allocated for the FDT,
-    // we return the start of the DRAM so that
-    // we allow the code to try and load the FDT.
-
-    if let Some(offset) = mem.last_addr().checked_sub(FDT_MAX_SIZE as u64 - 1) {
-        if mem.address_in_range(offset) {
-            return offset.raw_value();
-        }
-    }
-    crate::layout::DRAM_MEM_START
-}
-
+#[allow(clippy::borrowed_box)]
 /// Creates the flattened device tree for this aarch64 microVM.
 pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     guest_mem: &M,
@@ -90,7 +76,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     create_cpu_nodes(&mut fdt, &vcpu_mpidr)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
-    create_gic_node(&mut fdt, gic_device)?;
+    create_gic_node(&mut fdt, gic_device.as_ref())?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
@@ -103,15 +89,13 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     let fdt_final = fdt.finish()?;
 
     // Write FDT to memory.
-    let fdt_address = GuestAddress(get_fdt_addr(guest_mem));
-    guest_mem
-        .write_slice(fdt_final.as_slice(), fdt_address)
-        .map_err(Error::WriteFDTToMemory)?;
+    let fdt_address = GuestAddress(super::get_fdt_addr(guest_mem));
+    guest_mem.write_slice(fdt_final.as_slice(), fdt_address)?;
     Ok(fdt_final)
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &Vec<u64>) -> Result<()> {
+fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     let cpus_node = fdt.begin_node("cpus")?;
     // As per documentation, on ARM v8 64-bit systems value should be set to 2.
@@ -119,7 +103,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &Vec<u64>) -> Result<()> {
     fdt.property_u32("#size-cells", 0x0)?;
     let num_cpus = vcpu_mpidr.len();
 
-    for cpu_index in 0..num_cpus {
+    for (cpu_index, iter) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{:x}", cpu_index);
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
@@ -130,7 +114,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &Vec<u64>) -> Result<()> {
         }
         // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
-        fdt.property_u64("reg", vcpu_mpidr[cpu_index] & 0x7FFFFF)?;
+        fdt.property_u64("reg", iter & 0x7FFFFF)?;
         fdt.end_node(cpu_node)?;
     }
     fdt.end_node(cpus_node)?;
@@ -183,7 +167,7 @@ fn append_its_common_property(fdt: &mut FdtWriter, registers_prop: &[u64]) -> Re
 
 fn create_its_node(
     fdt: &mut FdtWriter,
-    gic_device: &Box<dyn GICDevice>,
+    gic_device: &dyn GICDevice,
     its_type: ItsType,
 ) -> Result<()> {
     let reg = gic_device.get_its_reg_range(&its_type);
@@ -211,7 +195,7 @@ fn create_its_node(
     Ok(())
 }
 
-fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Box<dyn GICDevice>) -> Result<()> {
+fn create_gic_node(fdt: &mut FdtWriter, gic_device: &dyn GICDevice) -> Result<()> {
     let gic_reg_prop = gic_device.device_properties();
 
     let intc_node = fdt.begin_node("intc")?;
@@ -371,12 +355,12 @@ fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug>(
     }
 
     // Sort out serial devices by address from low to high and insert them into fdt table.
-    ordered_serial_device.sort_by(|a, b| a.addr().cmp(&b.addr()));
+    ordered_serial_device.sort_by_key(|a| a.addr());
     for serial_device_info in ordered_serial_device.drain(..) {
         create_serial_node(fdt, serial_device_info)?;
     }
     // Sort out virtio devices by address from low to high and insert them into fdt table.
-    ordered_virtio_device.sort_by(|a, b| a.addr().cmp(&b.addr()));
+    ordered_virtio_device.sort_by_key(|a| a.addr());
     for ordered_device_info in ordered_virtio_device.drain(..) {
         create_virtio_node(fdt, ordered_device_info)?;
     }
@@ -440,15 +424,12 @@ mod tests {
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
-                MMIODeviceInfo {
-                    addr: 0x00 + LEN,
-                    irq: 2,
-                },
+                MMIODeviceInfo { addr: LEN, irq: 2 },
             ),
             (
                 (DeviceType::RTC, "rtc".to_string()),
                 MMIODeviceInfo {
-                    addr: 0x00 + 2 * LEN,
+                    addr: 2 * LEN,
                     irq: 3,
                 },
             ),

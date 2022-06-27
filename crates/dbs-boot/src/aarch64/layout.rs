@@ -1,7 +1,6 @@
 // Copyright 2021-2022 Alibaba Cloud. All Rights Reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-
 //      ==== Address map in use in ARM development systems today ====
 //
 //              - 32-bit -              - 36-bit -          - 40-bit -
@@ -80,3 +79,16 @@ pub const IRQ_MAX: u32 = dbs_arch::gic::IRQ_MAX;
 pub const MAPPED_IO_START: u64 = dbs_arch::gic::GIC_REG_END_ADDRESS; // 1 GB
 /// End address (inclusive) of the MMIO window.
 pub const MAPPED_IO_END: u64 = (2 << 30) - 1; // 1 GB
+
+/// Maximum guest physical address supported.
+pub static GUEST_PHYS_END: &u64 = &((1u64 << 40) - 1);
+/// Upper bound of guest memory.
+pub static GUEST_MEM_END: &u64 = &(DRAM_MEM_END - 1);
+/// Lower bound of guest memory.
+pub const GUEST_MEM_START: u64 = DRAM_MEM_START;
+/// Start address of the lower MMIO window.
+pub const MMIO_LOW_START: u64 = MAPPED_IO_START;
+/// End address (inclusive) of the lower MMIO window.
+pub const MMIO_LOW_END: u64 = MAPPED_IO_END;
+/// Size of memory below MMIO hole.
+pub const GUEST_MEM_LOW_SIZE: u64 = 0u64;

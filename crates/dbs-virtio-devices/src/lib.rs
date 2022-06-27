@@ -246,10 +246,11 @@ pub mod tests {
 
     macro_rules! offset_of {
         ($ty:ty, $field:ident) => {
-            #[allow(deref_nullptr)]
-            //unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
             unsafe {
-                &(*std::ptr::null::<$ty>()).$field as *const _ as usize
+                let base = std::mem::MaybeUninit::<$ty>::uninit();
+                let base_ptr = base.as_ptr();
+                let c = std::ptr::addr_of!((*base_ptr).$field);
+                (c as usize) - (base_ptr as usize)
             }
         };
     }

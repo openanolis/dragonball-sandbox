@@ -7,59 +7,21 @@ on:
       - main
 
 jobs:
-  vagrant:
-    runs-on: macos-10.15
+  test:
+    runs-on: self-hosted
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - name: Cache Vagrant boxes
-        uses: actions/cache@v2
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
-          path: ~/.vagrant.d/boxes
-          key: ${{ runner.os }}-vagrant-${{ hashFiles('.github/Vagrantfile') }}
+          profile: minimal
+          toolchain: stable
+          components: cargo, llvm-tools-preview
 
-      - name: Show Vagrant version
-        run: vagrant --version
-
-      - name: Cache dependencies
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-cargo-dependencies
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-build-${{ env.cache-name }}
-
-      - name: Run vagrant up
-        working-directory: .github
-        run: vagrant up
-
-      - name: Run test
-        working-directory: .github
-        run: vagrant ssh -c 'export CARGO_INCREMENTAL=0; export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"; export RUSTDOCFLAGS=-Cpanic=abort; cd /vagrant; cargo clean; sudo -E cargo test --all-features $CARGO_OPTIONS -- -Z unstable-options --test-threads 1'
-
-      - name: Save coverage
-        uses: actions/upload-artifact@v3
-        with:
-          name: coverage
-          path: target/**/dbs_*.gc*
-          if-no-files-found: error
-
-  upload_codecov:
-    runs-on: macos-10.15
-    needs: vagrant
-    strategy:
-      matrix:
-        crate: [dbs-address-space, dbs-allocator, dbs-arch, dbs-boot, dbs-device, dbs-interrupt, dbs-legacy-devices, dbs-utils, dbs-virtio-devices]
-
-    steps:
-      - uses: actions/checkout@v2
-      - name: Download coverage
-        uses: actions/download-artifact@v3
-        with:
-          name: coverage
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Cache dependencies
         uses: actions/cache@v2
@@ -74,20 +36,58 @@ jobs:
             ~/.cargo/bin/
           key: ${{ runner.os }}-build-${{ env.cache-name }}
 
+      - name: Test dbs-address-space
+        run: cargo llvm-cov --all-features -p dbs-address-space --lcov --output-path dbs-address-space.info
+      - name: Test dbs-allocator
+        run: cargo llvm-cov --all-features -p dbs-allocator --lcov --output-path dbs-allocator.info
+      - name: Test dbs-arch
+        run: cargo llvm-cov --all-features -p dbs-arch --lcov --output-path dbs-arch.info
+      - name: Test dbs-boot
+        run: cargo llvm-cov --all-features -p dbs-boot --lcov --output-path dbs-boot.info
+      - name: Test dbs-device
+        run: cargo llvm-cov --all-features -p dbs-device --lcov --output-path dbs-device.info
+      - name: Test dbs-interrupt
+        run: cargo llvm-cov --all-features -p dbs-interrupt --lcov --output-path dbs-interrupt.info
+      - name: Test dbs-legacy-devices
+        run: cargo llvm-cov --all-features -p dbs-legacy-devices --lcov --output-path dbs-legacy-devices.info
+      - name: Test dbs-utils
+        run: cargo llvm-cov --all-features -p dbs-utils --lcov --output-path dbs-utils.info
+      - name: Test dbs-virtio-devices
+        run: cargo llvm-cov --all-features -p dbs-virtio-devices --lcov --output-path dbs-virtio-devices.info
       - name: Collection Coverage
-        run: |
-          cargo install grcov
-          CRATE=${{matrix.crate}}
-          zip -0 ccov.zip `find . \( -name "${CRATE//-/_}*.gc*" \) -print`
-          grcov ccov.zip -s . -t lcov --llvm --ignore-not-existing -p "/vagrant/" --ignore "/*" --ignore "tests/*" -o lcov.info
-        shell: bash
+        run: cargo llvm-cov --no-run --lcov --output-path lcov.info
 
+      - name: Save coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage
+          path: ./*.info
+          if-no-files-found: error
+
+  upload_codecov:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        crate: [dbs-address-space, dbs-allocator, dbs-arch, dbs-boot, dbs-device, dbs-interrupt, dbs-legacy-devices, dbs-utils, dbs-virtio-devices]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: coverage
 
       - name: Upload to CodeCov
         uses: codecov/codecov-action@v2
         with:
-          # required for private repositories:
-          # token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./lcov.info
+          files: ${{ matrix.crate }}.info
           flags: ${{matrix.crate}}
+          fail_ci_if_error: true
+
+      - name: Upload sum to CodeCov
+        uses: codecov/codecov-action@v2
+        with:
+          files: ./lcov.info
           fail_ci_if_error: true

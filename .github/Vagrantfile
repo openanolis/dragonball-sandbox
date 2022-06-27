@@ -28,6 +28,10 @@ Vagrant.configure("2") do |config|
             echo 'export PATH=/home/vagrant/.cargo/bin:$PATH' | sudo tee -a /etc/profile
             source $HOME/.cargo/env
 
+            # Install llvm for codecov
+            rustup toolchain install stable --component llvm-tools-preview
+            cargo install cargo-llvm-cov
+
             # For virtiofs test resources.
             sudo mkdir -p /test_resources/nydus-rs/bootstrap/
             cd /test_resources/nydus-rs/bootstrap/

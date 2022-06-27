@@ -139,7 +139,7 @@ impl AddressSpaceBase {
 
 /// An address space implementation with region hotplug capability.
 ///
-/// The `AddressSpaceAtomic` is a wrapper over [AddressSpaceInternal] to support hotplug of
+/// The `AddressSpace` is a wrapper over [AddressSpaceBase] to support hotplug of
 /// address space regions.
 #[derive(Clone)]
 pub struct AddressSpace {
@@ -154,7 +154,7 @@ impl AddressSpace {
         vm_memory::atomic::GuestMemoryAtomic::from(Arc::new(gm))
     }
 
-    /// Create an instance of `AddressSpaceAtomic` from an `AddressSpaceRegion` array.
+    /// Create an instance of `AddressSpace` from an `AddressSpaceRegion` array.
     ///
     /// To achieve better performance by using binary search algorithm, the `regions` vector
     /// will gotten sorted by guest physical address.
@@ -164,14 +164,11 @@ impl AddressSpace {
     /// # Arguments
     /// * `regions` - prepared regions to managed by the address space instance.
     /// * `layout` - prepared address space layout configuration.
-    pub fn from_regions(
-        regions: Vec<Arc<AddressSpaceRegion>>,
-        boundary: AddressSpaceLayout,
-    ) -> Self {
-        let internal = AddressSpaceBase::from_regions(regions, boundary);
+    pub fn from_regions(regions: Vec<Arc<AddressSpaceRegion>>, layout: AddressSpaceLayout) -> Self {
+        let base = AddressSpaceBase::from_regions(regions, layout);
 
         AddressSpace {
-            state: Arc::new(ArcSwap::new(Arc::new(internal))),
+            state: Arc::new(ArcSwap::new(Arc::new(base))),
         }
     }
 
@@ -184,10 +181,10 @@ impl AddressSpace {
         region: Arc<AddressSpaceRegion>,
     ) -> Result<(), AddressSpaceError> {
         let curr = self.state.load().regions.clone();
-        let boundary = self.state.load().layout.clone();
-        let mut internal = AddressSpaceBase::from_regions(curr, boundary);
-        internal.insert_region(region)?;
-        let _old = self.state.swap(Arc::new(internal));
+        let layout = self.state.load().layout.clone();
+        let mut base = AddressSpaceBase::from_regions(curr, layout);
+        base.insert_region(region)?;
+        let _old = self.state.swap(Arc::new(base));
 
         Ok(())
     }
@@ -263,8 +260,8 @@ mod tests {
                 page_size as GuestUsize,
             )),
         ];
-        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let address_space = AddressSpace::from_regions(address_space_region, boundary);
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpace::from_regions(address_space_region, layout);
 
         assert!(!address_space.is_dax_region(GuestAddress(page_size)));
         assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
@@ -275,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_address_space_internal() {
+    fn test_create_address_space_base() {
         let mut file = TempFile::new().unwrap().into_file();
         let sample_buf = &[1, 2, 3, 4, 5];
         assert!(file.write_all(sample_buf).is_ok());
@@ -286,26 +283,8 @@ mod tests {
                 .unwrap(),
         );
         let regions = vec![reg];
-        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let address_space = AddressSpaceBase::from_regions(regions, boundary.clone());
-        assert_eq!(address_space.layout(), boundary);
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpaceBase::from_regions(regions, layout.clone());
+        assert_eq!(address_space.layout(), layout);
     }
-
-    /*
-    #[should_panic]
-    #[test]
-    fn test_create_address_space_internal_panic() {
-        let mut file = TempFile::new().unwrap().into_file();
-        let sample_buf = &[1, 2, 3, 4, 5];
-        assert!(file.write_all(sample_buf).is_ok());
-        file.set_len(0x10000).unwrap();
-
-        let reg = Arc::new(
-            AddressSpaceRegion::create_device_region(GuestAddress(0x10_0000), 0x1000).unwrap(),
-        );
-        let regions = vec![reg.clone(), reg];
-        let boundary = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let _ = AddressSpaceBase::from_regions(regions, boundary);
-    }
-     */
 }

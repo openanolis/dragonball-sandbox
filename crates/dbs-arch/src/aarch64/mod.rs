@@ -95,7 +95,7 @@ impl DeviceInfoForFDT for MMIODeviceInfo {
             return Err(Error::MMIODeviceInfoError);
         }
         let irq = self.irqs[0];
-        if irq < gic::IRQ_BASE || irq > gic::IRQ_MAX {
+        if !(gic::IRQ_BASE..=gic::IRQ_MAX).contains(&irq) {
             return Err(Error::MMIODeviceInfoError);
         }
 
