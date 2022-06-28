@@ -478,9 +478,9 @@ mod tests {
         let dev_mgr_service = DevMgrService {};
 
         assert!(dev_mgr_service.connection_start(&mut inner_stream).is_ok());
-        let mut reader_buf = [0; 2];
+        let mut reader_buf = [0; 1];
         outer_stream.read_exact(&mut reader_buf).unwrap();
-        assert_eq!(reader_buf, [b'd', 0]);
+        assert_eq!(reader_buf, [b'd']);
     }
 
     #[test]
