@@ -9,15 +9,16 @@ Dragonball-sandbox is a collection of Rust crates to help build custom Virtual M
 This repository contains the following crates:
 | Name | Description | Links |
 | --- | --- | --- |
-| [dbs-address-space](crates/dbs-address-space) | manager for memory and MMIO resources resident in the guest physical address space | TBD |
-| [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | TBD |
-| [dbs-arch](crates/dbs-arch) | collections of CPU architecture related modules | TBD |
-| [dbs-boot](crates/dbs-boot) | collections of constants, structs and utilities used during VM boot stage | TBD |
+| [dbs-address-space](crates/dbs-address-space) | manager for memory and MMIO resources resident in the guest physical address space | [![Crates.io](https://img.shields.io/crates/v/dbs-address-space)](https://crates.io/crates/dbs-address-space) |
+| [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | [![Crates.io](https://img.shields.io/crates/v/dbs-allocator)](https://crates.io/crates/dbs-allocator) |
+| [dbs-arch](crates/dbs-arch) | collections of CPU architecture related modules | [![Crates.io](https://img.shields.io/crates/v/dbs-arch)](https://crates.io/crates/dbs-arch) |
+| [dbs-boot](crates/dbs-boot) | collections of constants, structs and utilities used during VM boot stage | [![Crates.io](https://img.shields.io/crates/v/dbs-boot)](https://crates.io/crates/dbs-boot) |
 | [dbs-device](crates/dbs-device) | virtual machine's device model | [![Crates.io](https://img.shields.io/crates/v/dbs-device)](https://crates.io/crates/dbs-device) |
-| [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | TBD |
+| [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | [![Crates.io](https://img.shields.io/crates/v/dbs-interrupt)](https://crates.io/crates/dbs-interrupt) |
 | [dbs-legacy-devices](crates/dbs-legacy-devices) | emulation for legacy devices | TBD |
-| [dbs-utils](crates/dbs-utils) | helpers and utilities used by multiple `dragonball-sandbox` components | TBD |
+| [dbs-utils](crates/dbs-utils) | helpers and utilities used by multiple `dragonball-sandbox` components | [![Crates.io](https://img.shields.io/crates/v/dbs-utils)](https://crates.io/crates/dbs-utils) |
 | [dbs-virtio-devices](crates/dbs-virtio-devices) | emulation for virtio devices | TBD |
+| [dbs-upcall](crates/dbs-upcall) | dbs-upcall is a direct communication tool between VMM and guest developed upon vsock. | TBD |
 
 (Dragonball is a virtual machine monitor developed by Alibaba and dbs is the abbreviation for Dragonball.)
 
