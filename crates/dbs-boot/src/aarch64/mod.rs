@@ -36,8 +36,8 @@ pub fn get_kernel_start() -> u64 {
     layout::DRAM_MEM_START
 }
 
-// Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
+/// Auxiliary function to get the address where the device tree blob is loaded.
+pub fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
     // If the memory allocated is smaller than the size allocated for the FDT,
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.
