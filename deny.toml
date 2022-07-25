@@ -83,6 +83,8 @@ allow = [
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
 deny = [
+    "GPL-2.0",
+    "GPL-3.0",
     #"Nokia",
 ]
 
