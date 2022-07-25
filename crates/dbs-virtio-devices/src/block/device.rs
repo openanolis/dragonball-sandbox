@@ -229,9 +229,7 @@ where
     }
 
     fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
-        self.device_info
-            .check_queue_sizes(&config.queues[..])
-            .map_err(|e| e)?;
+        self.device_info.check_queue_sizes(&config.queues[..])?;
 
         if self.disk_images.len() != config.queues.len() {
             error!(
