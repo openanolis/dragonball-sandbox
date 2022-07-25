@@ -83,12 +83,13 @@ impl PartialEq for CpuDevRequest {
 
 impl fmt::Debug for CpuDevRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use std::fmt::Write as _;
         let mut apic_ids = String::from("[ ");
         for apic_id in self.apic_ids.iter() {
             if apic_id == &0 {
                 break;
             }
-            apic_ids.push_str(&format!("{}", apic_id));
+            let _ = write!(apic_ids, "{}", apic_id);
             apic_ids.push(' ');
         }
         apic_ids.push_str(" ]");
