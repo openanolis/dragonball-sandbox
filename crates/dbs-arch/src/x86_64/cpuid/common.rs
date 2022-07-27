@@ -7,6 +7,7 @@ use super::cpu_leaf::*;
 
 pub(crate) const VENDOR_ID_INTEL: &[u8; 12] = b"GenuineIntel";
 pub(crate) const VENDOR_ID_AMD: &[u8; 12] = b"AuthenticAMD";
+pub(crate) const VENDOR_ID_HYGON: &[u8; 12] = b"HygonGenuine";
 
 #[derive(Clone, Debug)]
 pub enum Error {
