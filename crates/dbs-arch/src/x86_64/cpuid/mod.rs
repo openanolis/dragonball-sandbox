@@ -53,6 +53,9 @@ pub fn process_cpuid(kvm_cpuid: &mut CpuId, vm_spec: &VmSpec) -> Result<(), Erro
         self::common::VENDOR_ID_AMD => {
             self::transformer::amd::AmdCpuidTransformer::new().process_cpuid(kvm_cpuid, vm_spec)
         }
+        self::common::VENDOR_ID_HYGON => {
+            self::transformer::amd::AmdCpuidTransformer::new().process_cpuid(kvm_cpuid, vm_spec)
+        }
         _ => Err(Error::CpuNotSupported),
     }
 }
