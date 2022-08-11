@@ -150,10 +150,15 @@ mod tests {
 
     #[test]
     fn test_set_invalid_boundary() {
+        // Normal case.
+        let constraint = Constraint::new(2_u64).max(1000_u64).min(999_u64);
+        assert!(constraint.validate().is_ok());
+
+        // Error case.
         let constraint = Constraint::new(2_u64).max(999_u64).min(1000_u64);
         assert_eq!(
             constraint.validate(),
             Err(Error::InvalidBoundary(1000u64, 999u64))
-        )
+        );
     }
 }
