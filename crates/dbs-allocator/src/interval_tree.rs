@@ -1033,37 +1033,91 @@ mod tests {
 
     #[should_panic]
     #[test]
-    fn test_tree_insert_intersect() {
+    fn test_tree_insert_intersect_on_right() {
         let mut tree = IntervalTree::<u64>::new();
         tree.insert(Range::new(0x100, 0x200u32), Some(1));
         tree.insert(Range::new(0x200, 0x2ffu64), None);
     }
 
+    #[should_panic]
+    #[test]
+    fn test_tree_insert_intersect_on_left() {
+        let mut tree = IntervalTree::<u64>::new();
+        tree.insert(Range::new(0x100, 0x200u32), Some(1));
+        tree.insert(Range::new(0x000, 0x100u64), None);
+    }
+
     #[test]
     fn test_tree_get_superset() {
         let mut tree = IntervalTree::<u64>::new();
-        tree.insert(Range::new(0x100u64, 0x100u64), Some(1));
-        tree.insert(Range::new(0x200, 0x2ffu64), None);
+        tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
+        tree.insert(Range::new(0x001u16, 0x008u16), None);
+        tree.insert(Range::new(0x009u16, 0x00fu16), None);
+        tree.insert(Range::new(0x200u16, 0x2ffu16), None);
+        let mut constraint = Constraint::new(8u64);
+        constraint.min = 0x211;
+        constraint.max = 0x21f;
+        constraint.align = 0x8;
+        tree.allocate(&constraint);
+
+        // Valued case.
         assert_eq!(
             tree.get_superset(&Range::new(0x100u32, 0x100)),
             Some((&Range::new(0x100, 0x100u32), NodeState::Valued(&1)))
         );
+
+        // Free case.
         assert_eq!(
             tree.get_superset(&Range::new(0x200u16, 0x200)),
-            Some((&Range::new(0x200, 0x2ffu64), NodeState::Free))
-        );
-        assert_eq!(
-            tree.get_superset(&Range::new(0x200u32, 0x2ff)),
-            Some((&Range::new(0x200, 0x2ffu16), NodeState::Free))
-        );
-        assert_eq!(
-            tree.get_superset(&Range::new(0x210u32, 0x210)),
-            Some((&Range::new(0x200, 0x2ffu32), NodeState::Free))
+            Some((&Range::new(0x200, 0x217u64), NodeState::Free))
         );
         assert_eq!(
             tree.get_superset(&Range::new(0x2ffu32, 0x2ff)),
-            Some((&Range::new(0x200, 0x2ffu32), NodeState::Free))
+            Some((&Range::new(0x220, 0x2ffu32), NodeState::Free))
         );
+
+        // Allocated case.
+        assert_eq!(
+            tree.get_superset(&Range::new(0x218u16, 0x21f)),
+            Some((&Range::new(0x218, 0x21fu16), NodeState::Allocated))
+        );
+
+        // None case.
+        assert_eq!(tree.get_superset(&Range::new(0x2ffu32, 0x300)), None);
+        assert_eq!(tree.get_superset(&Range::new(0x300u32, 0x300)), None);
+        assert_eq!(tree.get_superset(&Range::new(0x1ffu32, 0x300)), None);
+    }
+
+    #[test]
+    fn test_tree_get_superset_mut() {
+        let mut tree = IntervalTree::<u64>::new();
+        tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
+        tree.insert(Range::new(0x200u16, 0x2ffu16), None);
+        let mut constraint = Constraint::new(8u64);
+        constraint.min = 0x211;
+        constraint.max = 0x21f;
+        constraint.align = 0x8;
+        tree.allocate(&constraint);
+
+        // Valued case.
+        assert_eq!(
+            tree.get_superset_mut(&Range::new(0x100u32, 0x100u32)),
+            Some((&Range::new(0x100u32, 0x100u32), NodeState::Valued(&mut 1)))
+        );
+
+        // Allocated case.
+        assert_eq!(
+            tree.get_superset_mut(&Range::new(0x218u64, 0x21fu64)),
+            Some((&Range::new(0x218u64, 0x21fu64), NodeState::Allocated))
+        );
+
+        // Free case.
+        assert_eq!(
+            tree.get_superset_mut(&Range::new(0x2ffu32, 0x2ffu32)),
+            Some((&Range::new(0x220u32, 0x2ffu32), NodeState::Free))
+        );
+
+        // None case.
         assert_eq!(tree.get_superset(&Range::new(0x2ffu32, 0x300)), None);
         assert_eq!(tree.get_superset(&Range::new(0x300u32, 0x300)), None);
         assert_eq!(tree.get_superset(&Range::new(0x1ffu32, 0x300)), None);
@@ -1098,6 +1152,7 @@ mod tests {
         assert_eq!(tree.get(&Range::new(0x101u32, 0x101u32)), None);
         assert!(tree.is_empty());
         tree.insert(Range::new(0x100u32, 0x100u32), Some(1));
+        tree.insert(Range::new(0x001u16, 0x00fu16), None);
         tree.insert(Range::new(0x200u32, 0x2ffu32), None);
         assert!(!tree.is_empty());
         assert_eq!(
@@ -1110,6 +1165,8 @@ mod tests {
         );
         assert_eq!(tree.get(&Range::new(0x101u32, 0x101u32)), None);
 
+        let old = tree.delete(&Range::new(0x001u16, 0x00fu16));
+        assert_eq!(old, None);
         let old = tree.delete(&Range::new(0x100u32, 0x100u32));
         assert_eq!(old, Some(1));
         let old = tree.delete(&Range::new(0x200u32, 0x2ffu32));
@@ -1180,5 +1237,61 @@ mod tests {
             tree.allocate(&constraint),
             Some(Range::new(0x200u32, 0x2ffu32))
         );
+    }
+
+    #[test]
+    fn test_with_size() {
+        let range_a = Range::with_size(1u8, 3u8);
+        let range_b = Range::with_size(4u16, 2u16);
+        let range_c = Range::with_size(2u32, 1u32);
+        let range_d = Range::with_size(4u64, 0u64);
+        let range_e = Range::with_size(5u32, 1u32);
+
+        assert_eq!(range_a, Range::new(1u8, 4u8));
+        assert_eq!(range_b, Range::new(4u16, 6u16));
+        assert_eq!(range_c, Range::new(2u32, 3u32));
+        assert_eq!(range_d, Range::new(4u64, 4u64));
+        assert_eq!(range_e, Range::new(5u32, 6u32));
+    }
+
+    #[test]
+    fn test_new_point() {
+        let range_a = Range::new_point(1u8);
+        let range_b = Range::new_point(2u16);
+        let range_c = Range::new_point(3u32);
+        let range_d = Range::new_point(4u64);
+        let range_e = Range::new_point(5u32);
+
+        assert_eq!(range_a, Range::with_size(1u8, 0u8));
+        assert_eq!(range_b, Range::with_size(2u16, 0u16));
+        assert_eq!(range_c, Range::with_size(3u32, 0u32));
+        assert_eq!(range_d, Range::with_size(4u64, 0u64));
+        assert_eq!(range_e, Range::with_size(5u32, 0u32));
+    }
+
+    #[test]
+    fn test_get_by_id() {
+        let mut tree = IntervalTree::<u32>::new();
+        tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
+        tree.insert(Range::new(0x001u32, 0x005u32), Some(2));
+        tree.insert(Range::new(0x200u16, 0x2ffu16), None);
+
+        assert_eq!(tree.get_by_id(0x100u16), Some(&1));
+        assert_eq!(tree.get_by_id(0x002u32), Some(&2));
+        assert_eq!(tree.get_by_id(0x210u32), None);
+        assert_eq!(tree.get_by_id(0x2ffu64), None);
+    }
+
+    #[test]
+    fn test_get_by_id_mut() {
+        let mut tree = IntervalTree::<u32>::new();
+        tree.insert(Range::new(0x100u16, 0x100u16), Some(1));
+        tree.insert(Range::new(0x001u32, 0x005u32), Some(2));
+        tree.insert(Range::new(0x200u16, 0x2ffu16), None);
+
+        assert_eq!(tree.get_by_id_mut(0x100u16), Some(&mut 1));
+        assert_eq!(tree.get_by_id_mut(0x002u32), Some(&mut 2));
+        assert_eq!(tree.get_by_id_mut(0x210u32), None);
+        assert_eq!(tree.get_by_id_mut(0x2ffu64), None);
     }
 }
