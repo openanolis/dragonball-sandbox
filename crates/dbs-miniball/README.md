@@ -59,7 +59,7 @@ the `vmm` crate (object that will store specialized `*Config` objects, e.g.
 users can disregard the `vmm` crate altogether and build their own, referring
 to it only for guidelines.
 
-![Overview](docs/overview.png)
+![Overview](docs/img/overview.png)
 
 ## Steps to running a guest
 
@@ -122,9 +122,12 @@ let mut event_manager = EventManager::<Arc<Mutex<dyn MutEventSubscriber + Send>>
 event_manager.add_subscriber(wrapped_exit_handler.0.clone());
 ```
 
-4. Configure the vCPUs. This is done through `vm-vcpu` crate, which for now is a
-   local crate, but once the interfaces there get stabilized, they will be
-   upstreamed in [`vmm-vcpu`](https://github.com/rust-vmm/vmm-vcpu).
+4. Configure the vCPUs. This is done through `vm-vcpu` crate, which is a
+   local crate. This is done partially through [`kvm-ioctls`](https://crates.io/crates/kvm-ioctls), 
+   [`dbs-arch`](https://crates.io/crates/dbs-arch) and 
+   [`dbs-boot`](https://crates.io/crates/dbs-boot). 
+   See the [`CPU virtualization documentation`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/docs/CPUVirtualization.md)
+   for details on this part.
     
 ```rust
 // src/vmm/src/lib.rs
@@ -145,8 +148,9 @@ let vm_config = VmConfig::new(&kvm, config.vcpu_config.num)?;
         ```rust
         // src/vm-vcpu/src/vm.rs
         
-        #[cfg(target_arch = "x86_64")]
-        MpTable::new(vm.config.num_vcpus)?.write(guest_memory)?;
+        #[cfg(target_arch = "x86_64")]        
+        mptable::setup_mptable(guest_memory, vm.config.num_vcpus, vm.config.num_vcpus)
+        .map_err(Error::MpTable)?;
         ```
 
        2. Create KVM `irqchip`. This creates the virtual IOAPIC and virtual
@@ -173,10 +177,11 @@ let vm_config = VmConfig::new(&kvm, config.vcpu_config.num)?;
         ```rust
         // src/vm-vcpu/src/vcpu/mod.rs
         
-        #[cfg(target_arch = "x86_64")]
         let base_cpuid = _kvm
         .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
         .map_err(Error::KvmIoctl)?;
+      
+        dbs_arch::cpuid::process_cpuid(&mut cpuid, &vm_spec).map_err(|e| Error::CpuId(e))?;
         ```
 
        5. Configure MSRs (model specific registers). These registers control
@@ -185,8 +190,9 @@ let vm_config = VmConfig::new(&kvm, config.vcpu_config.num)?;
       
         ```rust
         // src/vm-vcpu/src/vcpu/mod.rs
+      
         #[cfg(target_arch = "x86_64")]
-        let supported_msrs = msrs::supported_guest_msrs(_kvm).map_err(Error::GetSupportedMsrs)?;
+        dbs_arch::regs::setup_msrs(&self.vcpu_fd).map_err(Error::MSRSConfiguration)
         ```
 
        6. Configure other registers (`kvm_regs`, `kvm_sregs`, `fpu`) and the
