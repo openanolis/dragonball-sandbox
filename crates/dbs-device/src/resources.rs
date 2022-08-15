@@ -23,7 +23,7 @@
 use std::ops::Deref;
 
 /// Enumeration describing a device's resource allocation requirements and constraints.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ResourceConstraint {
     /// Constraint for an IO Port address range.
     PioAddress {
@@ -156,7 +156,7 @@ impl ResourceConstraint {
 }
 
 /// Type of Message Singaled Interrupt
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MsiIrqType {
     /// PCI MSI IRQ numbers.
     PciMsi,
@@ -167,7 +167,7 @@ pub enum MsiIrqType {
 }
 
 /// Enumeration for device resources.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Resource {
     /// IO Port resource range.
     PioAddressRange {
@@ -208,7 +208,7 @@ pub enum Resource {
 }
 
 /// Newtype to store a set of device resources.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DeviceResources(Vec<Resource>);
 
 impl DeviceResources {

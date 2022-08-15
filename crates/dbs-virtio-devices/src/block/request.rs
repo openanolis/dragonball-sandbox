@@ -29,7 +29,7 @@ pub(crate) enum ExecuteError {
 }
 
 /// Type of request from driver to device.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RequestType {
     /// Read request.
     In,

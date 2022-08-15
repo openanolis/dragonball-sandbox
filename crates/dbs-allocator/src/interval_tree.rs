@@ -245,7 +245,7 @@ impl<T> From<NodeState<T>> for Option<T> {
 }
 
 /// Internal tree node to implement interval tree.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 struct InnerNode<T> {
     /// Interval handled by this node.
     key: Range,
@@ -275,7 +275,7 @@ impl<T> InnerNode<T> {
 }
 
 /// Newtype for interval tree nodes.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 struct Node<T>(Box<InnerNode<T>>);
 
 impl<T> Node<T> {
@@ -578,7 +578,7 @@ fn max_key<T>(node: &Option<Node<T>>) -> u64 {
 }
 
 /// An interval tree implementation specialized for VMM resource management.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct IntervalTree<T> {
     root: Option<Node<T>>,
 }

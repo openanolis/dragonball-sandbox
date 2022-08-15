@@ -11,7 +11,7 @@ pub mod common;
 pub mod intel;
 
 /// Enum indicating vpmu feature level
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum VpmuFeatureLevel {
     /// Disabled means vpmu feature is off (by default)
     Disabled,

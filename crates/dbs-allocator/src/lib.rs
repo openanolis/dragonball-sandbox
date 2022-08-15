@@ -15,7 +15,7 @@ pub mod interval_tree;
 pub use interval_tree::{IntervalTree, NodeState, Range};
 
 /// Error codes for resource allocation operations.
-#[derive(thiserror::Error, Debug, PartialEq)]
+#[derive(thiserror::Error, Debug, Eq, PartialEq)]
 pub enum Error {
     /// Invalid boundary for resource allocation.
     #[error("invalid boundary constraint: min ({0}), max ({1})")]
@@ -26,7 +26,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Resource allocation policies.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AllocPolicy {
     /// Default resource allocation policy.
     Default,

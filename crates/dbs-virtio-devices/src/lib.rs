@@ -46,7 +46,7 @@ impl<T> DbsGuestAddressSpace for T where T: GuestAddressSpace + 'static + Clone 
 
 /// Version of virtio specifications supported by PCI virtio devices.
 #[allow(non_camel_case_types)]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VirtioVersion {
     /// Unknown/non-virtio VFIO device.
     VIRTIO_VERSION_UNKNOWN,

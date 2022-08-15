@@ -39,7 +39,7 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 /// A vsock connection state.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnState {
     /// The connection has been initiated by the host end, but is yet to be
     /// confirmed by the guest.
@@ -67,7 +67,7 @@ pub enum ConnState {
 /// For instance, after being notified that there is available data to be read
 /// from the host stream (via `notify()`), the connection will store a
 /// `PendingRx::Rw` to be later inspected by `recv_pkt()`.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PendingRx {
     /// We need to yield a connection request packet (VSOCK_OP_REQUEST).
     Request = 0,
@@ -90,7 +90,7 @@ impl PendingRx {
 }
 
 /// A set of RX indications (`PendingRx` items).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingRxSet {
     data: u16,
 }

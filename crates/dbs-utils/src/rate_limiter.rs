@@ -90,7 +90,7 @@ pub enum BucketReduction {
 
 /// TokenBucket provides a lower level interface to rate limiting with a
 /// configurable capacity, refill-rate and initial burst.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TokenBucket {
     // Bucket defining traits.
     size: u64,

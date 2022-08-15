@@ -26,7 +26,7 @@ use super::defs;
 use super::muxer_impl::{ConnMapKey, MuxerRx};
 
 /// The muxer RX queue.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct MuxerRxQ {
     /// The RX queue data.
     pub(crate) q: VecDeque<MuxerRx>,

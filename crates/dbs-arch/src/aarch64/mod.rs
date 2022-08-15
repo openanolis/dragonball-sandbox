@@ -56,7 +56,7 @@ pub trait DeviceInfoForFDT {
 }
 
 /// MMIO device info used for FDT generating.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MMIODeviceInfo {
     /// MMIO address base
     pub base: u64,

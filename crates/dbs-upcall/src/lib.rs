@@ -67,7 +67,7 @@ pub type Result<T> = std::result::Result<T, UpcallClientError>;
 // NOTE: here's not a state like `ServerDisconnect`, because we always connect
 // to server immediately when constructing the connection or disconnected from
 // server.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum UpcallClientState {
     /// There are two possible scenarios for a connection in this state:
     /// - Server's connection is broken, waiting for reconnect.
@@ -95,7 +95,7 @@ pub enum UpcallClientRequest {
 }
 
 /// Upcall client response of different services.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum UpcallClientResponse {
     /// Device manager's response.
     DevMgr(DevMgrResponse),

@@ -10,7 +10,7 @@ use super::{Error, Result};
 /// A simple ring-buffer implementation, used by vsock connections to buffer TX
 /// (guest -> host) data.  Memory for this buffer is allocated lazily, since
 /// buffering will only be needed when the host can't read fast enough.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct TxBuf {
     /// The actual u8 buffer - only allocated after the first push.
     pub data: Option<Box<[u8]>>,
