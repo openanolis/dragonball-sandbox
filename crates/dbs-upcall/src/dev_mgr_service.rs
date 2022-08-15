@@ -47,7 +47,7 @@ struct DevMgrMsgHeader {
 
 /// Command struct to add/del a MMIO Virtio Device.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct MmioDevRequest {
     /// base address of the virtio MMIO configuration window.
     pub mmio_base: u64,
@@ -159,14 +159,14 @@ impl DevMgrRequest {
 
 /// Device manager's response from cpu device.
 #[repr(C)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CpuDevResponse {
     /// apic id index of last act cpu
     pub apic_id_index: u32,
 }
 
 /// Device manager's response inner message.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct DevMgrResponseInfo<I> {
     /// 0 means success and other result is the error code.
     pub result: i32,
@@ -175,7 +175,7 @@ pub struct DevMgrResponseInfo<I> {
 }
 
 /// Device manager's response representation in client side.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum DevMgrResponse {
     /// Add mmio device's response (no response body)
     AddMmioDev(DevMgrResponseInfo<()>),

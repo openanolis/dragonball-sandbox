@@ -260,7 +260,7 @@ where
 
 /// Device memory shared between guest and the device backend driver, defined by the Virtio
 /// specification for Virtio-fs devices.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct VirtioSharedMemory {
     /// offset from the bar base
     pub offset: u64,

@@ -56,7 +56,7 @@ unsafe impl ByteValued for MpfIntelWrapper {}
 // MPTABLE, describing VCPUS.
 const MPTABLE_START: u64 = 0x9fc00;
 
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 /// MP Table related errors
 pub enum Error {
     /// There was too little guest memory to store the entire MP table.

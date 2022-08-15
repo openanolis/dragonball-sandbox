@@ -78,7 +78,7 @@ pub type Result<T> = std::io::Result<T>;
 pub type InterruptIndex = u32;
 
 /// Type of interrupt source.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum InterruptSourceType {
     #[cfg(feature = "legacy-irq")]
     /// Legacy Pin-based Interrupt.
@@ -91,7 +91,7 @@ pub enum InterruptSourceType {
 }
 
 /// Configuration data for an interrupt source.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InterruptSourceConfig {
     #[cfg(feature = "legacy-irq")]
     /// Configuration data for Legacy interrupts.
@@ -105,12 +105,12 @@ pub enum InterruptSourceConfig {
 ///
 /// On x86 platforms, legacy interrupts means those interrupts routed through PICs or IOAPICs.
 #[cfg(feature = "legacy-irq")]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LegacyIrqSourceConfig {}
 
 /// Configuration data for GenericMsi, PciMsi, PciMsix interrupts.
 #[cfg(feature = "msi-irq")]
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, Eq, PartialEq)]
 pub struct MsiIrqSourceConfig {
     /// High address to deliver message signaled interrupt.
     pub high_addr: u32,

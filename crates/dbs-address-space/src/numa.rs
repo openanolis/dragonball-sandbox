@@ -20,7 +20,7 @@ pub struct NumaIdTable {
 }
 
 /// Record numa node memory information.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NumaNodeInfo {
     /// Base address of the region in guest physical address space.
     pub base: GuestAddress,
@@ -29,7 +29,7 @@ pub struct NumaNodeInfo {
 }
 
 /// Record all region's info of a numa node.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct NumaNode {
     region_infos: Vec<NumaNodeInfo>,
     vcpu_ids: Vec<u32>,

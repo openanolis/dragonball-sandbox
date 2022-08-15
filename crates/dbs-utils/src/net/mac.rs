@@ -20,7 +20,7 @@ pub enum MacError {
 }
 
 /// MAC address for ethernet NIC.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MacAddr {
     bytes: [u8; MAC_ADDR_LEN],
 }

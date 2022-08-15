@@ -59,7 +59,7 @@ pub struct ConnMapKey {
 }
 
 /// A muxer RX queue item.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MuxerRx {
     /// The packet must be fetched from the connection identified by
     /// `ConnMapKey`.

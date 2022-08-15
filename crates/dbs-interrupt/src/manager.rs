@@ -33,7 +33,7 @@ const MSI_INT_MASK_BIT: u8 = 0;
 const MSI_INT_MASK: u32 = (1 << MSI_INT_MASK_BIT) as u32;
 
 /// Device interrupt working modes.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum DeviceInterruptMode {
     /// The device interrupt manager has been disabled.
     Disabled = 0,
