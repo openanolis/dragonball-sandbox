@@ -19,6 +19,7 @@ This repository contains the following crates:
 | [dbs-utils](crates/dbs-utils) | helpers and utilities used by multiple `dragonball-sandbox` components | [![Crates.io](https://img.shields.io/crates/v/dbs-utils)](https://crates.io/crates/dbs-utils) |
 | [dbs-virtio-devices](crates/dbs-virtio-devices) | emulation for virtio devices | TBD |
 | [dbs-upcall](crates/dbs-upcall) | dbs-upcall is a direct communication tool between VMM and guest developed upon vsock. | TBD |
+| [dbs-miniball](crates/dbs-miniball) | dbs-miniball is a minimal virtual machine manager using components from dragonball-sandbox and rust-vmm. | TBD |
 
 (Dragonball is a virtual machine monitor developed by Alibaba and dbs is the abbreviation for Dragonball.)
 
