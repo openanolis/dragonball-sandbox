@@ -464,6 +464,10 @@ pub(crate) mod tests {
     fn test_get_legacy_irq() {
         let resources = get_device_resource();
         assert!(resources.get_legacy_irq().unwrap() == LEGACY_IRQ);
+
+        // None case.
+        let resources = DeviceResources::new();
+        assert!(resources.get_legacy_irq().is_none());
     }
 
     #[test]
@@ -473,15 +477,23 @@ pub(crate) mod tests {
             resources.get_pci_msi_irqs().unwrap().0 == PCI_MSI_IRQ_BASE
                 && resources.get_pci_msi_irqs().unwrap().1 == PCI_MSI_IRQ_SIZE
         );
+
+        // None case.
+        let resources = DeviceResources::new();
+        assert!(resources.get_generic_msi_irqs().is_none());
     }
 
     #[test]
-    fn test_pci_msix_irqs() {
+    fn test_get_pci_msix_irqs() {
         let resources = get_device_resource();
         assert!(
             resources.get_pci_msix_irqs().unwrap().0 == PCI_MSIX_IRQ_BASE
                 && resources.get_pci_msix_irqs().unwrap().1 == PCI_MSIX_IRQ_SIZE
         );
+
+        // None case.
+        let resources = DeviceResources::new();
+        assert!(resources.get_generic_msi_irqs().is_none());
     }
 
     #[test]
@@ -491,12 +503,20 @@ pub(crate) mod tests {
             resources.get_generic_msi_irqs().unwrap().0 == GENERIC_MSI_IRQS_BASE
                 && resources.get_generic_msi_irqs().unwrap().1 == GENERIC_MSI_IRQS_SIZE
         );
+
+        // None case.
+        let resources = DeviceResources::new();
+        assert!(resources.get_generic_msi_irqs().is_none());
     }
 
     #[test]
     fn test_get_mac_address() {
         let resources = get_device_resource();
         assert_eq!(resources.get_mac_address().unwrap(), MAC_ADDRESS);
+
+        // None case.
+        let resources = DeviceResources::new();
+        assert!(resources.get_mac_address().is_none());
     }
 
     #[test]
@@ -560,13 +580,23 @@ pub(crate) mod tests {
         }
 
         if let ResourceConstraint::MemAddress { range, align, size } =
+            ResourceConstraint::new_mem(0x2000)
+        {
+            assert_eq!(range, None);
+            assert_eq!(align, 0x1000);
+            assert_eq!(size, 0x2000);
+        } else {
+            panic!("Mem resource constraint is invalid.");
+        }
+
+        if let ResourceConstraint::MemAddress { range, align, size } =
             ResourceConstraint::mem_with_constraints(0x2000, Some((0x0, 0x2000)), 0x2000)
         {
             assert_eq!(range, Some((0x0, 0x2000)));
             assert_eq!(align, 0x2000);
             assert_eq!(size, 0x2000);
         } else {
-            panic!("Mmio resource constraint is invalid.");
+            panic!("Mem resource constraint is invalid.");
         }
 
         if let ResourceConstraint::LegacyIrq { irq } =
