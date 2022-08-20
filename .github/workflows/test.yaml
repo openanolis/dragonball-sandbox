@@ -38,7 +38,7 @@ jobs:
 
       - name: Test dbs-address-space
         run: |
-          cargo update -p fuse-backend-rs:0.9.5 --precise 0.9.4
+          cargo update -p fuse-backend-rs:0.9.2 --precise 0.9.4
           cargo llvm-cov --all-features -p dbs-address-space --lcov --output-path dbs-address-space.info
       - name: Test dbs-allocator
         run: cargo llvm-cov --all-features -p dbs-allocator --lcov --output-path dbs-allocator.info
@@ -58,6 +58,8 @@ jobs:
         run: cargo llvm-cov --all-features -p dbs-virtio-devices --lcov --output-path dbs-virtio-devices.info
       - name: Test dbs-upcall
         run: cargo llvm-cov --all-features -p dbs-upcall --lcov --output-path dbs-upcall.info
+      - name: Test dbs-miniball
+        run: cargo llvm-cov --all-features -p dbs-miniball --lcov --output-path dbs-miniball.info
       - name: Collection Coverage
         run: cargo llvm-cov --no-run --lcov --output-path lcov.info
 
@@ -73,7 +75,7 @@ jobs:
     needs: test
     strategy:
       matrix:
-        crate: [dbs-address-space, dbs-allocator, dbs-arch, dbs-boot, dbs-device, dbs-interrupt, dbs-legacy-devices, dbs-utils, dbs-virtio-devices, dbs-upcall]
+        crate: [dbs-address-space, dbs-allocator, dbs-arch, dbs-boot, dbs-device, dbs-interrupt, dbs-legacy-devices, dbs-utils, dbs-virtio-devices, dbs-upcall, dbs-miniball]
 
     steps:
       - uses: actions/checkout@v3
