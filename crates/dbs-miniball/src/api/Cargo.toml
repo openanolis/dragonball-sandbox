@@ -1,0 +1,19 @@
+[package]
+name = "api"
+version = "0.1.0"
+authors = ["Alibaba Dragonball Team"]
+description = "CLI for the Miniball"
+license = "Apache-2.0"
+edition = "2018"
+homepage = "https://github.com/openanolis/dragonball-sandbox"
+repository = "https://github.com/openanolis/dragonball-sandbox"
+keywords = ["dragonball", "Miniball", "api", "VMM"]
+readme = "README.md"
+
+[dependencies]
+clap = "2.33.3"
+
+vmm = { path = "../vmm" }
+
+[dev-dependencies]
+linux-loader = "0.4.0"
