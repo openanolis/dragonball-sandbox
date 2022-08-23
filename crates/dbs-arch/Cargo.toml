@@ -2,7 +2,7 @@
 name = "dbs-arch"
 version = "0.1.0"
 authors = ["Alibaba Dragonball Team"]
-license = "Apache-2.0"
+license = "Apache-2.0 AND BSD-3-Clause"
 edition = "2018"
 description = "A collection of CPU architecture specific constants and utilities."
 homepage = "https://github.com/openanolis/dragonball-sandbox"
