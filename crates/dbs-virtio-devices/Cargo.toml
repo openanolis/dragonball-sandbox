@@ -2,7 +2,7 @@
 name = "dbs-virtio-devices"
 version = "0.1.0"
 authors = ["Alibaba Dragonball Team"]
-license = "Apache-2.0"
+license = "Apache-2.0 AND BSD-3-Clause"
 edition = "2018"
 description = "Virtio device backend driver framework and device drivers"
 homepage = "https://github.com/openanolis/dragonball-sandbox"
