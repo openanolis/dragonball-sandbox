@@ -2,10 +2,15 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 #![cfg(target_arch = "x86_64")]
-use std::result;
+use std::{mem, result};
 
-use linux_loader::{bootparam::boot_params, loader::KernelLoaderResult};
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryMmap};
+use dbs_address_space::AddressSpace;
+use dbs_boot::{
+    add_e820_entry,
+    bootparam::{boot_params, E820_RAM},
+    layout, BootParamsWrapper,
+};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
 
 // x86_64 boot constants. See https://www.kernel.org/doc/Documentation/x86/boot.txt for the full
 // documentation.
@@ -20,46 +25,40 @@ const KERNEL_LOADER_OTHER: u8 = 0xff;
 // Header field: `kernel_alignment`. Alignment unit required by a relocatable kernel.
 const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x0100_0000;
 
-// Start address for the EBDA (Extended Bios Data Area). Older computers (like the one this VMM
-// emulates) typically use 1 KiB for the EBDA, starting at 0x9fc00.
-// See https://wiki.osdev.org/Memory_Map_(x86) for more information.
-const EBDA_START: u64 = 0x0009_fc00;
-// RAM memory type.
-// TODO: this should be bindgen'ed and exported by linux-loader.
-// See https://github.com/rust-vmm/linux-loader/issues/51
-const E820_RAM: u32 = 1;
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 /// Errors pertaining to boot parameter setup.
 pub enum Error {
-    /// Invalid E820 configuration.
-    E820Configuration,
+    /// Empty AddressSpace from parameters.
+    #[error("Empty AddressSpace from parameters")]
+    AddressSpace,
+
     /// Highmem start address is past the guest memory end.
+    #[error("Highmem start address is past the guest memory end.")]
     HimemStartPastMemEnd,
+
     /// Highmem start address is past the MMIO gap start.
+    #[error("Highmem start address is past the MMIO gap start.")]
     HimemStartPastMmioGapStart,
+
     /// The MMIO gap end is past the guest memory end.
+    #[error("The MMIO gap end is past the guest memory end.")]
     MmioGapPastMemEnd,
+
     /// The MMIO gap start is past the gap end.
+    #[error("The MMIO gap start is past the gap end.")]
     MmioGapStartPastMmioGapEnd,
-}
 
-fn add_e820_entry(
-    params: &mut boot_params,
-    addr: u64,
-    size: u64,
-    mem_type: u32,
-) -> result::Result<(), Error> {
-    if params.e820_entries >= params.e820_table.len() as u8 {
-        return Err(Error::E820Configuration);
-    }
+    /// Fail to boot system
+    #[error("failed to boot system: {0}")]
+    BootSystem(#[source] dbs_boot::Error),
 
-    params.e820_table[params.e820_entries as usize].addr = addr;
-    params.e820_table[params.e820_entries as usize].size = size;
-    params.e820_table[params.e820_entries as usize].type_ = mem_type;
-    params.e820_entries += 1;
+    /// The zero page extends past the end of guest_mem.
+    #[error("the guest zero page extends past the end of guest memory")]
+    ZeroPagePastRamEnd,
 
-    Ok(())
+    /// Error writing the zero page of guest memory.
+    #[error("failed to write to guest zero page")]
+    ZeroPageSetup,
 }
 
 /// Build boot parameters for ELF kernels following the Linux boot protocol.
@@ -67,46 +66,47 @@ fn add_e820_entry(
 /// # Arguments
 ///
 /// * `guest_memory` - guest memory.
-/// * `kernel_load` - result of loading the kernel in guest memory.
+/// * `address_space` - address space.
 /// * `himem_start` - address where high memory starts.
 /// * `mmio_gap_start` - address where the MMIO gap starts.
 /// * `mmio_gap_end` - address where the MMIO gap ends.
+/// * `cmdline_addr` - Address in `guest_mem` where the kernel command line was
+///   loaded.
+/// * `cmdline_size` - Size of the kernel command line in bytes including the
+///   null terminator.
 pub fn build_bootparams(
     guest_memory: &GuestMemoryMmap,
-    kernel_load: &KernelLoaderResult,
+    address_space: &AddressSpace,
     himem_start: GuestAddress,
     mmio_gap_start: GuestAddress,
     mmio_gap_end: GuestAddress,
-) -> result::Result<boot_params, Error> {
+    cmdline_addr: GuestAddress,
+    cmdline_size: usize,
+) -> result::Result<(), Error> {
     if mmio_gap_start >= mmio_gap_end {
         return Err(Error::MmioGapStartPastMmioGapEnd);
     }
 
-    let mut params = boot_params::default();
+    let mut boot_params: BootParamsWrapper = BootParamsWrapper(boot_params::default());
 
-    if let Some(hdr) = kernel_load.setup_header {
-        params.hdr = hdr;
-    } else {
-        params.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
-        params.hdr.header = KERNEL_HDR_MAGIC;
-        params.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
-    }
-    // If the header copied from the bzImage file didn't set type_of_loader,
-    // force it to "undefined" so that the guest can boot normally.
-    // See: https://github.com/cloud-hypervisor/cloud-hypervisor/issues/918
-    // and: https://www.kernel.org/doc/html/latest/x86/boot.html#details-of-header-fields
-    if params.hdr.type_of_loader == 0 {
-        params.hdr.type_of_loader = KERNEL_LOADER_OTHER;
-    }
+    boot_params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
+    boot_params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
+    boot_params.0.hdr.header = KERNEL_HDR_MAGIC;
+    boot_params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
+
+    // Add the kernel command line to the boot parameters.
+    boot_params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
+    boot_params.0.hdr.cmdline_size = cmdline_size as u32;
 
     // Add an entry for EBDA itself.
-    add_e820_entry(&mut params, 0, EBDA_START, E820_RAM)?;
+    add_e820_entry(&mut boot_params.0, 0, layout::EBDA_START, E820_RAM)
+        .map_err(Error::BootSystem)?;
 
     // Add entries for the usable RAM regions (potentially surrounding the MMIO gap).
-    let last_addr = guest_memory.last_addr();
+    let last_addr = address_space.last_addr();
     if last_addr < mmio_gap_start {
         add_e820_entry(
-            &mut params,
+            &mut boot_params.0,
             himem_start.raw_value(),
             // The unchecked + 1 is safe because:
             // * overflow could only occur if last_addr - himem_start == u64::MAX
@@ -114,57 +114,98 @@ pub fn build_bootparams(
             // * last_addr - himem_start is also smaller than mmio_gap_start
             last_addr
                 .checked_offset_from(himem_start)
-                .ok_or(Error::HimemStartPastMemEnd)?
+                .ok_or(Error::HimemStartPastMemEnd)? as u64
                 + 1,
             E820_RAM,
-        )?;
+        )
+        .map_err(Error::BootSystem)?;
     } else {
         add_e820_entry(
-            &mut params,
+            &mut boot_params.0,
             himem_start.raw_value(),
             mmio_gap_start
                 .checked_offset_from(himem_start)
                 .ok_or(Error::HimemStartPastMmioGapStart)?,
             E820_RAM,
-        )?;
+        )
+        .map_err(Error::BootSystem)?;
 
         if last_addr > mmio_gap_end {
             add_e820_entry(
-                &mut params,
-                mmio_gap_end.raw_value(),
+                &mut boot_params.0,
+                mmio_gap_end.raw_value() + 1,
                 // The unchecked_offset_from is safe, guaranteed by the `if` condition above.
                 // The unchecked + 1 is safe because:
                 // * overflow could only occur if last_addr == u64::MAX and mmio_gap_end == 0
                 // * mmio_gap_end > mmio_gap_start, which is a valid u64 => mmio_gap_end > 0
-                last_addr.unchecked_offset_from(mmio_gap_end) + 1,
+                last_addr.unchecked_offset_from(mmio_gap_end) as u64 + 1,
                 E820_RAM,
-            )?;
+            )
+            .map_err(Error::BootSystem)?;
         }
     }
 
-    Ok(params)
+    // Write the boot parameters in the zeropage.
+    let zero_page_addr = GuestAddress(layout::ZERO_PAGE_START);
+    guest_memory
+        .checked_offset(zero_page_addr, mem::size_of::<boot_params>())
+        .ok_or(Error::ZeroPagePastRamEnd)?;
+    guest_memory
+        .write_obj(boot_params, zero_page_addr)
+        .map_err(|_| Error::ZeroPageSetup)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::vmm::{DEFAULT_HIGH_RAM_START, MMIO_GAP_END, MMIO_GAP_START};
-    use linux_loader::bootparam;
+    use crate::config::KernelConfig;
+    use dbs_address_space::{AddressSpace, AddressSpaceLayout, AddressSpaceRegion};
+    use dbs_boot::layout;
+    use std::sync::Arc;
+
+    fn create_address_space(base: GuestAddress, size: u64) -> Result<AddressSpace, Error> {
+        // create several memory regions
+        let reg = Arc::new(
+            AddressSpaceRegion::create_default_memory_region(
+                base, size, None, "shmem", "", false, false,
+            )
+            .unwrap(),
+        );
+        let regions = vec![reg];
+
+        // create layout (depending on archs)
+        let layout = AddressSpaceLayout::new(
+            *layout::GUEST_PHYS_END,
+            layout::GUEST_MEM_START,
+            *layout::GUEST_MEM_END,
+        );
+
+        // create address space from regions and layout
+        let address_space = AddressSpace::from_regions(regions, layout);
+
+        Ok(address_space)
+    }
 
     #[test]
     fn test_build_bootparams() {
         let guest_memory = GuestMemoryMmap::default();
-        let mut kern_load_res = KernelLoaderResult::default();
+        let address_space = create_address_space(GuestAddress(0), 1024).unwrap();
+        let kernel_cfg = KernelConfig::default();
+        let cmdline_addr = layout::CMDLINE_START;
 
         // Error case: MMIO gap start address is past its end address.
         assert_eq!(
             build_bootparams(
                 &guest_memory,
-                &kern_load_res,
-                GuestAddress(DEFAULT_HIGH_RAM_START),
-                GuestAddress(MMIO_GAP_START),
-                GuestAddress(MMIO_GAP_START - 1)
+                &address_space,
+                GuestAddress(layout::HIMEM_START),
+                GuestAddress(layout::MMIO_LOW_START),
+                GuestAddress(layout::MMIO_LOW_START - 1),
+                GuestAddress(cmdline_addr),
+                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
             )
             .err(),
             Some(Error::MmioGapStartPastMmioGapEnd)
@@ -172,15 +213,18 @@ mod tests {
 
         // Error case: high memory starts after guest memory ends.
         let guest_memory =
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), DEFAULT_HIGH_RAM_START as usize - 1)])
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), layout::HIMEM_START as usize - 1)])
                 .unwrap();
+        let address_space = create_address_space(GuestAddress(0), 1024).unwrap();
         assert_eq!(
             build_bootparams(
                 &guest_memory,
-                &kern_load_res,
-                GuestAddress(DEFAULT_HIGH_RAM_START),
-                GuestAddress(MMIO_GAP_START),
-                GuestAddress(MMIO_GAP_END)
+                &address_space,
+                GuestAddress(layout::HIMEM_START),
+                GuestAddress(layout::MMIO_LOW_START),
+                GuestAddress(layout::MMIO_LOW_END),
+                GuestAddress(cmdline_addr),
+                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
             )
             .err(),
             Some(Error::HimemStartPastMemEnd)
@@ -188,80 +232,41 @@ mod tests {
 
         // Error case: MMIO gap starts before high memory.
         let guest_memory = GuestMemoryMmap::from_ranges(&[
-            (GuestAddress(0), MMIO_GAP_START as usize),
-            (GuestAddress(MMIO_GAP_END), 0x1000),
+            (GuestAddress(0), layout::MMIO_LOW_START as usize),
+            (GuestAddress(layout::MMIO_LOW_END), 0x1000),
         ])
         .unwrap();
+        let address_space =
+            create_address_space(GuestAddress(layout::MMIO_LOW_START), 1024).unwrap();
         assert_eq!(
             build_bootparams(
                 &guest_memory,
-                &kern_load_res,
-                GuestAddress(MMIO_GAP_START + 1),
-                GuestAddress(MMIO_GAP_START),
-                GuestAddress(MMIO_GAP_END)
+                &address_space,
+                GuestAddress(layout::MMIO_LOW_START + 1),
+                GuestAddress(layout::MMIO_LOW_START),
+                GuestAddress(layout::MMIO_LOW_END),
+                GuestAddress(cmdline_addr),
+                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
             )
             .err(),
             Some(Error::HimemStartPastMmioGapStart)
         );
 
-        // Success case: 2 ranges surrounding the MMIO gap.
-        // Setup header is specified in the kernel loader result.
-        kern_load_res.setup_header = Some(bootparam::setup_header::default());
-        let params = build_bootparams(
-            &guest_memory,
-            &kern_load_res,
-            GuestAddress(DEFAULT_HIGH_RAM_START),
-            GuestAddress(MMIO_GAP_START),
-            GuestAddress(MMIO_GAP_END),
-        )
-        .unwrap();
-
-        // The kernel loader type should have been modified in the setup header.
-        let expected_setup_hdr = bootparam::setup_header {
-            type_of_loader: KERNEL_LOADER_OTHER,
-            ..Default::default()
-        };
-        assert_eq!(expected_setup_hdr, params.hdr);
-
-        // There should be 3 EBDA entries: EBDA, RAM preceding MMIO gap, RAM succeeding MMIO gap.
-        assert_eq!(params.e820_entries, 3);
-
         // Success case: 1 range preceding the MMIO gap.
         // Let's skip the setup header this time.
         let guest_memory =
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MMIO_GAP_START as usize)]).unwrap();
-        kern_load_res.setup_header = None;
-        let params = build_bootparams(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), layout::MMIO_LOW_START as usize)])
+                .unwrap();
+        let address_space = create_address_space(GuestAddress(layout::HIMEM_START), 1024).unwrap();
+        assert!(build_bootparams(
             &guest_memory,
-            &kern_load_res,
-            GuestAddress(DEFAULT_HIGH_RAM_START),
-            GuestAddress(MMIO_GAP_START),
-            GuestAddress(MMIO_GAP_END),
+            &address_space,
+            GuestAddress(layout::HIMEM_START),
+            GuestAddress(layout::MMIO_LOW_START),
+            GuestAddress(layout::MMIO_LOW_END),
+            GuestAddress(cmdline_addr),
+            (kernel_cfg.cmdline.as_str().len() + 1) as usize,
         )
-        .unwrap();
-
-        // The setup header should be filled in, even though we didn't specify one.
-        let expected_setup_hdr = bootparam::setup_header {
-            boot_flag: KERNEL_BOOT_FLAG_MAGIC,
-            header: KERNEL_HDR_MAGIC,
-            kernel_alignment: KERNEL_MIN_ALIGNMENT_BYTES,
-            type_of_loader: KERNEL_LOADER_OTHER,
-            ..Default::default()
-        };
-        assert_eq!(expected_setup_hdr, params.hdr);
-
-        // There should be 2 EBDA entries: EBDA and RAM.
-        assert_eq!(params.e820_entries, 2);
-    }
-
-    #[test]
-    fn test_add_e820_entry() {
-        let mut params = boot_params::default();
-        assert!(add_e820_entry(&mut params, 0, 0, 0).is_ok());
-        params.e820_entries = params.e820_table.len() as u8;
-        assert_eq!(
-            add_e820_entry(&mut params, 0, 0, 0).err(),
-            Some(Error::E820Configuration)
-        );
+        .is_ok());
     }
 }

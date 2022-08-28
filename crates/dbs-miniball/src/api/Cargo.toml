@@ -11,7 +11,7 @@ keywords = ["dragonball", "Miniball", "api", "VMM"]
 readme = "README.md"
 
 [dependencies]
-clap = "2.33.3"
+clap = "3.2.17"
 
 vmm = { path = "../vmm" }
 
