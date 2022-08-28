@@ -20,68 +20,51 @@ use kvm_ioctls::{
 };
 use linux_loader::cmdline;
 #[cfg(target_arch = "x86_64")]
-use linux_loader::configurator::{
-    self, linux::LinuxBootConfigurator, BootConfigurator, BootParams,
-};
-#[cfg(target_arch = "x86_64")]
-use linux_loader::{bootparam::boot_params, cmdline::Cmdline};
-
+use linux_loader::configurator;
 use linux_loader::loader::{self, KernelLoader, KernelLoaderResult};
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::{
     bzimage::BzImage,
     elf::{self, Elf},
-    load_cmdline,
 };
+use vm_allocator::{AddressAllocator, AllocPolicy, RangeInclusive};
+use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+
+use dbs_address_space::{AddressSpace, AddressSpaceLayout, AddressSpaceRegion};
+use dbs_boot::layout;
+
 use vm_device::bus::{MmioAddress, MmioRange};
 #[cfg(target_arch = "x86_64")]
 use vm_device::bus::{PioAddress, PioRange};
 use vm_device::device_manager::IoManager;
 #[cfg(target_arch = "x86_64")]
 use vm_device::device_manager::PioManager;
-use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+
 #[cfg(target_arch = "x86_64")]
 use vm_superio::I8042Device;
 use vm_superio::Serial;
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd, terminal::Terminal};
 
 #[cfg(target_arch = "x86_64")]
-use crate::boot::build_bootparams;
-pub use crate::config::*;
+use devices::legacy::I8042Wrapper;
+use devices::legacy::{EventFdTrigger, SerialWrapper};
+
+#[cfg(target_arch = "x86_64")]
 use devices::virtio::block::{self, BlockArgs};
 use devices::virtio::net::{self, NetArgs};
 use devices::virtio::{Env, MmioConfig};
 
-#[cfg(target_arch = "x86_64")]
-use devices::legacy::I8042Wrapper;
-use devices::legacy::{EventFdTrigger, SerialWrapper};
+use crate::boot::build_bootparams;
+pub use crate::config::*;
 use vm_vcpu::vm::{self, ExitHandler, KvmVm, VmConfig};
 
-use vm_allocator::{AddressAllocator, AllocPolicy, RangeInclusive};
-
-/// First address past 32 bits is where the MMIO gap ends.
-#[cfg(target_arch = "x86_64")]
-pub(crate) const MMIO_GAP_END: u64 = 1 << 32;
 /// Size of the MMIO gap.
 #[cfg(target_arch = "x86_64")]
-pub(crate) const MMIO_GAP_SIZE: u64 = 768 << 20;
-/// The start of the MMIO gap (memory area reserved for MMIO devices).
-#[cfg(target_arch = "x86_64")]
-pub(crate) const MMIO_GAP_START: u64 = MMIO_GAP_END - MMIO_GAP_SIZE;
-/// Address of the zeropage, where Linux kernel boot parameters are written.
-#[cfg(target_arch = "x86_64")]
-const ZEROPG_START: u64 = 0x7000;
-/// Address where the kernel command line is written.
-#[cfg(target_arch = "x86_64")]
-const CMDLINE_START: u64 = 0x0002_0000;
-
-/// Default high memory start (1 MiB).
-#[cfg(target_arch = "x86_64")]
-pub const DEFAULT_HIGH_RAM_START: u64 = 0x0010_0000;
+pub const MMIO_GAP_SIZE: u64 = layout::MMIO_LOW_END - layout::MMIO_LOW_START;
 
 /// Default address for loading the kernel.
 #[cfg(target_arch = "x86_64")]
-pub const DEFAULT_KERNEL_LOAD_ADDR: u64 = DEFAULT_HIGH_RAM_START;
+pub const DEFAULT_KERNEL_LOAD_ADDR: u64 = layout::HIMEM_START;
 
 /// Default kernel command line.
 #[cfg(target_arch = "x86_64")]
@@ -142,6 +125,8 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     /// Cannot retrieve the supported MSRs.
     GetSupportedMsrs(dbs_arch::msr::Error),
+    /// Cannot load command line string.
+    LoadCommandline(linux_loader::loader::Error),
 }
 
 impl std::convert::From<vm::Error> for Error {
@@ -167,6 +152,7 @@ pub struct Vmm {
     vm: KvmVm<WrappedExitHandler>,
     kernel_cfg: KernelConfig,
     guest_memory: GuestMemoryMmap,
+    address_space: AddressSpace,
     address_allocator: AddressAllocator,
     // The `device_mgr` is an Arc<Mutex> so that it can be shared between
     // the Vcpu threads, and modified when new devices are added.
@@ -245,9 +231,8 @@ impl TryFrom<VMMConfig> for Vmm {
         }
         Vmm::check_kvm_capabilities(&kvm)?;
 
-        //TODO: Memory virtualization. Use dragonball-sandbox creats to implement Memory virtualization.
-        // See https://github.com/openanolis/dragonball-sandbox/issues/182
         let guest_memory = Vmm::create_guest_memory(&config.memory_config)?;
+        let address_space = Vmm::create_address_space(&config.memory_config)?;
         let address_allocator = Vmm::create_address_allocator(&config.memory_config)?;
         let device_mgr = Arc::new(Mutex::new(IoManager::new()));
 
@@ -270,6 +255,7 @@ impl TryFrom<VMMConfig> for Vmm {
         let mut vmm = Vmm {
             vm,
             guest_memory,
+            address_space,
             address_allocator,
             device_mgr,
             event_mgr: event_manager,
@@ -337,21 +323,51 @@ impl Vmm {
         #[cfg(target_arch = "x86_64")]
         // On x86_64, they surround the MMIO gap (dedicated space for MMIO device slots) if the
         // configured memory size exceeds the latter's starting address.
-        match mem_size.checked_sub(MMIO_GAP_START as usize) {
+        match mem_size.checked_sub(layout::MMIO_LOW_START as usize) {
             // Guest memory fits before the MMIO gap.
             None | Some(0) => vec![(GuestAddress(0), mem_size)],
             // Guest memory extends beyond the MMIO gap.
             Some(remaining) => vec![
-                (GuestAddress(0), MMIO_GAP_START as usize),
-                (GuestAddress(MMIO_GAP_END), remaining),
+                (GuestAddress(0), layout::MMIO_LOW_START as usize),
+                (GuestAddress(layout::MMIO_LOW_END), remaining),
             ],
         }
+    }
+
+    fn create_address_space(memory_config: &MemoryConfig) -> Result<AddressSpace> {
+        let mem_size = ((memory_config.size_mib as u64) << 20) as usize;
+        // create several memory regions
+        let reg = Arc::new(
+            AddressSpaceRegion::create_default_memory_region(
+                GuestAddress(layout::GUEST_MEM_START),
+                mem_size as u64,
+                None,
+                "shmem",
+                "",
+                false,
+                false,
+            )
+            .unwrap(),
+        );
+        let regions = vec![reg];
+
+        // create layout (depending on archs)
+        let layout = AddressSpaceLayout::new(
+            *layout::GUEST_PHYS_END,
+            layout::GUEST_MEM_START,
+            *layout::GUEST_MEM_END,
+        );
+
+        // create address space from regions and layout
+        let address_space = AddressSpace::from_regions(regions, layout);
+
+        Ok(address_space)
     }
 
     fn create_address_allocator(memory_config: &MemoryConfig) -> Result<AddressAllocator> {
         let mem_size = (memory_config.size_mib as u64) << 20;
         #[cfg(target_arch = "x86_64")]
-        let start_addr = MMIO_GAP_START;
+        let start_addr = layout::MMIO_LOW_START;
         let address_allocator = AddressAllocator::new(start_addr, mem_size)?;
         Ok(address_allocator)
     }
@@ -360,7 +376,6 @@ impl Vmm {
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<KernelLoaderResult> {
         let mut kernel_image = File::open(&self.kernel_cfg.path).map_err(Error::IO)?;
-        let zero_page_addr = GuestAddress(ZEROPG_START);
 
         // Load the kernel into guest memory.
         let kernel_load = match Elf::load(
@@ -382,40 +397,26 @@ impl Vmm {
             }
         };
 
-        // Generate boot parameters.
-        let mut bootparams = build_bootparams(
+        // Load the kernel command line into guest memory.
+        let cmdline_addr = dbs_boot::layout::CMDLINE_START;
+        linux_loader::loader::load_cmdline(
             &self.guest_memory,
-            &kernel_load,
+            GuestAddress(cmdline_addr),
+            &self.kernel_cfg.cmdline,
+        )
+        .map_err(Error::LoadCommandline)?;
+
+        // Generate boot parameters.
+        build_bootparams(
+            &self.guest_memory,
+            &self.address_space,
             GuestAddress(self.kernel_cfg.load_addr),
-            GuestAddress(MMIO_GAP_START),
-            GuestAddress(MMIO_GAP_END),
+            GuestAddress(layout::MMIO_LOW_START),
+            GuestAddress(layout::MMIO_LOW_END),
+            GuestAddress(cmdline_addr),
+            (self.kernel_cfg.cmdline.as_str().len() + 1) as usize,
         )
         .map_err(Error::BootParam)?;
-
-        // Add the kernel command line to the boot parameters.
-        bootparams.hdr.cmd_line_ptr = CMDLINE_START as u32;
-        bootparams.hdr.cmdline_size = self.kernel_cfg.cmdline.as_str().len() as u32 + 1;
-
-        // Load the kernel command line into guest memory.
-        let mut cmdline = Cmdline::new(4096);
-        cmdline
-            .insert_str(self.kernel_cfg.cmdline.as_str())
-            .map_err(Error::Cmdline)?;
-
-        load_cmdline(
-            &self.guest_memory,
-            GuestAddress(CMDLINE_START),
-            // Safe because we know the command line string doesn't contain any 0 bytes.
-            &cmdline,
-        )
-        .map_err(Error::KernelLoad)?;
-
-        // Write the boot parameters in the zeropage.
-        LinuxBootConfigurator::write_bootparams::<GuestMemoryMmap>(
-            &BootParams::new::<boot_params>(&bootparams, zero_page_addr),
-            &self.guest_memory,
-        )
-        .map_err(Error::BootConfigure)?;
 
         Ok(kernel_load)
     }
@@ -668,6 +669,7 @@ mod tests {
     fn mock_vmm(vmm_config: VMMConfig) -> Vmm {
         let kvm = Kvm::new().unwrap();
         let guest_memory = Vmm::create_guest_memory(&vmm_config.memory_config).unwrap();
+        let address_space = Vmm::create_address_space(&vmm_config.memory_config).unwrap();
 
         let address_allocator = Vmm::create_address_allocator(&vmm_config.memory_config).unwrap();
         // Create the KvmVm.
@@ -685,11 +687,12 @@ mod tests {
         .unwrap();
         Vmm {
             vm,
+            kernel_cfg: vmm_config.kernel_config,
             guest_memory,
+            address_space,
             address_allocator,
             device_mgr,
             event_mgr: EventManager::new().unwrap(),
-            kernel_cfg: vmm_config.kernel_config,
             exit_handler,
             block_devices: Vec::new(),
             net_devices: Vec::new(),
@@ -715,8 +718,8 @@ mod tests {
 
         // ELF (vmlinux) kernel scenario: happy case
         let mut kern_load = KernelLoaderResult {
-            kernel_load: GuestAddress(DEFAULT_HIGH_RAM_START), // 1 MiB.
-            kernel_end: 0,                                     // doesn't matter.
+            kernel_load: GuestAddress(layout::HIMEM_START), // 1 MiB.
+            kernel_end: 0,                                  // doesn't matter.
             setup_header: None,
             pvh_boot_cap: PvhBootCapability::PvhEntryNotPresent,
         };
@@ -772,7 +775,7 @@ mod tests {
         let kernel_load_result = vmm.load_kernel().unwrap();
         assert_eq!(
             kernel_load_result.kernel_load,
-            GuestAddress(DEFAULT_HIGH_RAM_START)
+            GuestAddress(layout::HIMEM_START)
         );
         assert!(kernel_load_result.setup_header.is_some());
     }
@@ -831,43 +834,46 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     fn test_create_guest_memory() {
         // Guest memory ends exactly at the MMIO gap: should succeed (last addressable value is
-        // MMIO_GAP_START - 1). There should be 1 memory region.
+        // layout::MMIO_LOW_START - 1). There should be 1 memory region.
         let mut mem_cfg = MemoryConfig {
-            size_mib: (MMIO_GAP_START >> 20) as u32,
+            size_mib: (layout::MMIO_LOW_START >> 20) as u32,
         };
         let guest_mem = Vmm::create_guest_memory(&mem_cfg).unwrap();
         assert_eq!(guest_mem.num_regions(), 1);
-        assert_eq!(guest_mem.last_addr(), GuestAddress(MMIO_GAP_START - 1));
+        assert_eq!(
+            guest_mem.last_addr(),
+            GuestAddress(layout::MMIO_LOW_START - 1)
+        );
 
         // Guest memory ends exactly past the MMIO gap: not possible because it's specified in MiB.
         // But it can end 1 MiB within the MMIO gap. Should succeed.
         // There will be 2 regions, the 2nd ending at `size_mib << 20 + MMIO_GAP_SIZE`.
-        mem_cfg.size_mib = (MMIO_GAP_START >> 20) as u32 + 1;
+        mem_cfg.size_mib = (layout::MMIO_LOW_START >> 20) as u32 + 1;
         let guest_mem = Vmm::create_guest_memory(&mem_cfg).unwrap();
         assert_eq!(guest_mem.num_regions(), 2);
         assert_eq!(
             guest_mem.last_addr(),
-            GuestAddress(MMIO_GAP_START + MMIO_GAP_SIZE + (1 << 20) - 1)
+            GuestAddress(layout::MMIO_LOW_START + MMIO_GAP_SIZE + (1 << 20) - 1)
         );
 
         // Guest memory ends exactly at the MMIO gap end: should succeed. There will be 2 regions,
         // the 2nd ending at `size_mib << 20 + MMIO_GAP_SIZE`.
-        mem_cfg.size_mib = ((MMIO_GAP_START + MMIO_GAP_SIZE) >> 20) as u32;
+        mem_cfg.size_mib = ((layout::MMIO_LOW_START + MMIO_GAP_SIZE) >> 20) as u32;
         let guest_mem = Vmm::create_guest_memory(&mem_cfg).unwrap();
         assert_eq!(guest_mem.num_regions(), 2);
         assert_eq!(
             guest_mem.last_addr(),
-            GuestAddress(MMIO_GAP_START + 2 * MMIO_GAP_SIZE - 1)
+            GuestAddress(layout::MMIO_LOW_START + 2 * MMIO_GAP_SIZE - (1 << 20))
         );
 
         // Guest memory ends 1 MiB past the MMIO gap end: should succeed. There will be 2 regions,
         // the 2nd ending at `size_mib << 20 + MMIO_GAP_SIZE`.
-        mem_cfg.size_mib = ((MMIO_GAP_START + MMIO_GAP_SIZE) >> 20) as u32 + 1;
+        mem_cfg.size_mib = ((layout::MMIO_LOW_START + MMIO_GAP_SIZE) >> 20) as u32 + 1;
         let guest_mem = Vmm::create_guest_memory(&mem_cfg).unwrap();
         assert_eq!(guest_mem.num_regions(), 2);
         assert_eq!(
             guest_mem.last_addr(),
-            GuestAddress(MMIO_GAP_START + 2 * MMIO_GAP_SIZE + (1 << 20) - 1)
+            GuestAddress(layout::MMIO_LOW_START + 2 * MMIO_GAP_SIZE)
         );
 
         // Guest memory size is 0: should fail, rejected by vm-memory with EINVAL.
@@ -963,7 +969,7 @@ mod tests {
             size_mib: MEM_SIZE_MIB,
         };
         #[cfg(target_arch = "x86_64")]
-        let start_addr = MMIO_GAP_START;
+        let start_addr = layout::MMIO_LOW_START;
         let mut address_alloc = Vmm::create_address_allocator(&memory_config).unwrap();
 
         // Trying to allocate at an address before the base address.
