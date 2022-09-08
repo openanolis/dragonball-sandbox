@@ -11,5 +11,4 @@ members = [
     "crates/dbs-upcall",
     "crates/dbs-utils",
     "crates/dbs-interrupt",
-    "crates/dbs-miniball",
 ]
