@@ -38,12 +38,15 @@ available in `rust-vmm`:
 [`vm-memory`](https://crates.io/crates/vm-memory),
 [`linux-loader`](https://crates.io/crates/linux-loader), 
 and in `dragonball-sandbox`:
+[`dbs-address-space`](https://crates.io/crates/dbs-address-space),
+[`dbs-allocator`](https://crates.io/crates/dbs-allocator),
 [`dbs-boot`](https://crates.io/crates/dbs-boot),
 [`dbs-arch`](https://crates.io/crates/dbs-arch),
-[`dbs-address-space`](https://crates.io/crates/dbs-address-space),
-[`dbs-virtio-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-virtio-devices),
-[`dbs-legacy-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-legacy-devices) and
-[`dbs-utils`](https://crates.io/crates/dbs-utils).
+[`dbs-device`](https://crates.io/crates/dbs-device),
+[`dbs-interrupt`](https://crates.io/crates/dbs-interrupt),
+[`dbs-legacy-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-legacy-devices),
+[`dbs-utils`](https://crates.io/crates/dbs-utils) and 
+[`dbs-virtio-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-virtio-devices).
 
 ### Architecture
 
@@ -112,14 +115,14 @@ let vm = KvmVm::new(
 )?;
 ```
 
-3. Create event manager for device events. This is done through `event-manager`.
+3. Create event manager for device events. 
+   This is done through [`dbs-utils::epoll_manager`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-utils/src/epoll_manager.rs).
 
 ```rust
 // src/vmm/src/lib.rs
 
-let mut event_manager = EventManager::<Arc<Mutex<dyn MutEventSubscriber + Send>>>::new()
-.map_err(Error::EventManager)?;
-event_manager.add_subscriber(wrapped_exit_handler.0.clone());
+let event_manager = EpollManager::default();
+event_manager.add_subscriber(Box::new(wrapped_exit_handler.0.clone()));
 ```
 
 4. Configure the vCPUs. This is done through `vm-vcpu` crate, which is a
@@ -213,9 +216,11 @@ let vm_config = VmConfig::new(&kvm, config.vcpu_config.num)?;
 
 
 
-5. Configure legacy devices. This is done partially through `kvm-ioctls`,
-   partially (serial console emulation) through `vm-superio`. Device event
-   handling is mediated with `event-manager`.
+5. legacy devices need to be configured with serial console and keyboard i8042 controller,
+   serial console emulation is done through [`dbs-device`](https://crates.io/crates/dbs-device)
+   and [`dbs-legacy-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-legacy-devices) crates.
+   Device event handling is mediated through
+   [`dbs-utils::epoll_manager`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-utils/src/epoll_manager.rs).
    1. Requirements: KVM is configured, guest memory is configured, `irqchip`
       is configured (`x86_64`), event manager is configured
    2. Inputs: N/A
@@ -233,24 +238,16 @@ vmm.add_serial_console()?;
 vmm.add_i8042_device()?;
 ```
 
-6. Configure root block device. This is done through `vm-virtio`. Device event
-   handling is mediated with `event-manager`.
+6. Configure root block device. This is done through [`dbs-virtio-devices`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-virtio-devices). 
+   Device event handling is mediated with [`dbs-utils::epoll_manager`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-utils/src/epoll_manager.rs).
    1. Requirements: KVM is configured, guest memory is configured, `irqchip`
       is configured (`x86_64`), event manager is configured
-   2. *Note*: Virtio devices are in an early stage, and we offer support now only for
-      configuring the root filesystem. We plan on adding support soon for
-      network and vsock devices, and on improving the current architecture by
-      having a much easier to use and modular one.
 
 ```rust
 // src/vmm/src/lib.rs
 
 if let Some(cfg) = config.block_config.as_ref() {
     vmm.add_block_device(cfg)?;
-}
-    
-if let Some(cfg) = config.net_config.as_ref() {
-    vmm.add_net_device(cfg)?;
 }
 ```
 
