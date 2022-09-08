@@ -37,9 +37,7 @@ jobs:
           key: ${{ runner.os }}-build-${{ env.cache-name }}
 
       - name: Test dbs-address-space
-        run: |
-          cargo update -p fuse-backend-rs:0.9.2 --precise 0.9.4
-          cargo llvm-cov --all-features -p dbs-address-space --lcov --output-path dbs-address-space.info
+        run: cargo llvm-cov --all-features -p dbs-address-space --lcov --output-path dbs-address-space.info
       - name: Test dbs-allocator
         run: cargo llvm-cov --all-features -p dbs-allocator --lcov --output-path dbs-allocator.info
       - name: Test dbs-arch
