@@ -252,6 +252,12 @@ where
     }
 
     #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn queues_mut(&mut self) -> &mut Vec<VirtioQueueConfig<Q>> {
+        &mut self.queues
+    }
+
+    #[inline]
     pub(crate) fn features_select(&self) -> u32 {
         self.features_select
     }
@@ -584,7 +590,7 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueState;
+    use virtio_queue::QueueStateSync;
     use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
 
     use super::*;
@@ -594,7 +600,7 @@ pub(crate) mod tests {
         have_msi: bool,
         doorbell: bool,
         ctrl_queue_size: u16,
-    ) -> MmioV2DeviceState<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> {
+    ) -> MmioV2DeviceState<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
 
         let mmio_base = 0;
@@ -630,17 +636,17 @@ pub(crate) mod tests {
 
         state.queue_select = 0;
         assert_eq!(state.with_queue(0, |q| q.max_size()), 16);
-        assert!(state.with_queue_mut(|q| q.size = 16));
-        assert_eq!(state.queues[state.queue_select as usize].queue.size, 16);
+        assert!(state.with_queue_mut(|q| q.set_size(16)));
+        assert_eq!(state.queues[state.queue_select as usize].queue.size(), 16);
 
         state.queue_select = 1;
         assert_eq!(state.with_queue(0, |q| q.max_size()), 32);
-        assert!(state.with_queue_mut(|q| q.size = 8));
-        assert_eq!(state.queues[state.queue_select as usize].queue.size, 8);
+        assert!(state.with_queue_mut(|q| q.set_size(8)));
+        assert_eq!(state.queues[state.queue_select as usize].queue.size(), 8);
 
         state.queue_select = 3;
         assert_eq!(state.with_queue(0xff, |q| q.max_size()), 0xff);
-        assert!(!state.with_queue_mut(|q| q.size = 16));
+        assert!(!state.with_queue_mut(|q| q.set_size(16)));
 
         assert!(!state.check_queues_valid());
 

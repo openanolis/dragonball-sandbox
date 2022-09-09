@@ -376,7 +376,7 @@ mod tests {
     use dbs_interrupt::NoopNotifier;
     use dbs_utils::rate_limiter::{TokenBucket, TokenType};
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueState;
+    use virtio_queue::QueueStateSync;
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -514,7 +514,7 @@ mod tests {
                 .unwrap();
             m.write_obj::<u64>(114, GuestAddress(0x1000 + 8)).unwrap();
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedWriteOnlyDescriptor)
             ));
         }
@@ -525,7 +525,7 @@ mod tests {
             // chain too short; no status_desc
             vq.dtable(0).flags().store(0);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::DescriptorChainTooShort)
             ));
         }
@@ -537,7 +537,7 @@ mod tests {
             vq.dtable(0).flags().store(VIRTQ_DESC_F_NEXT);
             vq.dtable(1).set(0x2000, 0x1000, 0, 2);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::DescriptorChainTooShort)
             ));
         }
@@ -551,7 +551,7 @@ mod tests {
                 .store(VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE);
             vq.dtable(2).set(0x3000, 0, 0, 0);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedWriteOnlyDescriptor)
             ));
         }
@@ -566,7 +566,7 @@ mod tests {
                 .flags()
                 .store(VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedWriteOnlyDescriptor)
             ));
         }
@@ -580,7 +580,7 @@ mod tests {
             vq.dtable(1).flags().store(VIRTQ_DESC_F_NEXT);
             vq.dtable(1).len().store(64);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::DescriptorLengthTooBig)
             ));
         }
@@ -593,7 +593,7 @@ mod tests {
                 .unwrap();
             vq.dtable(1).flags().store(VIRTQ_DESC_F_NEXT);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedReadOnlyDescriptor)
             ));
         }
@@ -609,7 +609,7 @@ mod tests {
                 .store(VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE);
             vq.dtable(1).len().store(64);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::DescriptorLengthTooBig)
             ));
         }
@@ -624,7 +624,7 @@ mod tests {
                 .flags()
                 .store(VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedReadOnlyDescriptor)
             ));
         }
@@ -635,7 +635,7 @@ mod tests {
             // status desc read only
             vq.dtable(2).flags().store(0);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::UnexpectedReadOnlyDescriptor)
             ));
         }
@@ -647,7 +647,7 @@ mod tests {
             vq.dtable(2).flags().store(VIRTQ_DESC_F_WRITE);
             vq.dtable(2).len().store(0);
             assert!(matches!(
-                Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32),
+                Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32),
                 Err(Error::DescriptorLengthTooSmall)
             ));
         }
@@ -657,7 +657,7 @@ mod tests {
             data_descs.clear();
             // should be OK now
             vq.dtable(2).len().store(0x1000);
-            let r = Request::parse(&mut q.iter(m).unwrap().next().unwrap(), &mut data_descs, 32)
+            let r = Request::parse(&mut q.pop_descriptor_chain(m).unwrap(), &mut data_descs, 32)
                 .unwrap();
 
             assert_eq!(r.request_type, RequestType::GetDeviceID);
@@ -693,7 +693,7 @@ mod tests {
             m.write_obj::<u32>(VIRTIO_BLK_T_IN, GuestAddress(0x1000))
                 .unwrap();
             let req = Request::parse(
-                &mut q.iter(m).unwrap().next().unwrap(),
+                &mut q.pop_descriptor_chain(m).unwrap(),
                 &mut data_descs,
                 0x100000,
             )
@@ -711,7 +711,7 @@ mod tests {
             m.write_obj::<u32>(VIRTIO_BLK_T_OUT, GuestAddress(0x1000))
                 .unwrap();
             let req = Request::parse(
-                &mut q.iter(m).unwrap().next().unwrap(),
+                &mut q.pop_descriptor_chain(m).unwrap(),
                 &mut data_descs,
                 0x100000,
             )
@@ -729,7 +729,7 @@ mod tests {
             m.write_obj::<u32>(VIRTIO_BLK_T_FLUSH, GuestAddress(0x1000))
                 .unwrap();
             let req = Request::parse(
-                &mut q.iter(m).unwrap().next().unwrap(),
+                &mut q.pop_descriptor_chain(m).unwrap(),
                 &mut data_descs,
                 0x100000,
             )
@@ -748,7 +748,7 @@ mod tests {
             m.write_obj::<u32>(VIRTIO_BLK_T_GET_ID, GuestAddress(0x1000))
                 .unwrap();
             let req = Request::parse(
-                &mut q.iter(m).unwrap().next().unwrap(),
+                &mut q.pop_descriptor_chain(m).unwrap(),
                 &mut data_descs,
                 0x100000,
             )
@@ -767,7 +767,7 @@ mod tests {
             m.write_obj::<u32>(VIRTIO_BLK_T_GET_ID + 10, GuestAddress(0x1000))
                 .unwrap();
             let req = Request::parse(
-                &mut q.iter(m).unwrap().next().unwrap(),
+                &mut q.pop_descriptor_chain(m).unwrap(),
                 &mut data_descs,
                 0x100000,
             )
@@ -795,7 +795,7 @@ mod tests {
         m.write_obj::<u32>(VIRTIO_BLK_T_IN, GuestAddress(0x1000))
             .unwrap();
         let req = Request::parse(
-            &mut q.iter(m.as_ref()).unwrap().next().unwrap(),
+            &mut q.pop_descriptor_chain(m.as_ref()).unwrap(),
             &mut data_descs,
             0x100000,
         )
@@ -822,7 +822,7 @@ mod tests {
         m.write_obj::<u32>(VIRTIO_BLK_T_IN, GuestAddress(0x1000))
             .unwrap();
         let req = Request::parse(
-            &mut q.iter(m).unwrap().next().unwrap(),
+            &mut q.pop_descriptor_chain(m).unwrap(),
             &mut data_descs,
             0x100000,
         )
@@ -844,7 +844,7 @@ mod tests {
         m.write_obj::<u32>(VIRTIO_BLK_T_IN, GuestAddress(0x1000))
             .unwrap();
         let req = Request::parse(
-            &mut q.iter(m).unwrap().next().unwrap(),
+            &mut q.pop_descriptor_chain(m).unwrap(),
             &mut data_descs,
             0x100000,
         )
@@ -871,38 +871,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::device_type(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::device_type(
                 &dev
             ),
             TYPE_BLOCK
         );
         let queue_size = vec![128];
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::queue_max_sizes(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::queue_max_sizes(
                 &dev
             ),
             &queue_size[..]
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 0),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 0),
             dev.device_info.get_avail_features(0)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 1),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 1),
             dev.device_info.get_avail_features(1)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::get_avail_features(&dev, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 2),
             dev.device_info.get_avail_features(2)
         );
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::read_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::read_config(
             &mut dev,
             0,
             &mut config,
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueState, GuestRegionMmap>::write_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
         );
     }
@@ -963,7 +963,7 @@ mod tests {
             dev.disk_images = vec![];
 
             let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues = vec![VirtioQueueConfig::<QueueState>::create(256, 0).unwrap()];
+            let queues = vec![VirtioQueueConfig::<QueueStateSync>::create(256, 0).unwrap()];
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -998,7 +998,7 @@ mod tests {
             .unwrap();
 
             let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues = vec![VirtioQueueConfig::<QueueState>::create(256, 0).unwrap()];
+            let queues = vec![VirtioQueueConfig::<QueueStateSync>::create(256, 0).unwrap()];
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -1044,7 +1044,7 @@ mod tests {
 
     fn get_block_epoll_handler_with_file(
         file: DummyFile,
-    ) -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueState> {
+    ) -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync> {
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
         let queue = VirtioQueueConfig::create(255, 0).unwrap();
         let rate_limiter = RateLimiter::default();
@@ -1072,7 +1072,7 @@ mod tests {
         }
     }
 
-    fn get_block_epoll_handler() -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueState> {
+    fn get_block_epoll_handler() -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync> {
         let mut file = DummyFile::new();
         file.capacity = 0x100000;
         get_block_epoll_handler_with_file(file)
@@ -1351,7 +1351,7 @@ mod tests {
         m.write_obj::<u32>(VIRTIO_BLK_T_IN, GuestAddress(0x1000))
             .unwrap();
         let req = Request::parse(
-            &mut q.iter(m).unwrap().next().unwrap(),
+            &mut q.pop_descriptor_chain(m).unwrap(),
             &mut data_descs,
             0x100000,
         )

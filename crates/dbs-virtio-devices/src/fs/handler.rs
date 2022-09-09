@@ -15,7 +15,7 @@ use fuse_backend_rs::api::Vfs;
 use fuse_backend_rs::transport::{FsCacheReqHandler, Reader, VirtioFsWriter, Writer};
 use log::{debug, error, info, trace};
 use threadpool::ThreadPool;
-use virtio_queue::QueueStateT;
+use virtio_queue::{QueueStateOwnedT, QueueStateT};
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 

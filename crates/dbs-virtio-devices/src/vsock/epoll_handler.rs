@@ -11,7 +11,7 @@ use std::ops::Deref;
 
 use dbs_utils::epoll_manager::{EventOps, EventSet, Events, MutEventSubscriber};
 use log::{error, trace, warn};
-use virtio_queue::{QueueState, QueueStateT};
+use virtio_queue::{QueueStateOwnedT, QueueStateSync, QueueStateT};
 use vm_memory::{GuestMemoryRegion, GuestRegionMmap};
 
 use super::defs;
@@ -55,7 +55,7 @@ const QUEUE_CFG: usize = 2;
 ///     virtio RX buffers.
 pub struct VsockEpollHandler<
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send = QueueState,
+    Q: QueueStateT + Send = QueueStateSync,
     R: GuestMemoryRegion = GuestRegionMmap,
     M: VsockGenericMuxer = VsockMuxer,
 > {
@@ -558,9 +558,7 @@ mod tests {
 
             if let Some(mut tx_desc) = ctx.queues[defs::TXQ_EVENT as usize]
                 .queue_mut()
-                .iter(&test_ctx.mem)
-                .unwrap()
-                .next()
+                .pop_descriptor_chain(&test_ctx.mem)
             {
                 assert!(VsockPacket::from_tx_virtq_head(&mut tx_desc).is_err());
             }
@@ -587,9 +585,7 @@ mod tests {
             let mut ctx = test_ctx.create_event_handler_context();
             let mut rx_desc = ctx.queues[defs::RXQ_EVENT as usize]
                 .queue_mut()
-                .iter(&test_ctx.mem)
-                .unwrap()
-                .next()
+                .pop_descriptor_chain(&test_ctx.mem)
                 .unwrap();
             assert!(VsockPacket::from_rx_virtq_head(&mut rx_desc).is_ok());
         }
@@ -598,9 +594,7 @@ mod tests {
             let mut ctx = test_ctx.create_event_handler_context();
             let mut tx_desc = ctx.queues[defs::TXQ_EVENT as usize]
                 .queue_mut()
-                .iter(&test_ctx.mem)
-                .unwrap()
-                .next()
+                .pop_descriptor_chain(&test_ctx.mem)
                 .unwrap();
             assert!(VsockPacket::from_tx_virtq_head(&mut tx_desc).is_ok());
         }

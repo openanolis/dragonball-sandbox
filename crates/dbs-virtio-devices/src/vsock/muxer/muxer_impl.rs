@@ -847,6 +847,7 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
+    use virtio_queue::QueueStateT;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::super::super::backend::VsockUnixStreamBackend;
@@ -889,9 +890,7 @@ mod tests {
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.queues[RXQ_EVENT as usize]
                     .queue_mut()
-                    .iter(&vsock_test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&vsock_test_ctx.mem)
                     .unwrap(),
             )
             .unwrap();
