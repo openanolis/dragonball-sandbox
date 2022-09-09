@@ -15,7 +15,6 @@ use std::str::FromStr;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-use blobfs::{BlobFs, Config as BlobfsConfig};
 use caps::{CapSet, Capability};
 use dbs_device::resources::{DeviceResources, ResourceConstraint};
 use dbs_utils::epoll_manager::{EpollManager, SubscriberId};
@@ -26,7 +25,8 @@ use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::VmFd;
 use log::{debug, error, info, trace, warn};
 use nix::sys::memfd;
-use rafs::{
+use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
+use nydus_rafs::{
     fs::{Rafs, RafsConfig},
     RafsIoRead,
 };
@@ -448,7 +448,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             ..Default::default()
         };
 
-        let passthrough_fs = PassthroughFs::new(fs_cfg).map_err(FsError::IOError)?;
+        let passthrough_fs = PassthroughFs::<()>::new(fs_cfg).map_err(FsError::IOError)?;
         passthrough_fs.import().map_err(FsError::IOError)?;
         debug!("passthroughfs mounted");
 

@@ -12,7 +12,7 @@ use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter, TokenType};
 use fuse_backend_rs::abi::virtio_fs::RemovemappingOne;
 use fuse_backend_rs::api::server::Server;
 use fuse_backend_rs::api::Vfs;
-use fuse_backend_rs::transport::{FsCacheReqHandler, Reader, Writer};
+use fuse_backend_rs::transport::{FsCacheReqHandler, Reader, VirtioFsWriter, Writer};
 use log::{debug, error, info, trace};
 use threadpool::ThreadPool;
 use virtio_queue::QueueStateT;
@@ -255,12 +255,14 @@ where
             let work_func = move || {
                 let guard = vm_as.memory();
                 let mem = guard.deref();
-                let reader = Reader::new(mem, desc_chain.clone())
+                let reader = Reader::from_descriptor_chain(mem, desc_chain.clone())
                     .map_err(FsError::InvalidDescriptorChain)
                     .unwrap();
-                let writer = Writer::new(mem, desc_chain)
-                    .map_err(FsError::InvalidDescriptorChain)
-                    .unwrap();
+                let writer = Writer::VirtioFs(
+                    VirtioFsWriter::new(mem, desc_chain)
+                        .map_err(FsError::InvalidDescriptorChain)
+                        .unwrap(),
+                );
                 let total = server
                     .handle_message(
                         reader,
