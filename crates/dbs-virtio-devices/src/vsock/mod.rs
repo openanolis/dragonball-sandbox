@@ -186,7 +186,7 @@ mod tests {
     use dbs_interrupt::NoopNotifier;
     use dbs_utils::epoll_manager::EpollManager;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueState;
+    use virtio_queue::QueueStateSync;
     use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -412,9 +412,10 @@ mod tests {
 
     pub struct EventHandlerContext<'a> {
         pub device: Vsock<Arc<GuestMemoryMmap>, TestMuxer>,
-        pub epoll_handler:
-            Option<VsockEpollHandler<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap, TestMuxer>>,
-        pub queues: Vec<VirtioQueueConfig>,
+        pub epoll_handler: Option<
+            VsockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap, TestMuxer>,
+        >,
+        pub queues: Vec<VirtioQueueConfig<QueueStateSync>>,
         pub guest_rxvq: GuestQ<'a>,
         pub guest_txvq: GuestQ<'a>,
         pub guest_evvq: GuestQ<'a>,
@@ -427,7 +428,7 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>>::new(
+            let config = VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueStateSync>::new(
                 Arc::new(mem.clone()),
                 vm_fd,
                 resources,

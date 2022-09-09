@@ -24,7 +24,7 @@ use dbs_interrupt::{InterruptNotifier, NoopNotifier};
 use dbs_utils::epoll_manager::{EpollManager, EpollSubscriber, SubscriberId};
 use kvm_ioctls::VmFd;
 use log::{error, warn};
-use virtio_queue::{DescriptorChain, QueueState, QueueStateSync, QueueStateT};
+use virtio_queue::{DescriptorChain, QueueStateOwnedT, QueueStateSync, QueueStateT};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
     GuestUsize,
@@ -37,7 +37,7 @@ use crate::{ActivateError, ActivateResult, Error, Result};
 ///
 /// The `VirtioQueueConfig` maintains configuration information for a Virtio queue.
 /// It also provides methods to access the queue and associated interrupt/event notifiers.
-pub struct VirtioQueueConfig<Q: QueueStateT = QueueState> {
+pub struct VirtioQueueConfig<Q: QueueStateT = QueueStateSync> {
     /// Virtio queue object to access the associated queue.
     pub queue: Q,
     /// EventFd to receive queue notification from guest.
@@ -140,27 +140,14 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
     pub fn set_interrupt_notifier(&mut self, notifier: Arc<dyn InterruptNotifier>) {
         self.notifier = notifier;
     }
-}
 
-impl VirtioQueueConfig<QueueState> {
     /// Return the actual size of the queue, as the driver may not set up a
     /// queue as big as the device allows.
     #[inline]
     pub fn actual_size(&self) -> u16 {
         // TODO: rework once https://github.com/rust-vmm/vm-virtio/pull/153 get merged.
         //self.queue.size()
-        std::cmp::min(self.queue.size, self.queue.max_size)
-    }
-}
-
-impl VirtioQueueConfig<QueueStateSync> {
-    /// Return the actual size of the queue, as the driver may not set up a
-    /// queue as big as the device allows.
-    #[inline]
-    pub fn actual_size(&self) -> u16 {
-        // TODO: rework once https://github.com/rust-vmm/vm-virtio/pull/153 get merged.
-        //self.queue.size()
-        self.queue.max_size()
+        std::cmp::min(self.queue.size(), self.queue.max_size())
     }
 }
 
@@ -182,7 +169,7 @@ impl<Q: QueueStateT + Clone> Clone for VirtioQueueConfig<Q> {
 /// object. On VirtioDevice::reset(), the configuration object should be returned to the caller.
 pub struct VirtioDeviceConfig<
     AS: GuestAddressSpace,
-    Q: QueueStateT = QueueState,
+    Q: QueueStateT = QueueStateSync,
     R: GuestMemoryRegion = GuestRegionMmap,
 > {
     /// `GustMemoryAddress` object to access the guest memory.
@@ -596,7 +583,7 @@ pub(crate) mod tests {
         let mut queues = Vec::new();
         for idx in 0..8 {
             queues.push(VirtioQueueConfig::new(
-                QueueState::new(512),
+                QueueStateSync::new(512),
                 Arc::new(EventFd::new(0).unwrap()),
                 Arc::new(LegacyNotifier::new(
                     group.clone(),
@@ -626,7 +613,7 @@ pub(crate) mod tests {
         let status = Arc::new(InterruptStatusRegister32::new());
         let notifier = Arc::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
 
-        let mut cfg = VirtioQueueConfig::<QueueState>::create(1024, 1).unwrap();
+        let mut cfg = VirtioQueueConfig::<QueueStateSync>::create(1024, 1).unwrap();
         cfg.set_interrupt_notifier(notifier);
 
         let mem =
@@ -713,7 +700,9 @@ pub(crate) mod tests {
         device_info: VirtioDeviceInfo,
     }
 
-    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueState, GuestRegionMmap> for DummyDevice {
+    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>
+        for DummyDevice
+    {
         fn device_type(&self) -> u32 {
             0xffff
         }
@@ -832,7 +821,7 @@ pub(crate) mod tests {
         assert!(matches!(
             device
                 .device_info
-                .check_queue_sizes::<QueueState>(&queue_size),
+                .check_queue_sizes::<QueueStateSync>(&queue_size),
             Err(ActivateError::InvalidParam)
         ));
 

@@ -488,7 +488,7 @@ pub(crate) mod tests {
     use dbs_utils::epoll_manager::EpollManager;
     use kvm_bindings::kvm_userspace_memory_region;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueState;
+    use virtio_queue::QueueStateSync;
     use vm_memory::{
         GuestAddress, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap, MemoryRegionAddress,
         MmapRegion,
@@ -524,7 +524,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> for MmioDevice {
+    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> for MmioDevice {
         fn device_type(&self) -> u32 {
             123
         }
@@ -620,7 +620,7 @@ pub(crate) mod tests {
     }
 
     pub fn set_driver_status(
-        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap>,
+        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
         status: u32,
     ) {
         let mut buf = vec![0; 4];
@@ -657,7 +657,7 @@ pub(crate) mod tests {
         doorbell: bool,
         ctrl_queue_size: u16,
         resources: DeviceResources,
-    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> {
+    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
         let device = MmioDevice::new(ctrl_queue_size);
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
         let kvm = Kvm::new().unwrap();
@@ -683,7 +683,8 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap> {
+    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>
+    {
         let resources = get_device_resource(false, false);
         get_mmio_device_inner(false, 0, resources)
     }
@@ -937,20 +938,20 @@ pub(crate) mod tests {
         assert_eq!(d.state().queue_select(), 3);
 
         d.state().set_queue_select(0);
-        assert_eq!(d.state().queues()[0].queue.size, 16);
+        assert_eq!(d.state().queues()[0].queue.size(), 16);
         LittleEndian::write_u32(&mut buf[..], 8);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_NUM), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.size, 8);
+        assert_eq!(d.state().queues()[0].queue.size(), 8);
 
-        assert!(!d.state().queues()[0].queue.ready);
+        assert!(!d.state().queues()[0].queue.ready());
         LittleEndian::write_u32(&mut buf[..], 1);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_READY), &buf[..]);
-        assert!(d.state().queues()[0].queue.ready);
+        assert!(d.state().queues()[0].queue.ready());
 
         LittleEndian::write_u32(&mut buf[..], 0b111);
         d.write(IoAddress(0), IoAddress(REG_MMIO_INTERRUPT_AC), &buf[..]);
 
-        assert_eq!(d.state().queues()[0].queue.desc_table.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0);
 
         // When write descriptor, descriptor table will judge like this:
         // if desc_table.mask(0xf) != 0 {
@@ -959,26 +960,32 @@ pub(crate) mod tests {
         // desc_table is the data that will be written.
         LittleEndian::write_u32(&mut buf[..], 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_LOW), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.desc_table.0, 0x120);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues()[0].queue.desc_table.0,
+            d.state().queues_mut()[0].queue.lock().desc_table.0,
             0x120 + (0x120 << 32)
         );
 
-        assert_eq!(d.state().queues()[0].queue.avail_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 0);
         LittleEndian::write_u32(&mut buf[..], 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_LOW), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.avail_ring.0, 124);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_HIGH), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.avail_ring.0, 124 + (124 << 32));
+        assert_eq!(
+            d.state().queues_mut()[0].queue.lock().avail_ring.0,
+            124 + (124 << 32)
+        );
 
-        assert_eq!(d.state().queues()[0].queue.used_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 0);
         LittleEndian::write_u32(&mut buf[..], 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_LOW), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.used_ring.0, 128);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_HIGH), &buf[..]);
-        assert_eq!(d.state().queues()[0].queue.used_ring.0, 128 + (128 << 32));
+        assert_eq!(
+            d.state().queues_mut()[0].queue.lock().used_ring.0,
+            128 + (128 << 32)
+        );
 
         // Write to an invalid address in generic register range.
         LittleEndian::write_u32(&mut buf[..], 0xf);
@@ -1078,7 +1085,9 @@ pub(crate) mod tests {
         assert_eq!(LittleEndian::read_u32(&buf[..]), 1);
     }
 
-    fn activate_device(d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap>) {
+    fn activate_device(
+        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
+    ) {
         set_driver_status(d, DEVICE_ACKNOWLEDGE);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_FEATURES_OK);

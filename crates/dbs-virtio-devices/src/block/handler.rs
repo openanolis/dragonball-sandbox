@@ -16,7 +16,7 @@ use dbs_utils::{
 };
 use log::{debug, error, info, warn};
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::{QueueState, QueueStateT};
+use virtio_queue::{QueueState, QueueStateOwnedT, QueueStateT};
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryRegion, GuestRegionMmap};
 use vmm_sys_util::eventfd::EventFd;
 

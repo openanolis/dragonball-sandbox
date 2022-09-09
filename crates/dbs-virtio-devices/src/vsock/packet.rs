@@ -448,6 +448,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 mod tests {
+    use virtio_queue::QueueStateT;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     use super::super::defs::MAX_PKT_BUF_SIZE;
@@ -487,9 +488,7 @@ mod tests {
             match VsockPacket::$ctor(
                 &mut $handler_ctx.queues[$vq_index as usize]
                     .queue_mut()
-                    .iter(&$test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&$test_ctx.mem)
                     .unwrap(),
             ) {
                 Err($err) => (),
@@ -516,9 +515,7 @@ mod tests {
             let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.queues[TXQ_EVENT as usize]
                     .queue_mut()
-                    .iter(&test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&test_ctx.mem)
                     .unwrap(),
             )
             .unwrap();
@@ -558,9 +555,7 @@ mod tests {
             let mut pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.queues[TXQ_EVENT as usize]
                     .queue_mut()
-                    .iter(&test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&test_ctx.mem)
                     .unwrap(),
             )
             .unwrap();
@@ -618,9 +613,7 @@ mod tests {
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.queues[RXQ_EVENT as usize]
                     .queue_mut()
-                    .iter(&test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&test_ctx.mem)
                     .unwrap(),
             )
             .unwrap();
@@ -679,9 +672,7 @@ mod tests {
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.queues[RXQ_EVENT as usize]
                 .queue_mut()
-                .iter(&test_ctx.mem)
-                .unwrap()
-                .next()
+                .pop_descriptor_chain(&test_ctx.mem)
                 .unwrap(),
         )
         .unwrap();
@@ -752,9 +743,7 @@ mod tests {
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.queues[RXQ_EVENT as usize]
                 .queue_mut()
-                .iter(&test_ctx.mem)
-                .unwrap()
-                .next()
+                .pop_descriptor_chain(&test_ctx.mem)
                 .unwrap(),
         )
         .unwrap();

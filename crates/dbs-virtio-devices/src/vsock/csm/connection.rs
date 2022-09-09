@@ -679,6 +679,7 @@ pub(crate) mod tests {
     use std::os::unix::io::RawFd;
     use std::time::{Duration, Instant};
 
+    use virtio_queue::QueueStateT;
     use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
     use super::super::super::backend::VsockBackendType;
@@ -830,9 +831,7 @@ pub(crate) mod tests {
             let mut pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.queues[RXQ_EVENT as usize]
                     .queue_mut()
-                    .iter(&vsock_test_ctx.mem)
-                    .unwrap()
-                    .next()
+                    .pop_descriptor_chain(&vsock_test_ctx.mem)
                     .unwrap(),
             )
             .unwrap();
