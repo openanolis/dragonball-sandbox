@@ -11,7 +11,7 @@ keywords = ["dragonball", "secure-sandbox", "devices", "virtio"]
 readme = "README.md"
 
 [dependencies]
-blobfs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "316380792092f73c99f832c4cb44ef4319d6f76b", optional = true }
+nydus-blobfs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "e429be3e8623d47db0f97186f761aeda2983c6f4", optional = true }
 byteorder = "1.4.3"
 caps = "0.5.3"
 dbs-device = { version = "0.1.0", path = "../dbs-device" }
@@ -19,13 +19,13 @@ dbs-interrupt = { version = "0.1.0", path = "../dbs-interrupt", features = ["kvm
 dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
 epoll = "4.0.1"
 io-uring = "0.5.2"
-fuse-backend-rs = { version = "0.9.0", optional = true }
+fuse-backend-rs = { version = "0.9.6", optional = true }
 kvm-bindings = "0.5.0"
 kvm-ioctls = "0.11.0"
 libc = "0.2.119"
 log = "0.4.14"
 nix = "0.23.1"
-rafs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "316380792092f73c99f832c4cb44ef4319d6f76b", optional = true }
+nydus-rafs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "e429be3e8623d47db0f97186f761aeda2983c6f4", optional = true }
 rlimit = "0.7.0"
 serde = "1.0.27"
 serde_json = "1.0.9"
@@ -44,4 +44,4 @@ virtio-mmio = []
 virtio-vsock = ["virtio-mmio"]
 virtio-net = ["virtio-mmio"]
 virtio-blk = ["virtio-mmio"]
-virtio-fs = ["virtio-mmio", "fuse-backend-rs/virtiofs", "rafs/virtio-fs", "blobfs/virtiofs"]
+virtio-fs = ["virtio-mmio", "fuse-backend-rs/virtiofs", "nydus-rafs/virtio-fs", "nydus-blobfs/virtiofs"]
