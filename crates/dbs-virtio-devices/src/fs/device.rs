@@ -979,6 +979,7 @@ pub mod tests {
     use dbs_interrupt::NoopNotifier;
     use kvm_ioctls::Kvm;
     use virtio_queue::QueueState;
+    use vm_memory::GuestMemoryRegion;
     use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::tempfile::TempFile;
     use Error as VirtIoError;
@@ -1640,5 +1641,162 @@ pub mod tests {
 
         let kb = 0x1100_0000_0000_0000;
         assert!(kb_to_bytes(kb).is_err());
+    }
+
+    #[test]
+    fn test_get_timeout() {
+        fn create_fs_device_with_cache_policy(policy: &str) -> VirtioFs<Arc<GuestMemoryMmap>> {
+            let epoll_manager = EpollManager::default();
+            let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+            let fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+                TAG,
+                NUM_QUEUES,
+                QUEUE_SIZE,
+                CACHE_SIZE,
+                policy,
+                THREAD_NUM,
+                WB_CACHE,
+                NO_OPEN,
+                KILLPRIV_V2,
+                XATTR,
+                DROP_SYS_RSC,
+                NO_READDIR,
+                new_dummy_handler_helper(),
+                epoll_manager,
+                Some(rate_limiter),
+            )
+            .unwrap();
+            fs
+        }
+        let fs = create_fs_device_with_cache_policy("auto");
+        assert_eq!(fs.get_timeout(), Duration::from_secs(CACHE_AUTO_TIMEOUT));
+        let fs = create_fs_device_with_cache_policy("always");
+        assert_eq!(fs.get_timeout(), Duration::from_secs(CACHE_ALWAYS_TIMEOUT));
+        let fs = create_fs_device_with_cache_policy("never");
+        assert_eq!(fs.get_timeout(), Duration::from_secs(CACHE_NONE_TIMEOUT));
+    }
+
+    #[test]
+    fn test_register_mmap_region() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let mut resources = DeviceResources::new();
+        let entry = dbs_device::resources::Resource::MmioAddressRange {
+            base: 0x1000,
+            size: 0x1000,
+        };
+        resources.append(entry);
+        let entry = dbs_device::resources::Resource::KvmMemSlot(0);
+        resources.append(entry);
+
+        let mmio_res = resources.get_mmio_address_ranges();
+        let slot_res = resources.get_kvm_mem_slots();
+        let start = mmio_res[0].0;
+        let len = mmio_res[0].1;
+        let res = fs.register_mmap_region(vm_fd, start, len, &slot_res);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap().start_addr(), GuestAddress(0x1000));
+    }
+
+    #[test]
+    fn test_get_resource_requirements() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let dax_on = 0x4000;
+        let fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            dax_on,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+        let mut requirements = Vec::new();
+        requirements.push(ResourceConstraint::new_mmio(0x1));
+        requirements.push(ResourceConstraint::new_mmio(0x2));
+        VirtioDevice::<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap>::get_resource_requirements(&fs, &mut requirements, true);
+
+        assert_eq!(requirements[2], ResourceConstraint::LegacyIrq { irq: None });
+        assert_eq!(requirements[3], ResourceConstraint::GenericIrq { size: 3 });
+        assert_eq!(
+            requirements[5],
+            ResourceConstraint::KvmMemSlot {
+                slot: None,
+                size: 1
+            }
+        );
+    }
+
+    #[test]
+    fn test_set_resource() {
+        let epoll_manager = EpollManager::default();
+        let rate_limiter = RateLimiter::new(100, 0, 300, 10, 0, 300).unwrap();
+        let mut fs: VirtioFs<Arc<GuestMemoryMmap>> = VirtioFs::new(
+            TAG,
+            NUM_QUEUES,
+            QUEUE_SIZE,
+            CACHE_SIZE,
+            CACHE_POLICY,
+            THREAD_NUM,
+            WB_CACHE,
+            NO_OPEN,
+            KILLPRIV_V2,
+            XATTR,
+            DROP_SYS_RSC,
+            NO_READDIR,
+            new_dummy_handler_helper(),
+            epoll_manager,
+            Some(rate_limiter),
+        )
+        .unwrap();
+        let kvm = Kvm::new().unwrap();
+        let vm_fd = Arc::new(kvm.create_vm().unwrap());
+        let mut resources = DeviceResources::new();
+        let entry = dbs_device::resources::Resource::MmioAddressRange {
+            base: 0x1000,
+            size: 0x1000,
+        };
+        resources.append(entry);
+        let entry = dbs_device::resources::Resource::KvmMemSlot(0);
+        resources.append(entry);
+
+        let res = VirtioDevice::<Arc<GuestMemoryMmap>, QueueState, GuestRegionMmap>::set_resource(
+            &mut fs, vm_fd, resources,
+        );
+        assert!(res.is_ok());
+        let content = res.unwrap().unwrap();
+        assert_eq!(content.kvm_userspace_memory_region_slot, 0);
+        assert_eq!(content.region_list[0].offset, 0);
+        assert_eq!(content.region_list[0].len, 0x1000);
     }
 }

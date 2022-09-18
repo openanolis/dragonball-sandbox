@@ -493,6 +493,8 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use std::io::Seek;
+    use std::io::Write;
     use std::sync::Arc;
 
     use dbs_interrupt::NoopNotifier;
@@ -500,13 +502,135 @@ pub mod tests {
     use dbs_utils::epoll_manager::SubscriberOps;
     use dbs_utils::rate_limiter::TokenBucket;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vmm_sys_util::tempfile::TempFile;
 
+    use super::*;
     use crate::fs::device::tests::*;
     use crate::fs::*;
     use crate::tests::{VirtQueue, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
     use crate::VirtioQueueConfig;
 
-    use super::*;
+    #[test]
+    fn test_is_req_valid() {
+        let handler = CacheHandler {
+            cache_size: 0x1000,
+            mmap_cache_addr: 0x1000,
+            id: "test".to_string(),
+        };
+
+        // Normal case.
+        assert!(handler.is_req_valid(0x0, 0x500));
+
+        // Invalid case.
+        assert!(!handler.is_req_valid(0x500, 0x1000));
+    }
+
+    #[test]
+    fn test_map() {
+        let mmap_addr = 0x10000;
+        let moffset = 0x5000;
+        let mut handler = CacheHandler {
+            cache_size: 0x10000,
+            mmap_cache_addr: mmap_addr,
+            id: "test".to_string(),
+        };
+
+        // Normal case.
+        let original_content = b"hello world";
+        let mut file = TempFile::new().unwrap().into_file();
+        file.set_len(0x1000).unwrap();
+        file.write_all(original_content).unwrap();
+        file.rewind().unwrap();
+        let fd = file.as_raw_fd();
+        handler.map(0x0, moffset, 0x5000, 0, fd).unwrap();
+        let mapped_addr = (mmap_addr + moffset) as *const [u8; 11];
+        unsafe {
+            let content = mapped_addr.read();
+            assert_eq!(&content, original_content);
+        }
+
+        // Invalid argument case.
+        assert!(matches!(
+            handler
+                .map(0x0, 0x5000, 0xc000, 0, fd)
+                .err()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        ));
+
+        // Bad file descriptor case.
+        let fd = TempFile::new().unwrap().as_file().as_raw_fd();
+        assert!(format!(
+            "{:?}",
+            handler.map(0x0, 0x5000, 0x5000, 0, fd).err().unwrap()
+        )
+        .contains("Bad file descriptor"));
+    }
+
+    #[test]
+    fn test_unmap() {
+        let mmap_addr = 0x10000;
+        let moffset = 0x5000;
+        let mut handler = CacheHandler {
+            cache_size: 0x10000,
+            mmap_cache_addr: mmap_addr,
+            id: "test".to_string(),
+        };
+
+        // Normal case after map.
+        let original_content = b"hello world";
+        let mut file = TempFile::new().unwrap().into_file();
+        file.set_len(0x1000).unwrap();
+        file.write_all(original_content).unwrap();
+        file.rewind().unwrap();
+        let fd = file.as_raw_fd();
+        handler.map(0x0, moffset, 0x5000, 0, fd).unwrap();
+        let mapped_addr = (mmap_addr + moffset) as *const [u8; 11];
+        unsafe {
+            let content = mapped_addr.read();
+            assert_eq!(&content, original_content);
+        }
+        let requests = vec![
+            RemovemappingOne {
+                moffset: 0x5000,
+                len: 0x1000,
+            },
+            RemovemappingOne {
+                moffset: 0x6000,
+                len: 0x2500,
+            },
+        ];
+        assert!(handler.unmap(requests).is_ok());
+
+        // Normal case.
+        let mut handler = CacheHandler {
+            cache_size: 0x10000,
+            mmap_cache_addr: mmap_addr,
+            id: "test".to_string(),
+        };
+        let requests = vec![
+            RemovemappingOne {
+                moffset: 0x5000,
+                len: 0x1000,
+            },
+            RemovemappingOne {
+                moffset: 0x6000,
+                len: 0x2500,
+            },
+        ];
+        assert!(handler.unmap(requests).is_ok());
+
+        // Invalid argument case.
+        let requests = vec![RemovemappingOne {
+            moffset: 0x5000,
+            len: 0x10000,
+        }];
+        assert!(matches!(
+            handler.unmap(requests).err().unwrap().kind(),
+            std::io::ErrorKind::InvalidInput
+        ));
+    }
 
     #[test]
     fn test_fs_get_patch_rate_limiters() {

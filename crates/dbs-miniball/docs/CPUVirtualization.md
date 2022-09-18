@@ -239,37 +239,72 @@ pub fn setup_mptable<M: GuestMemory>(mem: &M, boot_cpus: u8, max_cpus: u8) -> Re
 ## KVM irqchip
 ### irqchip
 ##### 原理介绍
-TODO 补充中断虚拟化相关的原理介绍。
+中断从设备发送到CPU需要经过中断控制器，现代x86架构采用的中断控制器被称为APIC(Advanced Programmable Interrupt Controller)。APIC是伴随多核处理器产生的，所有的核共用一个I/O APIC，用于统一接收来自外部I/O设备的中断，而后根据软件的设定，格式化出一条包含该中断所有信息的Interrupt Message，发送给对应的CPU。
+
+每个核有一个Local APIC，用于接收来自I/O APIC的Interrupt Message，内部的时钟和温控中断，以及来自其他核的中断，也就是IPI(Inter-Processor Interrupt)。
+
+在虚拟化环境中，VMM需要为guest VM展现一个与物理中断架构类似的虚拟中断架构。每个vCPU都对应一个虚拟的Local APIC，多个虚拟CPU共享一个虚拟的I/O APIC。
+
+和虚拟CPU一样，虚拟的Local APIC和虚拟的I/O APIC都是VMM维护的软件实体（以下统称虚拟中断控制器）。中断虚拟化的主要任务就是实现下图描述的虚拟中断架构，包括虚拟中断控制器的创建，中断采集和中断注入。
+
+![Interrupt.png](img/Interrupt.png)
+
+###### 中断采集
+中断的采集是指将guest VM的设备中断请求送入对应的虚拟中断控制器中。Guest VM的中断有两种可能的来源：
+
+- 来自于软件模拟的虚拟设备，比如一个模拟出来的串口，可以产生一个虚拟中断。从VMM的角度来看，虚拟设备只是一个软件模块，可以通过调用虚拟中断控制器提供的接口函数，实现虚拟设备的中断发送。
+- 来自于直接分配给guest VM的物理设备的中断，比如一个物理网卡，可以产生一个真正的物理中断。一个物理设备被直接分配给一个guest VM，意味着当该设备发生中断时，中断的处理函数（ISR）应该位于guest OS中。
+
+在虚拟化环境中，物理中断控制器是由VMM控制的，因而VMM在收到中断后，会首先判断该中断是不是由分配给guest VM的设备产生的，如果是的话，就将中断发送给对应的虚拟中断控制器。而后，虚拟中断控制器会在适当的时机将该中断注入guest VM，由guest OS中的ISR进行处理。
+
+###### 中断注入
+虚拟中断控制器采集到的中断请求，将按照VMM排定的优先级，被逐一注入到对应的虚拟CPU中。在Linux的信号发送与接收机制中，只有从内核空间返回到用户空间，也就是某个进程被调度到重新获得CPU的使用权时，该进程才可以处理之前发送给它的那些信号，或者说此时内核才可以将这些未处理的信号注入到进程中。
+
+同样地，只有在VM entry，也就是某个虚拟CPU被调度到重新获得物理CPU的使用权时，VMM才可以将中断注入到该虚拟CPU中。
+
+为了保证中断的及时注入，就需要通过一定的手段，强制虚拟CPU发生VM exit，然后在VM entry返回guest VM的时候注入中断。强制产生VM exit最常用的办法就是往虚拟CPU对应的物理CPU发送一个IPI核间中断。
+
+VMM注入的中断虚拟CPU并非全部接收。Linux中的进程可以通过设置SIG_IGN来忽略某个信号（SIGKILL和SIGSTOP除外），同样地，虚拟CPU也可以通过配置虚拟IMR(Interrupt Mask Register)来选择是否屏蔽某个中断。
+
+###### irqchip
+“irqchip”是KVM对通常称为“中断控制器”的名称。这是一种硬件，它接收大量中断信号（来自USB控制器，磁盘控制器，PCI卡，串行端口等设备），并以一种允许CPU控制启用哪些中断，在新中断到达时通知，消除已处理的中断等方式将它们呈现给CPU。
+
+VM 需要仿真中断控制器，就像实际硬件具有真正的硬件中断控制器一样。在 KVM VM 中，可以像所有其他模拟设备一样将此模拟设备置于用户空间 （如 QEMU） 中。但是，由于中断控制器与模拟中断的处理密切相关，因此在来宾操作中断控制器时，必须在内核和用户空间之间频繁地来回切换，这对性能不利。因此，KVM在内核中提供了一个中断控制器（“内核内irqchip”）的仿真，QEMU可以使用该控制器，而不是在用户空间中提供自己的版本。
+
 
 ##### 代码解读
-TODO 对代码内容进行梳理
+在 x86_64 上，必须在 vCPU 之前创建 irqchip。 它设置虚拟 IOAPIC、虚拟 PIC，并为 LAPIC 设置未来的 vCPU。 如有疑问，请在[内核中查找 KVM_CREATE_IRQCHIP](https://elixir.bootlin.com/linux/latest/source/arch/x86/kvm/x86.c)。
 
 ```rust
-pub(crate) fn setup_interrupt_controller(
-    &mut self,
-) -> std::result::Result<(), StartMicroVmError> {
-    self.vm_fd
-    .create_irq_chip()
-    .map_err(|e| StartMicroVmError::ConfigureVm(VmError::VmSetup(e)))
+#[cfg(target_arch = "x86_64")]
+fn setup_irq_controller(&self) -> Result<()> {
+    self.fd
+        .create_irq_chip()
+        .map_err(Error::SetupInterruptController)?;
 }
 ```
 
 ### pit
+
+##### 原理介绍
+PIT是周期中断定时器。PIT定时器是32位递减计数器，每一个时钟周期减1。每次计时器达到0时它将生成一个触发脉冲并设置中断标志，然后再次加载相应的启动值。PIT定时器常用于为其他外设提供周期信号，例如ADC利用PIT设置采样周期，DMA可以使用PIT设置周期性的DMA传输。
+
+##### 代码解读
+PIT 在引导期间用于配置频率。 PIT 通道 0 的输出连接到 PIC 芯片，因此它产生一个“IRQ 0”（系统定时器），详细[参考](https://wiki.osdev.org/Programmable_Interval_Timer)。
+
+设置扬声器 PIT，因为某些内核在启动期间访问扬声器端口。 没有这个，KVM 将不断退出到用户空间。
+
 ```rust
-pub(crate) fn create_pit(&self) -> std::result::Result<(), StartMicroVmError> {
-    info!(self.logger, "VM: create pit");
-    // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
-    // (i.e. KVM_SPEAKER_BASE_ADDRESS) does not trigger an exit to user space.
+fn setup_irq_controller(&self) -> Result<()> {
+    ...
+
     let pit_config = kvm_pit_config {
         flags: KVM_PIT_SPEAKER_DUMMY,
-        ..kvm_pit_config::default()
+        ..Default::default()
     };
-
-    // Safe because we know that our file is a VM fd, we know the kernel will only read the
-    // correct amount of memory from our pointer, and we verify the return result.
-    self.vm_fd
-    .create_pit2(pit_config)
-    .map_err(|e| StartMicroVmError::ConfigureVm(VmError::VmSetup(e)))
+    self.fd
+        .create_pit2(pit_config)
+        .map_err(Error::SetupInterruptController)
 }
 ```
 
@@ -799,10 +834,12 @@ pub fn set_fpu(&self, fpu: &kvm_fpu) -> Result<()> {
 
 #### LAPIC
 ##### 原理介绍
-TODO 补充原理介绍
+LAPIC (Local Advanced Programmable Interrupt Controller) 是一种负责接收 / 发送中断的芯片，集成在 CPU 内部，每个 CPU 有一个属于自己的 LAPIC。它们通过 APIC ID 进行区分。每个 LAPIC 都有自己的一系列寄存器、一个内部时钟、一个本地定时设备 和 两条 IRQ 线 LINT0 和 LINT1。
+
+在虚拟化环境中，VMM需要为guest VM展现一个与物理中断架构类似的虚拟中断架构。每个vCPU都对应一个虚拟的Local APIC，多个虚拟CPU共享一个虚拟的I/O APIC。和虚拟CPU一样，虚拟的Local APIC和虚拟的I/O APIC都是VMM维护的虚拟中断控制器。
 
 ##### 代码梳理
-TODO 对代码内容进行梳理
+在 Miniball 中通过 `dbs-arch` crate 的 `setup_lint()` 来配置 LAPIC。`get_klapic_reg()` 和 `set_klapic_reg()` 用于获取和设置寄存器。第 43 ～ 54 行，LAPIC0 设置为外部中断，LAPIC1 设置为 NMI。代码如下：
 
 ```rust
 dbs_arch::interrupts::set_lint(&self.fd).map_err(VcpuError::LocalIntConfiguration)?;
