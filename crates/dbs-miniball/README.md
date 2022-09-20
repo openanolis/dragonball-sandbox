@@ -81,7 +81,7 @@ stored, are as follows:
    machine in the host kernel.
 
 ```rust
-// src/vmm/src/lib.rs
+// src/vmm/src/vmm.rs
 
 let kvm = Kvm::new().map_err(Error::KvmIoctl)?;
 
@@ -93,33 +93,29 @@ if kvm_api_ver != KVM_API_VERSION as i32 {
 Vmm::check_kvm_capabilities(&kvm)?;
 ```
 
-2. Configure guest memory. This is done through the `vm-memory` crate. This
-   creates and registers the guest memory with KVM.
+2. Configure guest memory. This is done through the [`vm-memory`](https://crates.io/crates/vm-memory) and 
+   [`dbs-address-space`](https://crates.io/crates/dbs-address-space) crates. 
+   The `vm-memory` creates and registers the guest memory with KVM.
+   The `dbs-address-space` manage guest memory.
+   See the [`Memory virtualization documentation`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/docs/MemoryVirtualization.md)
+   for details on this part.
    1. Requirements: KVM set up
    2. Inputs
        1. guest memory size
 
 ```rust
-// src/vmm/src/lib.rs
+// src/vmm/src/vmm.rs
 
 let guest_memory = Vmm::create_guest_memory(&config.memory_config)?;
+let address_space = Vmm::create_address_space(&config.memory_config)?;
 let address_allocator = Vmm::create_address_allocator(&config.memory_config)?;
-let device_mgr = Arc::new(Mutex::new(IoManager::new()));
-...
-let vm = KvmVm::new(
-    &kvm,
-    vm_config,
-    &guest_memory,
-    wrapped_exit_handler.clone(),
-    device_mgr.clone(),
-)?;
 ```
 
 3. Create event manager for device events. 
    This is done through [`dbs-utils::epoll_manager`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-utils/src/epoll_manager.rs).
 
 ```rust
-// src/vmm/src/lib.rs
+// src/vmm/src/vmm.rs
 
 let event_manager = EpollManager::default();
 event_manager.add_subscriber(Box::new(wrapped_exit_handler.0.clone()));
@@ -133,7 +129,7 @@ event_manager.add_subscriber(Box::new(wrapped_exit_handler.0.clone()));
    for details on this part.
     
 ```rust
-// src/vmm/src/lib.rs
+// src/vmm/src/vmm.rs
 
 // Create the KvmVm.
 let vm_config = VmConfig::new(&kvm, config.vcpu_config.num)?;
@@ -251,7 +247,9 @@ if let Some(cfg) = config.block_config.as_ref() {
 }
 ```
 
-7. Load the guest kernel into guest memory. This is done through `linux-loader`.
+7. Load the guest kernel into guest memory. This is done through `linux-loader` and `dbs-boot` crates.
+   See the [`Memory virtualization documentation`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/docs/MemoryVirtualization.md)
+   for details on this part.
    1. Requirements: guest memory is configured
    2. Inputs:
       1. path to kernel file
@@ -308,14 +306,14 @@ vsock devices.
 #### Example: Override the kernel command line
 
 ```bash
-vmm-reference \
+dbs-miniball \
     --kernel path=/path/to/kernel/image,cmdline="reboot=t panic=1 pci=off"
 ```
 
 #### Example: VM with 2 vCPUs and 1 GiB memory
 
 ```bash
-vmm-reference                           \
+dbs-miniball                           \
     --memory size_mib=1024          \
     --vcpu num=2                        \
     --kernel path=/path/to/kernel/image
@@ -367,7 +365,7 @@ is as simple as:
 cargo build [--release]
 ```
 
-This will produce a binary called `vmm-reference` in the `cargo` build
+This will produce a binary called `dbs-miniball` in the `cargo` build
 directory (default: `target/${toolchain}/${mode}`, where mode can be `debug` or
 `release`).
 
@@ -469,7 +467,7 @@ cargo run --release --            \
 
 ```wrap
 cargo build --release
-target/release/vmm-reference      \
+target/release/dbs-miniball      \
     --memory size_mib=1024        \
     --kernel path=${KERNEL_PATH}  \
     --vcpu num=1
