@@ -7,4 +7,6 @@ pub mod boot;
 #[cfg(target_arch = "x86_64")]
 pub mod config;
 #[cfg(target_arch = "x86_64")]
+pub mod device_manager;
+#[cfg(target_arch = "x86_64")]
 pub mod vmm;

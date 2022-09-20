@@ -6,13 +6,12 @@
 
 use std::convert::TryFrom;
 use std::fs::File;
-use std::io::{self, stdin, stdout};
-use std::ops::DerefMut;
-use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::io::{self, stdin};
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use event_manager::{EventManager, EventOps, Events, MutEventSubscriber, SubscriberOps};
 use kvm_bindings::KVM_API_VERSION;
 use kvm_ioctls::{
     Cap::{self, Ioeventfd, Irqchip, Irqfd, UserMemory},
@@ -27,45 +26,45 @@ use linux_loader::loader::{
     bzimage::BzImage,
     elf::{self, Elf},
 };
-use vm_allocator::{AddressAllocator, AllocPolicy, RangeInclusive};
-use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+use virtio_queue::QueueStateSync;
+use vm_allocator::AllocPolicy;
+use vm_memory::atomic::GuestMemoryAtomic;
+use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, GuestRegionMmap};
+use vmm_sys_util::{eventfd::EventFd, terminal::Terminal};
 
 use dbs_address_space::{AddressSpace, AddressSpaceLayout, AddressSpaceRegion};
 use dbs_boot::layout;
-
-use vm_device::bus::{MmioAddress, MmioRange};
+use dbs_device::device_manager::{Error as IoManagerError, IoManager};
+use dbs_device::resources::{Resource, ResourceConstraint};
+use dbs_device::DeviceIo;
+use dbs_interrupt::KvmIrqManager;
 #[cfg(target_arch = "x86_64")]
-use vm_device::bus::{PioAddress, PioRange};
-use vm_device::device_manager::IoManager;
+use dbs_legacy_devices::SerialDevice;
 #[cfg(target_arch = "x86_64")]
-use vm_device::device_manager::PioManager;
-
-#[cfg(target_arch = "x86_64")]
-use vm_superio::I8042Device;
-use vm_superio::Serial;
-use vmm_sys_util::{epoll::EventSet, eventfd::EventFd, terminal::Terminal};
-
-#[cfg(target_arch = "x86_64")]
-use devices::legacy::I8042Wrapper;
-use devices::legacy::{EventFdTrigger, SerialWrapper};
-
-#[cfg(target_arch = "x86_64")]
-use devices::virtio::block::{self, BlockArgs};
-use devices::virtio::net::{self, NetArgs};
-use devices::virtio::{Env, MmioConfig};
+use dbs_legacy_devices::{EventFdTrigger, I8042Device, I8042DeviceMetrics};
+use dbs_utils::epoll_manager::{EpollManager, EventOps, EventSet, Events, MutEventSubscriber};
+use dbs_virtio_devices::{
+    block::{aio::Aio, io_uring::IoUring, Block, LocalFile, Ufile},
+    mmio::{
+        MmioV2Device, DRAGONBALL_FEATURE_INTR_USED, DRAGONBALL_FEATURE_PER_QUEUE_NOTIFY,
+        DRAGONBALL_MMIO_DOORBELL_SIZE, MMIO_DEFAULT_CFG_SIZE,
+    },
+    VirtioDevice,
+};
 
 use crate::boot::build_bootparams;
 pub use crate::config::*;
+use crate::device_manager::{
+    self, console_manager::ConsoleManager, resource_manager::ResourceManager,
+};
 use vm_vcpu::vm::{self, ExitHandler, KvmVm, VmConfig};
 
 /// Size of the MMIO gap.
 #[cfg(target_arch = "x86_64")]
 pub const MMIO_GAP_SIZE: u64 = layout::MMIO_LOW_END - layout::MMIO_LOW_START;
-
 /// Default address for loading the kernel.
 #[cfg(target_arch = "x86_64")]
 pub const DEFAULT_KERNEL_LOAD_ADDR: u64 = layout::HIMEM_START;
-
 /// Default kernel command line.
 #[cfg(target_arch = "x86_64")]
 pub const DEFAULT_KERNEL_CMDLINE: &str = "panic=1 pci=off";
@@ -73,6 +72,18 @@ pub const DEFAULT_KERNEL_CMDLINE: &str = "panic=1 pci=off";
 pub const DEFAULT_ADDRESSS_ALIGNEMNT: u64 = 4;
 /// Default allocation policy for address allocator.
 pub const DEFAULT_ALLOC_POLICY: AllocPolicy = AllocPolicy::FirstMatch;
+
+/// The I8042 Data Port (IO Port 0x60) is used for reading data that was received from a I8042 device or from the I8042 controller itself and writing data to a I8042 device or to the I8042 controller itself.
+#[cfg(target_arch = "x86_64")]
+pub const I8042_DATA_PORT: u16 = 0x60;
+
+/// Register its interrupt fd with KVM. IRQ line 4 is typically used for serial port 1.
+pub const COM1_IRQ: u32 = 4;
+/// The base port address for the COM devices
+pub const COM1_PORT1: u16 = 0x3f8;
+
+/// Default queue size for VirtIo block devices.
+pub const QUEUE_SIZE: u32 = 128;
 
 /// VMM memory related errors.
 #[derive(Debug)]
@@ -88,8 +99,6 @@ pub enum MemoryError {
 /// VMM errors.
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to create block device.
-    Block(block::Error),
     /// Failed to write boot parameters to guest memory.
     #[cfg(target_arch = "x86_64")]
     BootConfigure(configurator::Error),
@@ -99,15 +108,13 @@ pub enum Error {
     /// Error configuring the kernel command line.
     Cmdline(cmdline::Error),
     /// Error setting up the serial device.
-    SerialDevice(devices::legacy::SerialError),
+    SerialDevice,
     /// Event management error.
     EventManager(event_manager::Error),
     /// I/O error.
     IO(io::Error),
     /// Failed to load kernel.
     KernelLoad(loader::Error),
-    /// Failed to create net device.
-    Net(net::Error),
     /// Address stored in the rip registry does not fit in guest memory.
     RipOutOfGuestMemory,
     /// Invalid KVM API version.
@@ -127,6 +134,28 @@ pub enum Error {
     GetSupportedMsrs(dbs_arch::msr::Error),
     /// Cannot load command line string.
     LoadCommandline(linux_loader::loader::Error),
+    /// Cannot add legacy device to Bus.
+    BusError(dbs_device::device_manager::Error),
+    /// Cannot create EventFd.
+    EventFd(io::Error),
+    /// Failed to register/deregister interrupt.
+    IrqManager(vm_vcpu::vm::Error),
+    /// Failed to get device resource.
+    GetDeviceResource,
+    /// Failed to perform an operation on the bus.
+    IoManager(IoManagerError),
+    /// No resource available.
+    NoAvailResource,
+    /// Failed to create block device.
+    Block(dbs_virtio_devices::Error),
+    /// Error from Virtio subsystem.
+    Virtio(dbs_virtio_devices::Error),
+    /// Resource constraint type error
+    ResourceConstraintType,
+    /// Cannot set mode for terminal.
+    StdinHandle(vmm_sys_util::errno::Error),
+    /// The device manager was not configured.
+    DeviceManager(device_manager::DeviceMgrError),
 }
 
 impl std::convert::From<vm::Error> for Error {
@@ -144,8 +173,15 @@ impl From<vm_allocator::Error> for Error {
 /// Dedicated [`Result`](https://doc.rust-lang.org/std/result/) type.
 pub type Result<T> = std::result::Result<T, Error>;
 
-type Block = block::Block<Arc<GuestMemoryMmap>>;
-type Net = net::Net<Arc<GuestMemoryMmap>>;
+type BlockDevice = Block<GuestMemoryAtomic<GuestMemoryMmap>>;
+
+/// Type of the miniball virtio devices.
+pub type DbsVirtioDevice =
+    Box<dyn VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>>;
+
+/// Type of the dragonball virtio mmio devices.
+pub type DbsMmioV2Device =
+    MmioV2Device<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>;
 
 /// A live VMM.
 pub struct Vmm {
@@ -153,17 +189,18 @@ pub struct Vmm {
     kernel_cfg: KernelConfig,
     guest_memory: GuestMemoryMmap,
     address_space: AddressSpace,
-    address_allocator: AddressAllocator,
+    resource_mgr: ResourceManager,
     // The `device_mgr` is an Arc<Mutex> so that it can be shared between
     // the Vcpu threads, and modified when new devices are added.
     device_mgr: Arc<Mutex<IoManager>>,
     // Arc<Mutex<>> because the same device (a dyn DevicePio/DeviceMmio from IoManager's
     // perspective, and a dyn MutEventSubscriber from EventManager's) is managed by the 2 entities,
     // and isn't Copy-able; so once one of them gets ownership, the other one can't anymore.
-    event_mgr: EventManager<Arc<Mutex<dyn MutEventSubscriber + Send>>>,
+    event_mgr: EpollManager,
+    irq_mgr: Arc<KvmIrqManager>,
+    con_manager: ConsoleManager,
     exit_handler: WrappedExitHandler,
-    block_devices: Vec<Arc<Mutex<Block>>>,
-    net_devices: Vec<Arc<Mutex<Net>>>,
+    block_devices: Vec<Arc<DbsMmioV2Device>>,
 }
 
 // The `VmmExitHandler` is used as the mechanism for exiting from the event manager loop.
@@ -233,7 +270,7 @@ impl TryFrom<VMMConfig> for Vmm {
 
         let guest_memory = Vmm::create_guest_memory(&config.memory_config)?;
         let address_space = Vmm::create_address_space(&config.memory_config)?;
-        let address_allocator = Vmm::create_address_allocator(&config.memory_config)?;
+        let resource_mgr = Vmm::create_resource_manager()?;
         let device_mgr = Arc::new(Mutex::new(IoManager::new()));
 
         // Create the KvmVm.
@@ -247,36 +284,37 @@ impl TryFrom<VMMConfig> for Vmm {
             wrapped_exit_handler.clone(),
             device_mgr.clone(),
         )?;
+        let irq_mgr = Arc::new(KvmIrqManager::new(vm.vm_fd()));
 
-        let mut event_manager = EventManager::<Arc<Mutex<dyn MutEventSubscriber + Send>>>::new()
-            .map_err(Error::EventManager)?;
-        event_manager.add_subscriber(wrapped_exit_handler.0.clone());
+        let event_manager = EpollManager::default();
+        event_manager.add_subscriber(Box::new(wrapped_exit_handler.0.clone()));
+
+        let logger = slog_scope::logger().new(slog::o!("vmm" => "Miniball"));
+
+        let con_manager = ConsoleManager::new(event_manager.clone(), &logger);
 
         let mut vmm = Vmm {
             vm,
+            kernel_cfg: config.kernel_config,
             guest_memory,
             address_space,
-            address_allocator,
-            device_mgr,
             event_mgr: event_manager,
-            kernel_cfg: config.kernel_config,
-            exit_handler: wrapped_exit_handler,
+            resource_mgr,
+            device_mgr,
+            irq_mgr,
+            con_manager,
             block_devices: Vec::new(),
-            net_devices: Vec::new(),
+            exit_handler: wrapped_exit_handler,
         };
 
-        //TODO: Device virtualization. Use dragonball-sandbox creats to implement Device virtualization.
-        // See https://github.com/openanolis/dragonball-sandbox/issues/183
-        vmm.add_serial_console()?;
+        let serial = vmm.create_serial_console()?;
+        vmm.init_serial_console(serial)?;
+
         #[cfg(target_arch = "x86_64")]
         vmm.add_i8042_device()?;
 
         if let Some(cfg) = config.block_config.as_ref() {
             vmm.add_block_device(cfg)?;
-        }
-
-        if let Some(cfg) = config.net_config.as_ref() {
-            vmm.add_net_device(cfg)?;
         }
 
         Ok(vmm)
@@ -296,7 +334,7 @@ impl Vmm {
 
         self.vm.run(Some(kernel_load_addr)).map_err(Error::Vm)?;
         loop {
-            match self.event_mgr.run() {
+            match self.event_mgr.handle_events(-1) {
                 Ok(_) => (),
                 Err(e) => eprintln!("Failed to handle events: {:?}", e),
             }
@@ -364,12 +402,9 @@ impl Vmm {
         Ok(address_space)
     }
 
-    fn create_address_allocator(memory_config: &MemoryConfig) -> Result<AddressAllocator> {
-        let mem_size = (memory_config.size_mib as u64) << 20;
-        #[cfg(target_arch = "x86_64")]
-        let start_addr = layout::MMIO_LOW_START;
-        let address_allocator = AddressAllocator::new(start_addr, mem_size)?;
-        Ok(address_allocator)
+    fn create_resource_manager() -> Result<ResourceManager> {
+        let resource_mgr = ResourceManager::new(None);
+        Ok(resource_mgr)
     }
 
     // Load the kernel into guest memory.
@@ -422,38 +457,45 @@ impl Vmm {
     }
 
     // Create and add a serial console to the VMM.
-    fn add_serial_console(&mut self) -> Result<()> {
+    fn create_serial_console(&mut self) -> Result<Arc<Mutex<SerialDevice>>> {
         // Create the serial console.
-        let interrupt_evt = EventFdTrigger::new(libc::EFD_NONBLOCK).map_err(Error::IO)?;
-        let serial = Arc::new(Mutex::new(SerialWrapper(Serial::new(
-            interrupt_evt.try_clone().map_err(Error::IO)?,
-            stdout(),
-        ))));
+        let interrupt_evt = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let serial = Arc::new(Mutex::new(SerialDevice::new(
+            interrupt_evt.try_clone().map_err(Error::EventFd)?,
+        )));
+
+        // port_base defines the base port address for the COM devices.
+        // Since every COM device has 8 data registers so we register the pio address range as size 0x8.
+        let resources = [Resource::PioAddressRange {
+            base: COM1_PORT1,
+            size: 0x8,
+        }];
+
+        self.device_mgr
+            .lock()
+            .unwrap()
+            .register_device_io(serial.clone(), &resources)
+            .map_err(Error::BusError)?;
 
         // Register its interrupt fd with KVM. IRQ line 4 is typically used for serial port 1.
         // See more IRQ assignments & info: https://tldp.org/HOWTO/Serial-HOWTO-8.html
-        self.vm.register_irqfd(&interrupt_evt, 4)?;
+        self.vm
+            .register_irqfd(&interrupt_evt, COM1_IRQ)
+            .map_err(Error::IrqManager)?;
 
         self.kernel_cfg
             .cmdline
             .insert_str("console=ttyS0")
             .map_err(Error::Cmdline)?;
 
-        // Put it on the bus.
-        // Safe to use unwrap() because the device manager is instantiated in new(), there's no
-        // default implementation, and the field is private inside the VMM struct.
-        #[cfg(target_arch = "x86_64")]
-        {
-            let range = PioRange::new(PioAddress(0x3f8), 0x8).unwrap();
-            self.device_mgr
-                .lock()
-                .unwrap()
-                .register_pio(range, serial.clone())
-                .unwrap();
-        }
+        Ok(serial)
+    }
 
-        // Hook it to event management.
-        self.event_mgr.add_subscriber(serial);
+    // Init legacy devices with logger stream in associted virtual machine.
+    fn init_serial_console(&mut self, serial: Arc<Mutex<SerialDevice>>) -> Result<()> {
+        self.con_manager
+            .create_stdio_console(serial)
+            .map_err(Error::DeviceManager)?;
 
         Ok(())
     }
@@ -461,90 +503,167 @@ impl Vmm {
     // Create and add a i8042 device to the VMM.
     #[cfg(target_arch = "x86_64")]
     fn add_i8042_device(&mut self) -> Result<()> {
-        let reset_evt = EventFdTrigger::new(libc::EFD_NONBLOCK).map_err(Error::IO)?;
-        let i8042_device = Arc::new(Mutex::new(I8042Wrapper(I8042Device::new(
-            reset_evt.try_clone().map_err(Error::IO)?,
-        ))));
+        let reset_evt =
+            EventFdTrigger::new(EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFd)?);
+        let i8042_device = Arc::new(Mutex::new(I8042Device::new(
+            reset_evt.try_clone().map_err(Error::EventFd)?,
+            Arc::new(I8042DeviceMetrics::default()),
+        )));
+
         self.vm.register_irqfd(&reset_evt, 1)?;
-        let range = PioRange::new(PioAddress(0x060), 0x5).unwrap();
+
+        let resources = [Resource::PioAddressRange {
+            // 0x60 and 0x64 are the io ports that i8042 devices used.
+            // We register pio address range from 0x60 - 0x64 with base I8042_DATA_PORT for i8042 to use.
+            base: I8042_DATA_PORT,
+            size: 0x5,
+        }];
 
         self.device_mgr
             .lock()
             .unwrap()
-            .register_pio(range, i8042_device)
-            .unwrap();
+            .register_device_io(i8042_device, &resources)
+            .map_err(Error::BusError)?;
+
         Ok(())
     }
 
-    // All methods that add a virtio device use hardcoded addresses and interrupts for now, and
-    // only support a single device. We need to expand this, but it looks like a good match if we
-    // can do it after figuring out how to better separate concerns and make the VMM agnostic of
-    // the actual device types.
     fn add_block_device(&mut self, cfg: &BlockConfig) -> Result<()> {
-        let mem = Arc::new(self.guest_memory.clone());
-        let range = self.address_allocator.allocate(
-            0x1000,
-            DEFAULT_ADDRESSS_ALIGNEMNT,
-            DEFAULT_ALLOC_POLICY,
-        )?;
-        let range = mmio_from_range(range);
-        let mmio_cfg = MmioConfig { range, gsi: 5 };
+        let mut block_files: Vec<Box<dyn Ufile>> = vec![];
+        let is_read_only = true;
+        let io_uring_supported = IoUring::is_supported();
+        let file = OpenOptions::new()
+            .read(true)
+            .write(!is_read_only)
+            .open(&cfg.path)
+            .unwrap();
 
-        let mut guard = self.device_mgr.lock().unwrap();
+        let queue_size = QUEUE_SIZE;
 
-        let mut env = Env {
-            mem,
-            vm_fd: self.vm.vm_fd(),
-            event_mgr: &mut self.event_mgr,
-            mmio_mgr: guard.deref_mut(),
-            mmio_cfg,
-            kernel_cmdline: &mut self.kernel_cfg.cmdline,
-        };
+        if io_uring_supported {
+            let io_engine = IoUring::new(file.as_raw_fd(), queue_size).unwrap();
+            block_files.push(Box::new(LocalFile::new(file, false, io_engine).unwrap()));
+        } else {
+            let io_engine = Aio::new(file.as_raw_fd(), queue_size).unwrap();
+            block_files.push(Box::new(LocalFile::new(file, false, io_engine).unwrap()));
+        }
 
-        let args = BlockArgs {
-            file_path: PathBuf::from(&cfg.path),
-            read_only: false,
-            root_device: true,
-            advertise_flush: true,
-        };
+        let is_disk_read_only = true;
 
-        // We can also hold this somewhere if we need to keep the handle for later.
-        let block = Block::new(&mut env, &args).map_err(Error::Block)?;
+        let block = Box::new(
+            BlockDevice::new(
+                block_files,
+                is_disk_read_only,
+                Arc::new(vec![128]),
+                self.event_mgr.clone(),
+                vec![],
+            )
+            .map_err(Error::Block)?,
+        );
+
+        let block = self.create_mmio_virtio_device(block).unwrap();
+
+        self.generate_kernel_boot_args(block.clone())?;
+
         self.block_devices.push(block);
 
         Ok(())
     }
 
-    fn add_net_device(&mut self, cfg: &NetConfig) -> Result<()> {
-        let mem = Arc::new(self.guest_memory.clone());
-        let range = self.address_allocator.allocate(
-            0x1000,
-            DEFAULT_ADDRESSS_ALIGNEMNT,
-            DEFAULT_ALLOC_POLICY,
-        )?;
-        let range = mmio_from_range(range);
-        let mmio_cfg = MmioConfig { range, gsi: 6 };
+    fn create_mmio_virtio_device(
+        &mut self,
+        device: DbsVirtioDevice,
+    ) -> Result<Arc<DbsMmioV2Device>> {
+        let use_shared_irq = false;
+        let use_generic_irq = true;
 
-        let mut guard = self.device_mgr.lock().unwrap();
+        let features = DRAGONBALL_FEATURE_INTR_USED | DRAGONBALL_FEATURE_PER_QUEUE_NOTIFY;
 
-        let mut env = Env {
-            mem,
-            vm_fd: self.vm.vm_fd(),
-            event_mgr: &mut self.event_mgr,
-            mmio_mgr: guard.deref_mut(),
-            mmio_cfg,
-            kernel_cmdline: &mut self.kernel_cfg.cmdline,
+        // Every emulated Virtio MMIO device needs a 4K configuration space,
+        // and another 4K space for per queue notification.
+        const MMIO_ADDRESS_DEFAULT: ResourceConstraint = ResourceConstraint::MmioAddress {
+            range: None,
+            align: 0,
+            size: MMIO_DEFAULT_CFG_SIZE + DRAGONBALL_MMIO_DOORBELL_SIZE,
         };
 
-        let args = NetArgs {
-            tap_name: cfg.tap_name.clone(),
+        let mut requests = vec![MMIO_ADDRESS_DEFAULT];
+        device.get_resource_requirements(&mut requests, use_generic_irq);
+        let resources = self
+            .resource_mgr
+            .allocate_device_resources(&requests, use_shared_irq)
+            .map_err(|_| Error::GetDeviceResource)?;
+
+        let virtio_dev = match MmioV2Device::new(
+            self.vm.vm_fd(),
+            GuestMemoryAtomic::new(self.guest_memory.clone()),
+            self.irq_mgr.clone(),
+            device,
+            resources.clone(),
+            Some(features),
+        ) {
+            Ok(d) => Arc::new(d),
+            Err(e) => return Err(Error::Virtio(e)),
         };
 
-        // We can also hold this somewhere if we need to keep the handle for later.
-        let net = Net::new(&mut env, &args).map_err(Error::Net)?;
-        self.net_devices.push(net);
+        // Register mmio device.
+        self.device_mgr
+            .lock()
+            .unwrap()
+            .register_device_io(virtio_dev.clone(), &resources)
+            .map_err(Error::BusError)?;
+
+        Ok(virtio_dev)
+    }
+
+    // Generated guest kernel commandline related to root block device.
+    fn generate_kernel_boot_args(
+        &mut self,
+        device: Arc<DbsMmioV2Device>,
+    ) -> std::result::Result<(), Error> {
+        // set root path
+        self.kernel_cfg
+            .cmdline
+            .insert("root", "/dev/vda")
+            .map_err(Error::Cmdline)?;
+
+        // set read only
+        self.kernel_cfg
+            .cmdline
+            .insert_str("ro")
+            .map_err(Error::Cmdline)?;
+
+        // get device information
+        let (mmio_base, mmio_size, irq) = self.get_virtio_device_info(&device)?;
+
+        // as per doc, [virtio_mmio.]device=<size>@<baseaddr>:<irq> needs to be appended
+        // to kernel commandline for virtio mmio devices to get recognized
+        // the size parameter has to be transformed to KiB, so dividing hexadecimal value in
+        // bytes to 1024; further, the '{}' formatting rust construct will automatically
+        // transform it to decimal
+        self.kernel_cfg
+            .cmdline
+            .insert(
+                "virtio_mmio.device",
+                &format!("{}K@0x{:08x}:{}", mmio_size / 1024, mmio_base, irq),
+            )
+            .map_err(Error::Cmdline)?;
 
         Ok(())
+    }
+
+    fn get_virtio_device_info(&mut self, device: &Arc<DbsMmioV2Device>) -> Result<(u64, u64, u32)> {
+        let resources = device.get_assigned_resources();
+        let irq = resources.get_legacy_irq().ok_or(Error::GetDeviceResource)?;
+        let mmio_address_range = device.get_trapped_io_resources().get_mmio_address_ranges();
+
+        // Assume the first MMIO region is virtio configuration region.
+        // Virtio-fs needs to pay attention to this assumption.
+        if let Some(range) = mmio_address_range.into_iter().next() {
+            Ok((range.0, range.1, irq))
+        } else {
+            Err(Error::GetDeviceResource)
+        }
     }
 
     // Helper function that computes the kernel_load_addr needed by the
@@ -590,11 +709,6 @@ impl Vmm {
     }
 }
 
-fn mmio_from_range(range: RangeInclusive) -> MmioRange {
-    // The following unwrap is safe because the address allocator makes
-    // sure that the address is available and correct
-    MmioRange::new(MmioAddress(range.start()), range.len()).unwrap()
-}
 #[cfg(test)]
 mod tests {
     use std::io::ErrorKind;
@@ -670,11 +784,10 @@ mod tests {
         let kvm = Kvm::new().unwrap();
         let guest_memory = Vmm::create_guest_memory(&vmm_config.memory_config).unwrap();
         let address_space = Vmm::create_address_space(&vmm_config.memory_config).unwrap();
+        let resource_mgr = Vmm::create_resource_manager().unwrap();
 
-        let address_allocator = Vmm::create_address_allocator(&vmm_config.memory_config).unwrap();
         // Create the KvmVm.
         let vm_config = VmConfig::new(&kvm, vmm_config.vcpu_config.num).unwrap();
-
         let device_mgr = Arc::new(Mutex::new(IoManager::new()));
         let exit_handler = default_exit_handler();
         let vm = KvmVm::new(
@@ -685,17 +798,26 @@ mod tests {
             device_mgr.clone(),
         )
         .unwrap();
+
+        let event_manager = EpollManager::default();
+
+        let logger = slog_scope::logger().new(slog::o!("vmm" => "Miniball"));
+        let con_manager = ConsoleManager::new(event_manager.clone(), &logger);
+
+        let irq_mgr = Arc::new(KvmIrqManager::new(vm.vm_fd()));
+
         Vmm {
             vm,
             kernel_cfg: vmm_config.kernel_config,
             guest_memory,
             address_space,
-            address_allocator,
+            resource_mgr,
             device_mgr,
-            event_mgr: EventManager::new().unwrap(),
+            event_mgr: event_manager,
+            irq_mgr,
+            con_manager,
             exit_handler,
             block_devices: Vec::new(),
-            net_devices: Vec::new(),
         }
     }
 
@@ -825,7 +947,7 @@ mod tests {
         vmm_config.kernel_config.path = default_elf_path();
         let mut vmm = mock_vmm(vmm_config);
         assert_eq!(vmm.kernel_cfg.cmdline.as_str(), DEFAULT_KERNEL_CMDLINE);
-        vmm.add_serial_console().unwrap();
+        vmm.create_serial_console().unwrap();
         #[cfg(target_arch = "x86_64")]
         assert!(vmm.kernel_cfg.cmdline.as_str().contains("console=ttyS0"));
     }
@@ -936,76 +1058,6 @@ mod tests {
         };
 
         let err = vmm.add_block_device(&invalid_block_config).unwrap_err();
-        assert!(
-            matches!(err, Error::Block(block::Error::OpenFile(io_err)) if io_err.kind() == ErrorKind::NotFound)
-        );
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    // FIXME: We cannot run this on aarch64 because we do not have an image that just runs and
-    // FIXME-continued: halts afterwards. Once we have this, we need to update `default_vmm_config`
-    // FIXME-continued: and have a default PE image on aarch64.
-    fn test_add_net() {
-        let vmm_config = default_vmm_config();
-        let mut vmm = mock_vmm(vmm_config);
-
-        // The device only attempts to open the tap interface during activation, so we can
-        // specify any name here for now.
-        let cfg = NetConfig {
-            tap_name: "imaginary_tap".to_owned(),
-        };
-
-        {
-            assert!(vmm.add_net_device(&cfg).is_ok());
-            assert_eq!(vmm.net_devices.len(), 1);
-            assert!(vmm.kernel_cfg.cmdline.as_str().contains("virtio"));
-        }
-    }
-
-    #[test]
-    fn test_address_alloc() {
-        let memory_config = MemoryConfig {
-            size_mib: MEM_SIZE_MIB,
-        };
-        #[cfg(target_arch = "x86_64")]
-        let start_addr = layout::MMIO_LOW_START;
-        let mut address_alloc = Vmm::create_address_allocator(&memory_config).unwrap();
-
-        // Trying to allocate at an address before the base address.
-        let alloc_err = address_alloc
-            .allocate(100, DEFAULT_ADDRESSS_ALIGNEMNT, AllocPolicy::ExactMatch(0))
-            .unwrap_err();
-        assert_eq!(alloc_err, vm_allocator::Error::ResourceNotAvailable);
-        let alloc_err = address_alloc
-            .allocate(
-                100,
-                DEFAULT_ADDRESSS_ALIGNEMNT,
-                AllocPolicy::ExactMatch(start_addr - DEFAULT_ADDRESSS_ALIGNEMNT),
-            )
-            .unwrap_err();
-        assert_eq!(alloc_err, vm_allocator::Error::ResourceNotAvailable);
-
-        // Testing it outside the available range
-        let outside_avail_range =
-            start_addr + ((MEM_SIZE_MIB as u64) << 20) + DEFAULT_ADDRESSS_ALIGNEMNT;
-        let alloc_err = address_alloc
-            .allocate(
-                100,
-                DEFAULT_ADDRESSS_ALIGNEMNT,
-                AllocPolicy::ExactMatch(outside_avail_range),
-            )
-            .unwrap_err();
-        assert_eq!(alloc_err, vm_allocator::Error::ResourceNotAvailable);
-
-        // Trying to add more than available range.
-        let alloc_err = address_alloc
-            .allocate(
-                ((MEM_SIZE_MIB as u64) << 20) + 2,
-                DEFAULT_ADDRESSS_ALIGNEMNT,
-                DEFAULT_ALLOC_POLICY,
-            )
-            .unwrap_err();
-        assert_eq!(alloc_err, vm_allocator::Error::ResourceNotAvailable);
+        assert!(matches!(err, Error::Block(_)));
     }
 }

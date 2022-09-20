@@ -14,8 +14,8 @@ use kvm_bindings::{
     KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE, KVM_PIT_SPEAKER_DUMMY,
 };
 
+use dbs_device::device_manager::IoManager;
 use kvm_ioctls::{Kvm, VmFd};
-use vm_device::device_manager::IoManager;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryRegion};
 use vmm_sys_util::errno::Error as Errno;
 use vmm_sys_util::eventfd::EventFd;
