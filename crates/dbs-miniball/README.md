@@ -50,8 +50,8 @@ the input of the CLI, builds the Config (VcpuConfig, MemoryConfig, KernelConfig,
 BlockConfig), configures the VM in sequence, and finally loads the kernel into 
 the Guest memory and starts the virtual machine. The detailed process is as follows:
 
-1. Set up KVM. This is done through `kvm-ioctls`. It creates the KVM virtual
-   machine in the host kernel.
+1. Set up KVM. This is done through [`kvm-ioctls`](https://crates.io/crates/kvm-ioctls). 
+   It creates the KVM virtual machine in the host kernel.
 
     ```rust
     // src/vmm/src/vmm.rs
@@ -84,8 +84,8 @@ the Guest memory and starts the virtual machine. The detailed process is as foll
     let address_allocator = Vmm::create_address_allocator(&config.memory_config)?;
     ```
 
-3. Configure the vCPUs. This is done through `vm-vcpu` crate, which is a
-   local crate. This is done partially through [`kvm-ioctls`](https://crates.io/crates/kvm-ioctls), 
+3. Configure the vCPUs. This is done through [`vm-vcpu`](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-miniball/src/vm-vcpu) 
+   crate, which is a local crate. This is done partially through [`kvm-ioctls`](https://crates.io/crates/kvm-ioctls), 
    [`dbs-arch`](https://crates.io/crates/dbs-arch) and 
    [`dbs-boot`](https://crates.io/crates/dbs-boot). 
    See the [`CPU virtualization documentation`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/docs/CPUVirtualization.md)
@@ -227,7 +227,8 @@ the Guest memory and starts the virtual machine. The detailed process is as foll
     }
     ```
 
-7. Load the guest kernel into guest memory. This is done through `linux-loader` and `dbs-boot` crates.
+7. Load the guest kernel into guest memory. This is done through [`linux-loader`](https://crates.io/crates/linux-loader)
+   and [`dbs-boot`](https://crates.io/crates/dbs-boot) crates.
    See the [`Memory virtualization documentation`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/docs/MemoryVirtualization.md)
    for details on this part.
    1. Requirements: guest memory is configured
@@ -355,7 +356,7 @@ directory (default: `target/${toolchain}/${mode}`, where mode can be `debug` or
 To build a kernel for the Miniball to boot, check out the scripts in 
 [resources/kernel](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-miniball/resources/kernel).
 
-- `[make_kernel_busybox_image.sh](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/make_kernel_busybox_image.sh)` 
+- [`make_kernel_busybox_image.sh`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/make_kernel_busybox_image.sh) 
 builds an ELF or bzImage kernel with a baked-in initramfs running [Busybox](https://busybox.net/). 
 It uses a stripped-down [kernel config](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/microvm-kernel-initramfs-hello-x86_64.config) 
 and a statically linked [config](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/busybox_1_32_1_static_config) 
@@ -371,7 +372,7 @@ produces a binary image called `vmlinux-hello-busybox` in the `/tmp/kernel`
 directory. Root privileges are needed to create device nodes.
 Run `./make_kernel_busybox_image.sh` with no arguments to see the help.
 
-- `[make_kernel_image_deb.sh](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/make_kernel_image_deb.sh)` 
+- [`make_kernel_image_deb.sh`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/make_kernel_image_deb.sh) 
 builds an ELF or bzImage kernel compatible with Ubuntu 20.04 from a stripped-down 
 [kernel config](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/kernel/microvm-kernel-5.4-x86_64.config), 
 as well as `.deb` packages containing the Linux kernel image and modules, 
@@ -401,7 +402,7 @@ will be expanded as other devices are added. Block devices are in the works.
 To build a block device with a root filesystem in it containing an OS for the Miniball, 
 check out the scripts in [resources/disk](https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-miniball/resources/disk).
 
-- `[make_rootfs.sh](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/disk/make_rootfs.sh)`
+- [`make_rootfs.sh`](https://github.com/openanolis/dragonball-sandbox/blob/main/crates/dbs-miniball/resources/disk/make_rootfs.sh)
 builds a 1 GiB disk image containing an ext4 filesystem with an Ubuntu 20.04 image.
 
 
