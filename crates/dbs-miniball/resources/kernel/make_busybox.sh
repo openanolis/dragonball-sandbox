@@ -84,14 +84,18 @@ make_init() {
 #!/bin/sh
 mount -t proc none /proc
 mount -t sysfs none /sys
-/bin/echo "                                                   "
-/bin/echo "                 _                                 "
-/bin/echo "  _ __ _   _ ___| |_    __   ___ __ ___  _ __ ___  "
-/bin/echo " | '__| | | / __| __|___\ \ / / '_ \ _ \| '_ \ _ \ "
-/bin/echo " | |  | |_| \__ \ ||_____\ V /| | | | | | | | | | |"
-/bin/echo " |_|   \__,_|___/\__|     \_/ |_| |_| |_|_| |_| |_|"
-/bin/echo "                                                   "
-/bin/echo "                                                   "
+/bin/echo "                                                     "
+/bin/echo "                                                     "
+/bin/echo " ______                             _           _ _  "
+/bin/echo " |  _  \                           | |         | | | "
+/bin/echo " | | | |_ __ __ _  __ _  ___  _ __ | |__   __ _| | | "
+/bin/echo " | | | | '__/ _' |/ _' |/ _ \| '_ \| '_ \ / _' | | | "
+/bin/echo " | |/ /| | | (_| | (_| | (_) | | | | |_) | (_| | | | "
+/bin/echo " |___/ |_|  \__,_|\__, |\___/|_| |_|_.__/ \__,_|_|_| "
+/bin/echo "                   __/ |                             "
+/bin/echo "                  |___/                              "
+/bin/echo "                                                     "
+/bin/echo "                                                     "
 /bin/echo "Hello, world, from the Miniball VMM!"
 EOF
 

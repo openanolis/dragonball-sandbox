@@ -11,14 +11,13 @@ use std::os::raw::c_int;
 use std::result;
 use std::sync::{Arc, Barrier, Condvar, Mutex};
 
+use dbs_device::device_manager::IoManager;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_debugregs, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
     kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
-use vm_device::bus::{MmioAddress, PioAddress};
-use vm_device::device_manager::{IoManager, MmioManager, PioManager};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
 use vm_memory::{GuestAddress, GuestMemory};
@@ -564,7 +563,7 @@ impl KvmVcpu {
                                     .device_mgr
                                     .lock()
                                     .unwrap()
-                                    .pio_write(PioAddress(addr), data)
+                                    .pio_write(addr, data)
                                     .is_err()
                                 {
                                     debug!("Failed to write to serial port");
@@ -578,7 +577,7 @@ impl KvmVcpu {
                                     .device_mgr
                                     .lock()
                                     .unwrap()
-                                    .pio_write(PioAddress(addr), data)
+                                    .pio_write(addr, data)
                                     .is_err()
                                 {
                                     debug!("Failed to write to i8042 port")
@@ -596,7 +595,7 @@ impl KvmVcpu {
                                     .device_mgr
                                     .lock()
                                     .unwrap()
-                                    .pio_read(PioAddress(addr), data)
+                                    .pio_read(addr, data)
                                     .is_err()
                                 {
                                     debug!("Failed to read from serial port");
@@ -610,7 +609,7 @@ impl KvmVcpu {
                                 .device_mgr
                                 .lock()
                                 .unwrap()
-                                .mmio_read(MmioAddress(addr), data)
+                                .mmio_read(addr, data)
                                 .is_err()
                             {
                                 debug!("Failed to read from mmio addr={} data={:#?}", addr, data);
@@ -621,7 +620,7 @@ impl KvmVcpu {
                                 .device_mgr
                                 .lock()
                                 .unwrap()
-                                .mmio_write(MmioAddress(addr), data)
+                                .mmio_write(addr, data)
                                 .is_err()
                             {
                                 debug!("Failed to write to mmio");
