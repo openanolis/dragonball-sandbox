@@ -134,6 +134,8 @@ pub enum Error {
     GetSupportedMsrs(dbs_arch::msr::Error),
     /// Cannot load command line string.
     LoadCommandline(linux_loader::loader::Error),
+    /// Cannot process command line string.
+    ProcessCommandlne(linux_loader::cmdline::Error),
     /// Cannot add legacy device to Bus.
     BusError(dbs_device::device_manager::Error),
     /// Cannot create EventFd.
@@ -441,6 +443,14 @@ impl Vmm {
         )
         .map_err(Error::LoadCommandline)?;
 
+        let cmdline_size = self
+            .kernel_cfg
+            .cmdline
+            .as_cstring()
+            .map_err(Error::ProcessCommandlne)?
+            .as_bytes_with_nul()
+            .len();
+
         // Generate boot parameters.
         build_bootparams(
             &self.guest_memory,
@@ -449,7 +459,7 @@ impl Vmm {
             GuestAddress(layout::MMIO_LOW_START),
             GuestAddress(layout::MMIO_LOW_END),
             GuestAddress(cmdline_addr),
-            (self.kernel_cfg.cmdline.as_str().len() + 1) as usize,
+            cmdline_size,
         )
         .map_err(Error::BootParam)?;
 
