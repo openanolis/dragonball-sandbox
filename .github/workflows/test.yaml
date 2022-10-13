@@ -84,14 +84,14 @@ jobs:
           name: coverage
 
       - name: Upload to CodeCov
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
           files: ${{ matrix.crate }}.info
           flags: ${{matrix.crate}}
           fail_ci_if_error: true
 
       - name: Upload sum to CodeCov
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
           files: ./lcov.info
           fail_ci_if_error: true
