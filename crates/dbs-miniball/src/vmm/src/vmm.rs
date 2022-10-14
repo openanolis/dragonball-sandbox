@@ -956,10 +956,25 @@ mod tests {
         let mut vmm_config = default_vmm_config();
         vmm_config.kernel_config.path = default_elf_path();
         let mut vmm = mock_vmm(vmm_config);
-        assert_eq!(vmm.kernel_cfg.cmdline.as_str(), DEFAULT_KERNEL_CMDLINE);
+        assert_eq!(
+            vmm.kernel_cfg
+                .cmdline
+                .as_cstring()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            DEFAULT_KERNEL_CMDLINE
+        );
         vmm.create_serial_console().unwrap();
         #[cfg(target_arch = "x86_64")]
-        assert!(vmm.kernel_cfg.cmdline.as_str().contains("console=ttyS0"));
+        assert!(vmm
+            .kernel_cfg
+            .cmdline
+            .as_cstring()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("console=ttyS0"));
     }
 
     #[test]
@@ -1059,7 +1074,14 @@ mod tests {
 
         assert!(vmm.add_block_device(&block_config).is_ok());
         assert_eq!(vmm.block_devices.len(), 1);
-        assert!(vmm.kernel_cfg.cmdline.as_str().contains("virtio"));
+        assert!(vmm
+            .kernel_cfg
+            .cmdline
+            .as_cstring()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("virtio"));
 
         let invalid_block_config = BlockConfig {
             // Let's create the tempfile directly here so that it gets out of scope immediately

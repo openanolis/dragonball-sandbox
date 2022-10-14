@@ -205,7 +205,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_START - 1),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
+                (kernel_cfg
+                    .cmdline
+                    .as_cstring()
+                    .unwrap()
+                    .as_bytes_with_nul()
+                    .len()) as usize,
             )
             .err(),
             Some(Error::MmioGapStartPastMmioGapEnd)
@@ -224,7 +229,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_END),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
+                (kernel_cfg
+                    .cmdline
+                    .as_cstring()
+                    .unwrap()
+                    .as_bytes_with_nul()
+                    .len()) as usize,
             )
             .err(),
             Some(Error::HimemStartPastMemEnd)
@@ -246,7 +256,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_END),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg.cmdline.as_str().len() + 1) as usize,
+                (kernel_cfg
+                    .cmdline
+                    .as_cstring()
+                    .unwrap()
+                    .as_bytes_with_nul()
+                    .len()) as usize,
             )
             .err(),
             Some(Error::HimemStartPastMmioGapStart)
@@ -265,7 +280,12 @@ mod tests {
             GuestAddress(layout::MMIO_LOW_START),
             GuestAddress(layout::MMIO_LOW_END),
             GuestAddress(cmdline_addr),
-            (kernel_cfg.cmdline.as_str().len() + 1) as usize,
+            (kernel_cfg
+                .cmdline
+                .as_cstring()
+                .unwrap()
+                .as_bytes_with_nul()
+                .len()) as usize,
         )
         .is_ok());
     }
