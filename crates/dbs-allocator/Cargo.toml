@@ -1,6 +1,6 @@
 [package]
 name = "dbs-allocator"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Liu Jiang <gerry@linux.alibaba.com>"]
 description = "a resource allocator for virtual machine manager"
 license = "Apache-2.0"
