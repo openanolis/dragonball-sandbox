@@ -10,7 +10,7 @@ keywords = ["dragonball", "secure-sandbox", "devices", "legacy"]
 readme = "README.md"
 
 [dependencies]
-dbs-device = { version = "0.1.0", path = "../dbs-device" }
+dbs-device = { version = "0.2.0", path = "../dbs-device" }
 dbs-utils = { version = "0.1.0", path = "../dbs-utils" }
 log = "0.4.14"
 serde = { version = "1.0.27", features = ["derive", "rc"] }
