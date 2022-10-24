@@ -16,5 +16,5 @@ log = "0.4.14"
 thiserror = "1"
 timerfd = "1.2.0"
 
-dbs-utils = { path = "../dbs-utils", version = "0.1" }
+dbs-utils = { path = "../dbs-utils", version = "0.2" }
 dbs-virtio-devices = { path = "../dbs-virtio-devices", version = "0.1", features = ["virtio-vsock"] }

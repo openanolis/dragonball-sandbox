@@ -1,6 +1,6 @@
 [package]
 name = "dbs-address-space"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Alibaba Dragonball Team"]
 description = "address space manager for virtual machines."
 license = "Apache-2.0"
