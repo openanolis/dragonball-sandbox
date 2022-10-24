@@ -1,6 +1,6 @@
 [package]
 name = "dbs-boot"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Alibaba Dragonball Team"]
 description = "Traits and structs for booting sandbox"
 license = "Apache-2.0 AND BSD-3-Clause"
@@ -11,7 +11,7 @@ keywords = ["dragonball", "boot", "VMM"]
 readme = "README.md"
 
 [dependencies]
-dbs-arch = { path = "../dbs-arch", version = "0.1" }
+dbs-arch = { path = "../dbs-arch", version = "0.2.0" }
 kvm-bindings = { version = "0.5.0", features = ["fam-wrappers"] }
 kvm-ioctls = ">=0.9.0"
 lazy_static = "1"
