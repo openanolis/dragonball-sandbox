@@ -14,7 +14,7 @@ readme = "README.md"
 byteorder = "1.4.3"
 caps = "0.5.3"
 dbs-device = { version = "0.2.0", path = "../dbs-device" }
-dbs-interrupt = { version = "0.1.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
+dbs-interrupt = { version = "0.2.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
 dbs-utils = { version = "0.2.0", path = "../dbs-utils" }
 epoll = "4.0.1"
 io-uring = "0.5.2"
