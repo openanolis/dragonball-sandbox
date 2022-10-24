@@ -1,6 +1,6 @@
 [package]
 name = "dbs-device"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Alibaba Dragonball Team"]
 description = "Device model for Dragonball Sandbox"
 license = "Apache-2.0"
