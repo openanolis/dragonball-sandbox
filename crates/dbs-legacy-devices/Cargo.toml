@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Alibaba Dragonball Team"]
 license = "Apache-2.0 AND BSD-3-Clause"
 edition = "2018"
+description = "dbs-legacy-devices provides emulation for legacy devices."
 homepage = "https://github.com/openanolis/dragonball-sandbox"
 repository = "https://github.com/openanolis/dragonball-sandbox"
 keywords = ["dragonball", "secure-sandbox", "devices", "legacy"]
