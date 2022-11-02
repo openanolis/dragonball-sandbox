@@ -53,6 +53,10 @@ pub enum AddressSpaceError {
     #[error("can not open memory file")]
     OpenFile(#[source] std::io::Error),
 
+    /// Failed to create directory.
+    #[error("can not create directory")]
+    CreateDir(#[source] std::io::Error),
+
     /// Failed to set size for memory file.
     #[error("can not set size for memory file")]
     SetFileSize(#[source] std::io::Error),
