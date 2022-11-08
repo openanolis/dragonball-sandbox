@@ -24,8 +24,8 @@ kvm-ioctls = "0.11.0"
 libc = "0.2.119"
 log = "0.4.14"
 nix = "0.23.1"
-nydus-blobfs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "e429be3e8623d47db0f97186f761aeda2983c6f4", optional = true }
-nydus-rafs = { git = "https://github.com/dragonflyoss/image-service.git", rev = "e429be3e8623d47db0f97186f761aeda2983c6f4", optional = true }
+nydus-blobfs = { version = "0.1.1", optional = true }
+nydus-rafs = { version = "0.1.1", optional = true }
 rlimit = "0.7.0"
 serde = "1.0.27"
 serde_json = "1.0.9"
