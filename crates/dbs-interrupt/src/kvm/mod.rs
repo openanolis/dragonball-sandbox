@@ -188,9 +188,9 @@ impl KvmIrqRouting {
         let mut routes = self.routes.lock().unwrap();
 
         #[cfg(feature = "kvm-legacy-irq")]
-        LegacyIrq::initialize_legacy(&mut *routes)?;
+        LegacyIrq::initialize_legacy(&mut routes)?;
 
-        self.set_routing(&*routes)?;
+        self.set_routing(&routes)?;
 
         Ok(())
     }
