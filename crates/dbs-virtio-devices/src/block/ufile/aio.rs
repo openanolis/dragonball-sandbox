@@ -86,14 +86,13 @@ impl IoEngine for Aio {
     // and may only return permanent errors. So the virtio-blk driver layer will not try to
     // recover and only pass errors up onto the device manager. When changing the error handling
     // policy, please do help to update BlockEpollHandler::io_complete().
-    #[allow(clippy::uninit_assumed_init)]
     fn complete(&mut self) -> io::Result<Vec<(u64, i64)>> {
         let count = self.aio_evtfd.read()?;
         let mut v = Vec::with_capacity(count as usize);
         if count > 0 {
             let mut events =
                 vec![
-                    unsafe { std::mem::MaybeUninit::<IoEvent>::uninit().assume_init() };
+                    unsafe { std::mem::MaybeUninit::<IoEvent>::zeroed().assume_init() };
                     count as usize
                 ];
             while v.len() < count as usize {

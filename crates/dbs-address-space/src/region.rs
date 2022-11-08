@@ -4,6 +4,7 @@
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::FromRawFd;
+use std::path::Path;
 use std::str::FromStr;
 
 use nix::sys::memfd;
@@ -202,6 +203,11 @@ impl AddressSpaceRegion {
                 )
             }
             MemorySourceType::FileOnHugeTlbFs => {
+                let path = Path::new(mem_file_path);
+                if let Some(parent_dir) = path.parent() {
+                    // Ensure that the parent directory is existed for the mem file path.
+                    std::fs::create_dir_all(parent_dir).map_err(AddressSpaceError::CreateDir)?;
+                }
                 let file = OpenOptions::new()
                     .read(true)
                     .write(true)
