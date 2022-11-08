@@ -100,7 +100,7 @@ impl InterruptSourceGroup for MsiIrq {
         for i in 0..self.count {
             // Safe to unwrap because there's no legal way to break the mutex.
             let msicfg = self.msi_configs[i as usize].config.lock().unwrap();
-            let entry = new_msi_routing_entry(self.base + i, &*msicfg);
+            let entry = new_msi_routing_entry(self.base + i, &msicfg);
             entries.push(entry);
         }
         self.irq_routing.remove(&entries)?;
@@ -122,7 +122,7 @@ impl InterruptSourceGroup for MsiIrq {
                 msicfg.low_addr = cfg.low_addr;
                 msicfg.data = cfg.data;
                 msicfg.device_id = cfg.device_id;
-                new_msi_routing_entry(self.base + index, &*msicfg)
+                new_msi_routing_entry(self.base + index, &msicfg)
             };
             self.irq_routing.modify(&entry)
         } else {
