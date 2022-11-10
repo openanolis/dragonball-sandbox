@@ -22,3 +22,8 @@
 
 - Add check for the mem_file_path, if there is a nonexistent directory in the mem_file_path, we will create the directory.
 
+## v0.2.2
+
+### Updated
+
+- update vmm-sys-utils to v0.11.0
