@@ -16,3 +16,9 @@
 ### Fixed
 
 - Several clippy warnings
+
+## v0.2.1
+
+### Updated
+
+- Update vmm-sys-utils to 0.11.0
