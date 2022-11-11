@@ -1,6 +1,6 @@
 [package]
 name = "dbs-interrupt"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Alibaba Dragonball Team"]
 description = "Traits and structs to manage interrupts for virtual devices"
 license = "Apache-2.0"
