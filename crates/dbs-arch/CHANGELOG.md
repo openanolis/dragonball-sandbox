@@ -24,3 +24,15 @@
 ### Updated
 
 - Update vmm-sys-utils to v0.11.0
+
+## v0.2.2
+
+### Updated
+
+- Update kvm-bindings to v0.6.0
+- Update kvm-ioctls to v0.12.0
+- Use caret dependencies for kvm-ioctls
+
+### Added
+
+- vPMU support in aarch64
