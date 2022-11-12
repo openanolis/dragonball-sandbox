@@ -847,7 +847,7 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
-    use virtio_queue::QueueStateT;
+    use virtio_queue::QueueT;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::super::super::backend::VsockUnixStreamBackend;
