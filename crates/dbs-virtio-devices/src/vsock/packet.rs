@@ -448,7 +448,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 mod tests {
-    use virtio_queue::QueueStateT;
+    use virtio_queue::QueueT;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     use super::super::defs::MAX_PKT_BUF_SIZE;

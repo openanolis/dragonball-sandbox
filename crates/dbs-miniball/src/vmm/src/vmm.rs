@@ -26,7 +26,7 @@ use linux_loader::loader::{
     bzimage::BzImage,
     elf::{self, Elf},
 };
-use virtio_queue::QueueStateSync;
+use virtio_queue::QueueSync;
 use vm_allocator::AllocPolicy;
 use vm_memory::atomic::GuestMemoryAtomic;
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, GuestRegionMmap};
@@ -179,11 +179,11 @@ type BlockDevice = Block<GuestMemoryAtomic<GuestMemoryMmap>>;
 
 /// Type of the miniball virtio devices.
 pub type DbsVirtioDevice =
-    Box<dyn VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>>;
+    Box<dyn VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueSync, GuestRegionMmap>>;
 
 /// Type of the dragonball virtio mmio devices.
 pub type DbsMmioV2Device =
-    MmioV2Device<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>;
+    MmioV2Device<GuestMemoryAtomic<GuestMemoryMmap>, QueueSync, GuestRegionMmap>;
 
 /// A live VMM.
 pub struct Vmm {

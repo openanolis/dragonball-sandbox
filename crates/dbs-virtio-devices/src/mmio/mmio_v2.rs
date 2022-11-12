@@ -11,7 +11,7 @@ use dbs_device::{DeviceIo, IoAddress};
 use dbs_interrupt::{InterruptStatusRegister32, KvmIrqManager};
 use kvm_ioctls::VmFd;
 use log::{debug, info, warn};
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
 use crate::{
@@ -39,7 +39,7 @@ const DEVICE_STATUS_DRIVER_OK: u32 = DEVICE_STATUS_FEATURE_OK | DEVICE_DRIVER_OK
 ///
 /// Typically one page (4096 bytes) of MMIO address space is sufficient to handle this transport
 /// and inner virtio device.
-pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: GuestMemoryRegion> {
+pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueT, R: GuestMemoryRegion> {
     state: Mutex<MmioV2DeviceState<AS, Q, R>>,
     assigned_resources: DeviceResources,
     mmio_cfg_res: Resource,
@@ -52,7 +52,7 @@ pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: GuestM
 impl<AS, Q, R> MmioV2Device<AS, Q, R>
 where
     AS: GuestAddressSpace + Clone,
-    Q: QueueStateT + Clone,
+    Q: QueueT + Clone,
     R: GuestMemoryRegion,
 {
     /// Constructs a new MMIO transport for the given virtio device.
@@ -200,7 +200,8 @@ where
             if result.is_ok() {
                 if let Err(e) = state.activate(self) {
                     // Reset internal status to initial state on failure.
-                    state.reset();
+                    // Error is ignored since the device will go to DEVICE_FAILED status.
+                    let _ = state.reset();
                     warn!("failed to activate MMIO Virtio device: {:?}", e);
                     result = Err(DEVICE_FAILED);
                 }
@@ -214,11 +215,15 @@ where
                     warn!("failed to reset MMIO Virtio device: {:?}.", ret);
                 } else {
                     state.deactivate();
-                    state.reset();
                     // it should reset the device's status to init, otherwise, the guest would
                     // get the wrong device's status.
-                    result =
-                        self.exchange_driver_status(DEVICE_STATUS_DRIVER_OK, DEVICE_STATUS_INIT);
+                    if let Err(e) = state.reset() {
+                        warn!("failed to reset device state due to {:?}", e);
+                        result = Err(DEVICE_FAILED);
+                    } else {
+                        result = self
+                            .exchange_driver_status(DEVICE_STATUS_DRIVER_OK, DEVICE_STATUS_INIT);
+                    }
                 }
             }
         } else if v == self.driver_status() {
@@ -339,7 +344,7 @@ where
 impl<AS, Q, R> DeviceIo for MmioV2Device<AS, Q, R>
 where
     AS: 'static + GuestAddressSpace + Send + Sync + Clone,
-    Q: 'static + QueueStateT + Send + Clone,
+    Q: 'static + QueueT + Send + Clone,
     R: 'static + GuestMemoryRegion + Send + Sync,
 {
     fn read(&self, _base: IoAddress, offset: IoAddress, data: &mut [u8]) {
@@ -488,7 +493,7 @@ pub(crate) mod tests {
     use dbs_utils::epoll_manager::EpollManager;
     use kvm_bindings::kvm_userspace_memory_region;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{
         GuestAddress, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap, MemoryRegionAddress,
         MmapRegion,
@@ -524,7 +529,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> for MmioDevice {
+    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> for MmioDevice {
         fn device_type(&self) -> u32 {
             123
         }
@@ -620,7 +625,7 @@ pub(crate) mod tests {
     }
 
     pub fn set_driver_status(
-        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
+        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>,
         status: u32,
     ) {
         let mut buf = vec![0; 4];
@@ -657,7 +662,7 @@ pub(crate) mod tests {
         doorbell: bool,
         ctrl_queue_size: u16,
         resources: DeviceResources,
-    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
+    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let device = MmioDevice::new(ctrl_queue_size);
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
         let kvm = Kvm::new().unwrap();
@@ -683,8 +688,7 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>
-    {
+    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let resources = get_device_resource(false, false);
         get_mmio_device_inner(false, 0, resources)
     }
@@ -1085,9 +1089,7 @@ pub(crate) mod tests {
         assert_eq!(LittleEndian::read_u32(&buf[..]), 1);
     }
 
-    fn activate_device(
-        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
-    ) {
+    fn activate_device(d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>) {
         set_driver_status(d, DEVICE_ACKNOWLEDGE);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_FEATURES_OK);

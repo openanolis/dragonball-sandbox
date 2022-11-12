@@ -33,7 +33,7 @@ use nydus_rafs::{
 use rlimit::Resource;
 use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::{
     FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
 };
@@ -772,7 +772,7 @@ where
     AS: 'static + GuestAddressSpace + Clone + Send + Sync,
     AS::T: Send,
     AS::M: Sync + Send,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
 {
     fn device_type(&self) -> u32 {
         TYPE_VIRTIO_FS
@@ -978,7 +978,7 @@ pub mod tests {
     use dbs_device::resources::DeviceResources;
     use dbs_interrupt::NoopNotifier;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::GuestMemoryRegion;
     use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::tempfile::TempFile;
@@ -1045,7 +1045,7 @@ pub mod tests {
 
     pub(crate) fn create_fs_epoll_handler(
         id: String,
-    ) -> VirtioFsEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
+    ) -> VirtioFsEpollHandler<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let vfs = Arc::new(Vfs::new(VfsOptions::default()));
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
         let queues = vec![
@@ -1152,44 +1152,42 @@ pub mod tests {
 
         assert!(!fs.is_dax_on());
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::device_type(
-                &fs
-            ),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::device_type(&fs),
             TYPE_VIRTIO_FS
         );
         let queue_size = vec![QUEUE_SIZE; NUM_QUEUE_OFFSET + NUM_QUEUES];
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::queue_max_sizes(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::queue_max_sizes(
                 &fs
             ),
             &queue_size[..]
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 0),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 0),
             fs.device_info.get_avail_features(0)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 1),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 1),
             fs.device_info.get_avail_features(1)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 2),
             fs.device_info.get_avail_features(2)
         );
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::set_acked_features(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::set_acked_features(
             &mut fs, 2, 0,
         );
         assert_eq!(
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 2),
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 2),
             0);
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::read_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut fs,
             0,
             &mut config,
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::write_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut fs, 0, &config,
         );
     }
@@ -1220,7 +1218,7 @@ pub mod tests {
             .unwrap();
 
             let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues: Vec<VirtioQueueConfig<QueueStateSync>> = Vec::new();
+            let queues: Vec<VirtioQueueConfig<QueueSync>> = Vec::new();
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -1263,8 +1261,8 @@ pub mod tests {
 
             let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
             let queues = vec![
-                VirtioQueueConfig::<QueueStateSync>::create(1024, 0).unwrap(),
-                VirtioQueueConfig::<QueueStateSync>::create(2, 0).unwrap(),
+                VirtioQueueConfig::<QueueSync>::create(1024, 0).unwrap(),
+                VirtioQueueConfig::<QueueSync>::create(2, 0).unwrap(),
             ];
 
             let kvm = Kvm::new().unwrap();
@@ -1747,7 +1745,11 @@ pub mod tests {
             ResourceConstraint::new_mmio(0x1),
             ResourceConstraint::new_mmio(0x2),
         ];
-        VirtioDevice::<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>::get_resource_requirements(&fs, &mut requirements, true);
+        VirtioDevice::<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>::get_resource_requirements(
+            &fs,
+            &mut requirements,
+            true,
+        );
 
         assert_eq!(requirements[2], ResourceConstraint::LegacyIrq { irq: None });
         assert_eq!(requirements[3], ResourceConstraint::GenericIrq { size: 3 });
@@ -1793,10 +1795,9 @@ pub mod tests {
         let entry = dbs_device::resources::Resource::KvmMemSlot(0);
         resources.append(entry);
 
-        let res =
-            VirtioDevice::<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>::set_resource(
-                &mut fs, vm_fd, resources,
-            );
+        let res = VirtioDevice::<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>::set_resource(
+            &mut fs, vm_fd, resources,
+        );
         assert!(res.is_ok());
         let content = res.unwrap().unwrap();
         assert_eq!(content.kvm_userspace_memory_region_slot, 0);
