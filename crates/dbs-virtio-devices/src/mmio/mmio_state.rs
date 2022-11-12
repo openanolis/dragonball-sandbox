@@ -13,7 +13,7 @@ use dbs_interrupt::{DeviceInterruptManager, DeviceInterruptMode, InterruptIndex,
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::{IoEventAddress, NoDatamatch, VmFd};
 use log::{debug, error, info, warn};
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
 use crate::{
@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// The state of Virtio Mmio device.
-pub struct MmioV2DeviceState<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: GuestMemoryRegion> {
+pub struct MmioV2DeviceState<AS: GuestAddressSpace + Clone, Q: QueueT, R: GuestMemoryRegion> {
     device: Box<dyn VirtioDevice<AS, Q, R>>,
     vm_fd: Arc<VmFd>,
     vm_as: AS,
@@ -49,7 +49,7 @@ pub struct MmioV2DeviceState<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: G
 impl<AS, Q, R> MmioV2DeviceState<AS, Q, R>
 where
     AS: GuestAddressSpace + Clone,
-    Q: QueueStateT + Clone,
+    Q: QueueT + Clone,
     R: GuestMemoryRegion,
 {
     /// Returns a reference to the internal device object.
@@ -150,7 +150,7 @@ where
             queues.push(VirtioQueueConfig::create(*size, idx as u16)?);
         }
 
-        // The ctrl queue must be append to QueueState Vec, because the guest will
+        // The ctrl queue must be append to Queue Vec, because the guest will
         // configure it which is same with other queues.
         let has_ctrl_queue = device.ctrl_queue_max_sizes() > 0;
         if has_ctrl_queue {
@@ -342,17 +342,26 @@ where
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) -> Result<()> {
         if self.device_activated {
             warn!("reset device while it's still in active state");
+            Ok(())
         } else {
             // . Keep interrupt_evt and queue_evts as is. There may be pending
             //   notifications in those eventfds, but nothing will happen other
             //   than supurious wakeups.
             // . Do not reset config_generation and keep it monotonically increasing
             for queue in self.queues.iter_mut() {
-                queue.queue = Q::new(queue.queue.max_size());
+                let new_queue = Q::new(queue.queue.max_size());
+                if let Err(e) = new_queue {
+                    warn!("reset device failed because new virtio-queue could not be created due to {:?}", e);
+                    return Err(Error::VirtioQueueError(e));
+                } else {
+                    // unwrap is safe here since we have checked new_queue result above.
+                    queue.queue = new_queue.unwrap();
+                }
             }
+
             let _ = self.intr_mgr.reset();
             self.unregister_ioevent();
             self.features_select = 0;
@@ -360,6 +369,7 @@ where
             self.queue_select = 0;
             self.msi = None;
             self.doorbell = None;
+            Ok(())
         }
     }
 
@@ -563,7 +573,7 @@ where
 impl<AS, Q, R> Drop for MmioV2DeviceState<AS, Q, R>
 where
     AS: GuestAddressSpace + Clone,
-    Q: QueueStateT,
+    Q: QueueT,
     R: GuestMemoryRegion,
 {
     fn drop(&mut self) {
@@ -590,7 +600,7 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
 
     use super::*;
@@ -600,7 +610,7 @@ pub(crate) mod tests {
         have_msi: bool,
         doorbell: bool,
         ctrl_queue_size: u16,
-    ) -> MmioV2DeviceState<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
+    ) -> MmioV2DeviceState<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
 
         let mmio_base = 0;
