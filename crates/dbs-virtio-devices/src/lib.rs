@@ -211,7 +211,7 @@ pub mod tests {
 
     use dbs_interrupt::KvmIrqManager;
     use kvm_ioctls::{Kvm, VmFd};
-    use virtio_queue::{QueueStateSync, QueueStateT};
+    use virtio_queue::{QueueSync, QueueT};
     use vm_memory::{
         Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize, VolatileMemory,
         VolatileRef, VolatileSlice,
@@ -442,9 +442,9 @@ pub mod tests {
             self.used.start()
         }
 
-        // Creates a new QueueStateSync, using the underlying memory regions represented by the VirtQueue.
-        pub fn create_queue(&self) -> QueueStateSync {
-            let mut q = QueueStateSync::new(self.size());
+        // Creates a new QueueSync, using the underlying memory regions represented by the VirtQueue.
+        pub fn create_queue(&self) -> QueueSync {
+            let mut q = QueueSync::new(self.size());
 
             q.set_size(self.size());
             q.set_ready(true);

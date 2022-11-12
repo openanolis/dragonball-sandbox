@@ -25,7 +25,7 @@ use libc;
 use log::{debug, error, info, trace};
 use serde::Serialize;
 use virtio_bindings::bindings::virtio_net::*;
-use virtio_queue::{QueueStateOwnedT, QueueStateSync, QueueStateT};
+use virtio_queue::{QueueOwnedT, QueueSync, QueueT};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryRegion, GuestRegionMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -104,7 +104,7 @@ pub struct NetDeviceMetrics {
     pub tx_rate_limiter_event_count: SharedIncMetric,
 }
 
-struct TxVirtio<Q: QueueStateT> {
+struct TxVirtio<Q: QueueT> {
     queue: VirtioQueueConfig<Q>,
     rate_limiter: RateLimiter,
     iovec: Vec<(GuestAddress, usize)>,
@@ -112,7 +112,7 @@ struct TxVirtio<Q: QueueStateT> {
     frame_buf: [u8; MAX_BUFFER_SIZE],
 }
 
-impl<Q: QueueStateT> TxVirtio<Q> {
+impl<Q: QueueT> TxVirtio<Q> {
     fn new(queue: VirtioQueueConfig<Q>, rate_limiter: RateLimiter) -> Self {
         let tx_queue_max_size = queue.max_size() as usize;
 
@@ -126,7 +126,7 @@ impl<Q: QueueStateT> TxVirtio<Q> {
     }
 }
 
-struct RxVirtio<Q: QueueStateT> {
+struct RxVirtio<Q: QueueT> {
     queue: VirtioQueueConfig<Q>,
     rate_limiter: RateLimiter,
     deferred_frame: bool,
@@ -135,7 +135,7 @@ struct RxVirtio<Q: QueueStateT> {
     frame_buf: [u8; MAX_BUFFER_SIZE],
 }
 
-impl<Q: QueueStateT> RxVirtio<Q> {
+impl<Q: QueueT> RxVirtio<Q> {
     fn new(queue: VirtioQueueConfig<Q>, rate_limiter: RateLimiter) -> Self {
         RxVirtio {
             queue,
@@ -155,7 +155,7 @@ fn vnet_hdr_len() -> usize {
 #[allow(dead_code)]
 pub(crate) struct NetEpollHandler<
     AS: GuestAddressSpace,
-    Q: QueueStateT + Send = QueueStateSync,
+    Q: QueueT + Send = QueueSync,
     R: GuestMemoryRegion = GuestRegionMmap,
 > {
     tap: Tap,
@@ -168,9 +168,7 @@ pub(crate) struct NetEpollHandler<
     pub metrics: Arc<NetDeviceMetrics>,
 }
 
-impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
-    NetEpollHandler<AS, Q, R>
-{
+impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> NetEpollHandler<AS, Q, R> {
     // Attempts to copy a single frame into the guest if there is enough rate limiting budget.
     // Returns true on successful frame delivery.
     fn rate_limited_rx_single_frame(&mut self, mem: &AS::M) -> bool {
@@ -468,7 +466,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion>
     }
 }
 
-impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutEventSubscriber
+impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> MutEventSubscriber
     for NetEpollHandler<AS, Q, R>
 {
     fn process(&mut self, events: Events, _ops: &mut EventOps) {
@@ -770,7 +768,7 @@ impl<AS: GuestAddressSpace + 'static> Net<AS> {
 impl<AS, Q, R> VirtioDevice<AS, Q, R> for Net<AS>
 where
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
     R: GuestMemoryRegion + Sync + Send + 'static,
 {
     fn device_type(&self) -> u32 {
@@ -942,45 +940,43 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::device_type(
-                &dev
-            ),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::device_type(&dev),
             TYPE_NET
         );
         let queue_size = vec![128];
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::queue_max_sizes(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::queue_max_sizes(
                 &dev
             ),
             &queue_size[..]
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 0),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 0),
             dev.device_info.get_avail_features(0)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 1),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 1),
             dev.device_info.get_avail_features(1)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 2),
             dev.device_info.get_avail_features(2)
         );
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::set_acked_features(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::set_acked_features(
             &mut dev, 2, 0,
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 2),
             0
         );
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::read_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut dev,
             0,
             &mut config,
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::write_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
         );
     }
@@ -1008,18 +1004,15 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<
-                Arc<GuestMemoryMmap<()>>,
-                QueueStateSync,
-                GuestRegionMmap,
-            >::new(
-                Arc::new(mem),
-                vm_fd,
-                resources,
-                queues,
-                None,
-                Arc::new(NoopNotifier::new()),
-            );
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
 
             matches!(dev.activate(config), Err(ActivateError::InvalidParam));
         }
@@ -1046,18 +1039,15 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<
-                Arc<GuestMemoryMmap<()>>,
-                QueueStateSync,
-                GuestRegionMmap,
-            >::new(
-                Arc::new(mem),
-                vm_fd,
-                resources,
-                queues,
-                None,
-                Arc::new(NoopNotifier::new()),
-            );
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
 
             matches!(dev.activate(config), Err(ActivateError::InvalidParam));
         }
@@ -1083,18 +1073,15 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<
-                Arc<GuestMemoryMmap<()>>,
-                QueueStateSync,
-                GuestRegionMmap,
-            >::new(
-                Arc::new(mem),
-                vm_fd,
-                resources,
-                queues,
-                None,
-                Arc::new(NoopNotifier::new()),
-            );
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
 
             matches!(dev.activate(config), Err(ActivateError::InvalidParam));
         }
@@ -1121,18 +1108,15 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<
-                Arc<GuestMemoryMmap<()>>,
-                QueueStateSync,
-                GuestRegionMmap,
-            >::new(
-                Arc::new(mem),
-                vm_fd,
-                resources,
-                queues,
-                None,
-                Arc::new(NoopNotifier::new()),
-            );
+            let config =
+                VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::new(
+                    Arc::new(mem),
+                    vm_fd,
+                    resources,
+                    queues,
+                    None,
+                    Arc::new(NoopNotifier::new()),
+                );
 
             assert!(dev.activate(config).is_ok());
         }
