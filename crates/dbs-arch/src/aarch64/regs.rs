@@ -5,6 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+//! Constants and utilities for aarch64 CPU generic, system and model specific registers.
+
 use std::{mem, result};
 
 use kvm_bindings::*;
