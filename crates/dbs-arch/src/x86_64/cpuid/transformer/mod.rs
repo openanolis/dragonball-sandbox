@@ -5,21 +5,11 @@
 use super::brand_string::{BrandString, Reg as BsReg};
 use super::common::get_vendor_id;
 use super::{CpuId, CpuIdEntry};
+use crate::VpmuFeatureLevel;
 
 pub mod amd;
 pub mod common;
 pub mod intel;
-
-/// Enum indicating vpmu feature level
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum VpmuFeatureLevel {
-    /// Disabled means vpmu feature is off (by default)
-    Disabled,
-    /// LimitedlyEnabled means minimal vpmu counters are supported( only cycles and instructions )
-    LimitedlyEnabled,
-    /// FullyEnabled means all vpmu counters are supported
-    FullyEnabled,
-}
 
 /// Structure containing the specifications of the VM
 pub struct VmSpec {

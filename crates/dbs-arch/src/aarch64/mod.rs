@@ -6,6 +6,8 @@
 
 /// Module for the global interrupt controller configuration.
 pub mod gic;
+/// Module for PMU virtualization.
+pub mod pmu;
 /// Logic for configuring aarch64 registers.
 pub mod regs;
 

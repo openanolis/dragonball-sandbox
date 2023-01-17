@@ -15,7 +15,9 @@ mod brand_string;
 mod common;
 mod transformer;
 
-pub use transformer::{Error, VmSpec, VpmuFeatureLevel};
+pub use transformer::{Error, VmSpec};
+
+pub use crate::VpmuFeatureLevel;
 
 type CpuId = kvm_bindings::CpuId;
 type CpuIdEntry = kvm_bindings::kvm_cpuid_entry2;
