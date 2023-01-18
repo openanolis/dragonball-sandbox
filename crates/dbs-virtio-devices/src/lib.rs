@@ -35,6 +35,9 @@ pub mod block;
 #[cfg(feature = "virtio-fs")]
 pub mod fs;
 
+#[cfg(feature = "virtio-mem")]
+pub mod mem;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
@@ -187,6 +190,10 @@ pub enum Error {
     /// Error from Virtio fs.
     #[error("virtio-fs error: {0}")]
     VirtioFs(fs::Error),
+
+    #[cfg(feature = "virtio-mem")]
+    #[error("Virtio-mem error: {0}")]
+    VirtioMemError(#[from] mem::MemError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
