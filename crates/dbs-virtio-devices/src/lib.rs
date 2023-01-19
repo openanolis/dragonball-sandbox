@@ -38,6 +38,9 @@ pub mod fs;
 #[cfg(feature = "virtio-mem")]
 pub mod mem;
 
+#[cfg(feature = "virtio-balloon")]
+pub mod balloon;
+
 use std::io::Error as IOError;
 
 use virtio_queue::Error as VqError;
@@ -194,6 +197,10 @@ pub enum Error {
     #[cfg(feature = "virtio-mem")]
     #[error("Virtio-mem error: {0}")]
     VirtioMemError(#[from] mem::MemError),
+
+    #[cfg(feature = "virtio-balloon")]
+    #[error("Virtio-balloon error: {0}")]
+    VirtioBalloonError(#[from] balloon::BalloonError),
 }
 
 /// Specialized std::result::Result for Virtio device operations.
