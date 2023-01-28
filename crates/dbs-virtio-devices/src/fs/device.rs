@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::os::unix::io::FromRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
@@ -26,10 +26,8 @@ use kvm_ioctls::VmFd;
 use log::{debug, error, info, trace, warn};
 use nix::sys::memfd;
 use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
-use nydus_rafs::{
-    fs::{Rafs, RafsConfig},
-    RafsIoRead,
-};
+use nydus_rafs::{fs::Rafs,RafsIoRead};
+use nydus_api::ConfigV2;
 use rlimit::Resource;
 use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
@@ -270,23 +268,19 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
     ) -> FsResult<(String, String, Option<u64>)> {
         let (blob_cache_dir, blob_ondemand_cfg) = match config.as_ref() {
             Some(cfg) => {
-                let conf = RafsConfig::from_str(cfg).map_err(|e| {
+                let conf = ConfigV2::from_str(cfg).map_err(|e| {
                     error!("failed to load rafs config {} error: {:?}", &cfg, e);
                     FsError::InvalidData
                 })?;
 
                 // v6 doesn't support digest validation yet.
-                if conf.digest_validate {
+                if conf.rafs.unwrap().validate {
                     error!("config.digest_validate needs to be false");
                     return Err(FsError::InvalidData);
                 }
 
-                let cache_config = conf.device.cache.cache_config;
-                let blob_config: BlobCacheConfig =
-                    serde_json::from_value(cache_config).map_err(|e| {
-                        error!("failed to get blob config");
-                        FsError::BackendFs(e.to_string())
-                    })?;
+                let blob_config = conf.cache.unwrap().file_cache;
+
 
                 let blob_ondemand_cfg = format!(
                     r#"
@@ -295,10 +289,10 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                         "bootstrap_path": "{}",
                         "blob_cache_dir": "{}"
                     }}"#,
-                    cfg, source, &blob_config.work_dir
+                    cfg, source, blob_config.as_ref().unwrap().work_dir
                 );
 
-                (blob_config.work_dir, blob_ondemand_cfg)
+                (blob_config.unwrap().work_dir, blob_ondemand_cfg)
             }
             None => return Err(FsError::BackendFs("no rafs config file".to_string())),
         };
@@ -480,15 +474,14 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         prefetch_list_path: Option<String>,
     ) -> FsResult<()> {
         debug!("http_server rafs");
-        let mut file = <dyn RafsIoRead>::from_file(&source)
-            .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {:?}", e)))?;
+        let mut file = Path::new(&source);
         let (mut rafs, rafs_cfg) = match config.as_ref() {
             Some(cfg) => {
-                let rafs_conf: RafsConfig =
-                    serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?;
+                let rafs_conf: Arc<ConfigV2> =
+                    Arc::new(serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?);
 
                 (
-                    Rafs::new(rafs_conf, mountpoint, &mut file)
+                    Rafs::new(&rafs_conf, mountpoint, &mut file)
                         .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {:?}", e)))?,
                     cfg.clone(),
                 )
@@ -500,13 +493,13 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             "{}: Import rafs with prefetch_files {:?}",
             VIRTIO_FS_NAME, prefetch_files
         );
-        rafs.import(file, prefetch_files)
+        rafs.0.import(rafs.1, prefetch_files)
             .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {:?}", e)))?;
         info!(
             "{}: Rafs imported with prefetch_list_path {:?}",
             VIRTIO_FS_NAME, prefetch_list_path
         );
-        let fs = Box::new(rafs);
+        let fs = Box::new(rafs.0);
         match self.fs.mount(fs, mountpoint) {
             Ok(idx) => {
                 self.backend_fs.insert(
@@ -544,8 +537,8 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         // safe because config is not None.
         let config = config.unwrap();
         let source = source.unwrap();
-        let rafs_conf: RafsConfig =
-            serde_json::from_str(&config).map_err(|e| FsError::BackendFs(e.to_string()))?;
+        let rafs_conf: Arc<ConfigV2> =
+            Arc::new(serde_json::from_str(&config).map_err(|e| FsError::BackendFs(e.to_string()))?);
         // Update rafs config, update BackendFsInfo as well.
         let new_info = match self.backend_fs.get(mountpoint) {
             Some(orig_info) => BackendFsInfo {
@@ -583,7 +576,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                 .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {:?}", e)))?;
 
             fs_swap
-                .update(&mut file, rafs_conf)
+                .update(&mut file, &rafs_conf)
                 .map_err(|e| FsError::BackendFs(format!("Update rafs failed: {:?}", e)))?;
             self.backend_fs.insert(mountpoint.to_string(), new_info);
             Ok(())
