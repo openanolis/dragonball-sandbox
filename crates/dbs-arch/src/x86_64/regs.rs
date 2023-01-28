@@ -168,7 +168,7 @@ fn configure_segments_and_sregs<M: GuestMemory>(
 
     /* 64-bit protected mode */
     sregs.cr0 |= X86_CR0_PE;
-    sregs.cr3 = pgtable_addr.raw_value() as u64;
+    sregs.cr3 = pgtable_addr.raw_value();
     sregs.cr4 |= X86_CR4_PAE;
     sregs.cr0 |= X86_CR0_PG;
     sregs.efer |= EFER_LME | EFER_LMA;
@@ -275,7 +275,7 @@ mod tests {
     }
 
     fn read_u64(gm: &GuestMemoryMmap, offset: u64) -> u64 {
-        let read_addr = GuestAddress(offset as u64);
+        let read_addr = GuestAddress(offset);
         gm.read_obj(read_addr).unwrap()
     }
 
@@ -303,7 +303,7 @@ mod tests {
     fn test_configure_segments_and_sregs() {
         let mut sregs: kvm_sregs = Default::default();
         let gm = create_guest_mem();
-        let gdt_table: [u64; BOOT_GDT_MAX as usize] = [
+        let gdt_table: [u64; BOOT_GDT_MAX] = [
             gdt_entry(0, 0, 0),            // NULL
             gdt_entry(0xa09b, 0, 0xfffff), // CODE
             gdt_entry(0xc093, 0, 0xfffff), // DATA
@@ -381,9 +381,9 @@ mod tests {
         let expected_regs: kvm_regs = kvm_regs {
             rflags: 0x0000_0000_0000_0002u64,
             rip: 1,
-            rsp: BOOT_STACK_POINTER as u64,
-            rbp: BOOT_STACK_POINTER as u64,
-            rsi: ZERO_PAGE_START as u64,
+            rsp: BOOT_STACK_POINTER,
+            rbp: BOOT_STACK_POINTER,
+            rsi: ZERO_PAGE_START,
             ..Default::default()
         };
 

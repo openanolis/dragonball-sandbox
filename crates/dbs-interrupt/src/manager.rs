@@ -270,7 +270,7 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
             DeviceInterruptMode::GenericMsiIrq
             | DeviceInterruptMode::PciMsiIrq
             | DeviceInterruptMode::PciMsixIrq => {
-                let group = &self.intr_groups[self.current_idx as usize];
+                let group = &self.intr_groups[self.current_idx];
                 if index >= group.len() || index >= self.msi_config.len() as u32 {
                     return Err(Error::from_raw_os_error(libc::EINVAL));
                 }

@@ -96,11 +96,11 @@ pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<GuestAddress> {
     let boot_pde_addr = GuestAddress(layout::PDE_START);
 
     // Entry covering VA [0..512GB)
-    mem.write_obj(boot_pdpte_addr.raw_value() as u64 | 0x03, boot_pml4_addr)
+    mem.write_obj(boot_pdpte_addr.raw_value() | 0x03, boot_pml4_addr)
         .map_err(|_| Error::WritePML4Address)?;
 
     // Entry covering VA [0..1GB)
-    mem.write_obj(boot_pde_addr.raw_value() as u64 | 0x03, boot_pdpte_addr)
+    mem.write_obj(boot_pde_addr.raw_value() | 0x03, boot_pdpte_addr)
         .map_err(|_| Error::WritePDPTEAddress)?;
 
     // 512 2MB entries together covering VA [0..1GB). Note we are assuming
@@ -116,7 +116,7 @@ pub fn setup_identity_mapping<M: GuestMemory>(mem: &M) -> Result<GuestAddress> {
 
 /// Get information to configure GDT/IDT.
 pub fn get_descriptor_config_info() -> ([u64; BOOT_GDT_MAX], u64, u64) {
-    let gdt_table: [u64; BOOT_GDT_MAX as usize] = [
+    let gdt_table: [u64; BOOT_GDT_MAX] = [
         gdt_entry(0, 0, 0),            // NULL
         gdt_entry(0xa09b, 0, 0xfffff), // CODE
         gdt_entry(0xc093, 0, 0xfffff), // DATA
@@ -180,7 +180,7 @@ mod tests {
     const BOOT_IDT_OFFSET: u64 = 0x520;
 
     fn read_u64(gm: &GuestMemoryMmap, offset: u64) -> u64 {
-        let read_addr = GuestAddress(offset as u64);
+        let read_addr = GuestAddress(offset);
         gm.read_obj(read_addr).unwrap()
     }
 
@@ -246,7 +246,7 @@ mod tests {
         if let Some(pgtable_base) = existing_pgtable {
             assert_eq!(pgtable_base.raw_value(), sregs.cr3);
         } else {
-            assert_eq!(PML4_START as u64, sregs.cr3);
+            assert_eq!(PML4_START, sregs.cr3);
         }
         assert!(sregs.cr4 & dbs_arch::regs::X86_CR4_PAE != 0);
         assert!(sregs.cr0 & dbs_arch::regs::X86_CR0_PG != 0);
@@ -262,7 +262,7 @@ mod tests {
         let vm = kvm.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let gm = create_guest_mem();
-        let gdt_table: [u64; layout::BOOT_GDT_MAX as usize] = [
+        let gdt_table: [u64; layout::BOOT_GDT_MAX] = [
             gdt_entry(0, 0, 0),            // NULL
             gdt_entry(0xa09b, 0, 0xfffff), // CODE
             gdt_entry(0xc093, 0, 0xfffff), // DATA

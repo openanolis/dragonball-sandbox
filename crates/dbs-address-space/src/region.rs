@@ -175,8 +175,7 @@ impl AddressSpaceRegion {
                     .map_err(AddressSpaceError::CreateMemFd)?;
                 // Safe because we have just created the fd.
                 let file: File = unsafe { File::from_raw_fd(fd) };
-                file.set_len(size as u64)
-                    .map_err(AddressSpaceError::SetFileSize)?;
+                file.set_len(size).map_err(AddressSpaceError::SetFileSize)?;
                 Self::build(
                     AddressSpaceRegionType::DefaultMemory,
                     base,
@@ -215,8 +214,7 @@ impl AddressSpaceRegion {
                     .open(mem_file_path)
                     .map_err(AddressSpaceError::OpenFile)?;
                 nix::unistd::unlink(mem_file_path).map_err(AddressSpaceError::UnlinkFile)?;
-                file.set_len(size as u64)
-                    .map_err(AddressSpaceError::SetFileSize)?;
+                file.set_len(size).map_err(AddressSpaceError::SetFileSize)?;
                 let file_offset = FileOffset::new(file, 0);
                 Self::build(
                     AddressSpaceRegionType::DefaultMemory,

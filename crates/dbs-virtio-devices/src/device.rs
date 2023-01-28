@@ -70,7 +70,7 @@ impl<Q: QueueT> VirtioQueueConfig<Q> {
 
         let queue = Q::new(queue_size)?;
         Ok(VirtioQueueConfig {
-            queue: queue,
+            queue,
             eventfd: Arc::new(eventfd),
             notifier: Arc::new(NoopNotifier::new()),
             index,

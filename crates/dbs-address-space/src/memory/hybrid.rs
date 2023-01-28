@@ -656,11 +656,7 @@ mod tests {
             .seek(std::io::SeekFrom::Start(0))
             .unwrap();
         guest_region
-            .read_from(
-                write_addr,
-                &mut file_to_write_mmap_region,
-                size_of_file as usize,
-            )
+            .read_from(write_addr, &mut file_to_write_mmap_region, size_of_file)
             .unwrap();
         let mut file_read_from_mmap_region = TempFile::new().unwrap().into_file();
         file_read_from_mmap_region
@@ -729,11 +725,7 @@ mod tests {
             .seek(std::io::SeekFrom::Start(0))
             .unwrap();
         guest_region
-            .read_from(
-                write_addr,
-                &mut file_to_write_mmap_region,
-                size_of_file as usize,
-            )
+            .read_from(write_addr, &mut file_to_write_mmap_region, size_of_file)
             .unwrap();
         let mut file_read_from_mmap_region = TempFile::new().unwrap().into_file();
         file_read_from_mmap_region
