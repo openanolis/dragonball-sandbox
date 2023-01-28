@@ -29,7 +29,6 @@ use nydus_api::ConfigV2;
 use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
 use nydus_rafs::{fs::Rafs, RafsIoRead};
 use rlimit::Resource;
-use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
 use virtio_queue::QueueT;
 use vm_memory::{
@@ -61,12 +60,6 @@ const CACHE_NONE_TIMEOUT: u64 = 0;
 pub(crate) const PASSTHROUGHFS: &str = "passthroughfs";
 pub(crate) const BLOBFS: &str = "blobfs";
 pub(crate) const RAFS: &str = "rafs";
-
-#[derive(Clone, Deserialize)]
-struct BlobCacheConfig {
-    #[serde(default)]
-    work_dir: String,
-}
 
 /// Info of backend filesystems of VirtioFs
 #[allow(dead_code)]
@@ -475,7 +468,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         prefetch_list_path: Option<String>,
     ) -> FsResult<()> {
         debug!("http_server rafs");
-        let mut file = Path::new(&source);
+        let file = Path::new(&source);
         let (mut rafs, rafs_cfg) = match config.as_ref() {
             Some(cfg) => {
                 let rafs_conf: Arc<ConfigV2> = Arc::new(
@@ -483,7 +476,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                 );
 
                 (
-                    Rafs::new(&rafs_conf, mountpoint, &mut file)
+                    Rafs::new(&rafs_conf, mountpoint, file)
                         .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {:?}", e)))?,
                     cfg.clone(),
                 )
