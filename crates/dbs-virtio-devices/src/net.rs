@@ -1030,8 +1030,8 @@ mod tests {
 
             let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
             let queues = vec![
-                VirtioQueueConfig::create(0, 0).unwrap(),
-                VirtioQueueConfig::create(0, 0).unwrap(),
+                VirtioQueueConfig::create(2, 0).unwrap(),
+                VirtioQueueConfig::create(2, 0).unwrap(),
             ];
 
             let kvm = Kvm::new().unwrap();
