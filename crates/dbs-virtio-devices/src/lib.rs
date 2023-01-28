@@ -444,13 +444,13 @@ pub mod tests {
 
         // Creates a new QueueSync, using the underlying memory regions represented by the VirtQueue.
         pub fn create_queue(&self) -> QueueSync {
-            let mut q = QueueSync::new(self.size());
+            let mut q = QueueSync::new(self.size()).unwrap();
 
             q.set_size(self.size());
             q.set_ready(true);
-            q.lock().desc_table = self.dtable_start();
-            q.lock().avail_ring = self.avail_start();
-            q.lock().used_ring = self.used_start();
+            let _ = q.lock().try_set_desc_table_address(self.dtable_start());
+            let _ = q.lock().try_set_avail_ring_address(self.avail_start());
+            let _ = q.lock().try_set_used_ring_address(self.used_start());
 
             q
         }

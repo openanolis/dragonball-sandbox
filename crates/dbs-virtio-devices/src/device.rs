@@ -581,7 +581,7 @@ pub(crate) mod tests {
         let mut queues = Vec::new();
         for idx in 0..8 {
             queues.push(VirtioQueueConfig::new(
-                QueueSync::new(512),
+                QueueSync::new(512).unwrap(),
                 Arc::new(EventFd::new(0).unwrap()),
                 Arc::new(LegacyNotifier::new(
                     group.clone(),
