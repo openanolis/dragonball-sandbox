@@ -1044,7 +1044,7 @@ mod tests {
         file: DummyFile,
     ) -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueSync> {
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
-        let queue = VirtioQueueConfig::create(255, 0).unwrap();
+        let queue = VirtioQueueConfig::create(256, 0).unwrap();
         let rate_limiter = RateLimiter::default();
         let disk_image: Box<dyn Ufile> = Box::new(file);
         let disk_image_id = build_device_id(disk_image.as_ref());

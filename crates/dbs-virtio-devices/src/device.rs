@@ -842,8 +842,8 @@ pub(crate) mod tests {
         let gm = GuestMemoryAtomic::<GuestMemoryMmap>::new(gmm);
 
         let queues = vec![
-            VirtioQueueConfig::create(0, 0).unwrap(),
-            VirtioQueueConfig::create(0, 0).unwrap(),
+            VirtioQueueConfig::create(2, 0).unwrap(),
+            VirtioQueueConfig::create(2, 0).unwrap(),
         ];
         let kvm = Kvm::new().unwrap();
         let vm_fd = Arc::new(kvm.create_vm().unwrap());
