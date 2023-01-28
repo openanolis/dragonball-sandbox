@@ -955,7 +955,7 @@ pub(crate) mod tests {
         LittleEndian::write_u32(&mut buf[..], 0b111);
         d.write(IoAddress(0), IoAddress(REG_MMIO_INTERRUPT_AC), &buf[..]);
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table(), 0);
 
         // When write descriptor, descriptor table will judge like this:
         // if desc_table.mask(0xf) != 0 {
@@ -964,30 +964,30 @@ pub(crate) mod tests {
         // desc_table is the data that will be written.
         LittleEndian::write_u32(&mut buf[..], 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0x120);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table(), 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().desc_table.0,
+            d.state().queues_mut()[0].queue.lock().desc_table(),
             0x120 + (0x120 << 32)
         );
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring(), 0);
         LittleEndian::write_u32(&mut buf[..], 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 124);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring(), 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().avail_ring.0,
+            d.state().queues_mut()[0].queue.lock().avail_ring(),
             124 + (124 << 32)
         );
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring(), 0);
         LittleEndian::write_u32(&mut buf[..], 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 128);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring(), 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().used_ring.0,
+            d.state().queues_mut()[0].queue.lock().used_ring(),
             128 + (128 << 32)
         );
 

@@ -25,9 +25,9 @@ use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::VmFd;
 use log::{debug, error, info, trace, warn};
 use nix::sys::memfd;
-use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
-use nydus_rafs::{fs::Rafs,RafsIoRead};
 use nydus_api::ConfigV2;
+use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
+use nydus_rafs::{fs::Rafs, RafsIoRead};
 use rlimit::Resource;
 use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
@@ -281,7 +281,6 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
 
                 let blob_config = conf.cache.unwrap().file_cache;
 
-
                 let blob_ondemand_cfg = format!(
                     r#"
                     {{
@@ -289,7 +288,9 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                         "bootstrap_path": "{}",
                         "blob_cache_dir": "{}"
                     }}"#,
-                    cfg, source, blob_config.as_ref().unwrap().work_dir
+                    cfg,
+                    source,
+                    blob_config.as_ref().unwrap().work_dir
                 );
 
                 (blob_config.unwrap().work_dir, blob_ondemand_cfg)
@@ -477,8 +478,9 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         let mut file = Path::new(&source);
         let (mut rafs, rafs_cfg) = match config.as_ref() {
             Some(cfg) => {
-                let rafs_conf: Arc<ConfigV2> =
-                    Arc::new(serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?);
+                let rafs_conf: Arc<ConfigV2> = Arc::new(
+                    serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?,
+                );
 
                 (
                     Rafs::new(&rafs_conf, mountpoint, &mut file)
@@ -493,7 +495,8 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             "{}: Import rafs with prefetch_files {:?}",
             VIRTIO_FS_NAME, prefetch_files
         );
-        rafs.0.import(rafs.1, prefetch_files)
+        rafs.0
+            .import(rafs.1, prefetch_files)
             .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {:?}", e)))?;
         info!(
             "{}: Rafs imported with prefetch_list_path {:?}",
