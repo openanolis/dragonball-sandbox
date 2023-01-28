@@ -95,7 +95,7 @@ impl FsCacheReqHandler for CacheHandler {
             libc::mmap(
                 addr as *mut libc::c_void,
                 len as usize,
-                libc::PROT_READ as i32,
+                libc::PROT_READ,
                 libc::MAP_SHARED | libc::MAP_FIXED,
                 fd,
                 foffset as libc::off_t,

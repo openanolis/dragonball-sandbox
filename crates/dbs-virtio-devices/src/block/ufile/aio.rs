@@ -73,7 +73,7 @@ impl IoEngine for Aio {
             aio_resfd: self.aio_evtfd.as_raw_fd() as u32,
             aio_flags: IOCB_FLAG_RESFD,
             aio_buf: iovecs.as_mut_ptr() as u64,
-            aio_offset: offset as i64,
+            aio_offset: offset,
             aio_nbytes: iovecs.len() as u64,
             aio_data: user_data,
             ..Default::default()
@@ -97,9 +97,9 @@ impl IoEngine for Aio {
                 ];
             while v.len() < count as usize {
                 let r = self.aio_context.get_events(1, &mut events[0..], None)?;
-                for idx in 0..r {
-                    let index = events[idx as usize].data;
-                    let res2 = events[idx as usize].res;
+                for event in events.iter().take(r) {
+                    let index = event.data;
+                    let res2 = event.res;
                     v.push((index, res2));
                 }
             }
