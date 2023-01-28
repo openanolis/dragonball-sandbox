@@ -328,9 +328,9 @@ mod tests {
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let queues = vec![
-            VirtioQueueConfig::<QueueSync>::create(0, 0).unwrap(),
-            VirtioQueueConfig::<QueueSync>::create(0, 0).unwrap(),
-            VirtioQueueConfig::<QueueSync>::create(0, 0).unwrap(),
+            VirtioQueueConfig::<QueueSync>::create(2, 0).unwrap(),
+            VirtioQueueConfig::<QueueSync>::create(2, 0).unwrap(),
+            VirtioQueueConfig::<QueueSync>::create(2, 0).unwrap(),
         ];
         let kvm = Kvm::new().unwrap();
         let vm_fd = Arc::new(kvm.create_vm().unwrap());
