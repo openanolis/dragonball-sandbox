@@ -397,7 +397,7 @@ where
                     return;
                 }
             };
-            LittleEndian::write_u16(data, v as u16);
+            LittleEndian::write_u16(data, v);
         } else {
             info!(
                 "unknown virtio mmio register read: 0x{:x}/0x{:x}",
@@ -854,10 +854,7 @@ pub(crate) mod tests {
         d.device_vendor |= DRAGONBALL_FEATURE_MSI_INTR;
         let mut buf = vec![0; 2];
         d.read(IoAddress(0), IoAddress(REG_MMIO_MSI_CSR), &mut buf[..]);
-        assert_eq!(
-            LittleEndian::read_u16(&buf[..]),
-            MMIO_MSI_CSR_SUPPORTED as u16
-        );
+        assert_eq!(LittleEndian::read_u16(&buf[..]), MMIO_MSI_CSR_SUPPORTED);
 
         let mut dev_cfg = vec![0; 4];
         assert_eq!(

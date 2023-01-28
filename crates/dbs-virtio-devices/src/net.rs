@@ -406,12 +406,10 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> NetEpollH
                 // TODO(performance - Issue #420): change this to use `writev()` instead of `write()`
                 // and get rid of the intermediate buffer.
                 for (desc_addr, desc_len) in self.tx.iovec.drain(..) {
-                    let limit = cmp::min((read_count + desc_len) as usize, self.tx.frame_buf.len());
+                    let limit = cmp::min(read_count + desc_len, self.tx.frame_buf.len());
 
-                    let read_result = mem.read(
-                        &mut self.tx.frame_buf[read_count..limit as usize],
-                        desc_addr,
-                    );
+                    let read_result =
+                        mem.read(&mut self.tx.frame_buf[read_count..limit], desc_addr);
                     match read_result {
                         Ok(sz) => read_count += sz,
                         Err(e) => {

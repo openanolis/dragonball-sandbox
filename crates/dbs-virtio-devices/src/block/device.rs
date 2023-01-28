@@ -91,7 +91,7 @@ impl<AS: DbsGuestAddressSpace> Block<AS> {
 
         let disk_image = &mut disk_images[0];
 
-        let disk_size = disk_image.seek(SeekFrom::End(0)).map_err(Error::IOError)? as u64;
+        let disk_size = disk_image.seek(SeekFrom::End(0)).map_err(Error::IOError)?;
         if disk_size % SECTOR_SIZE != 0 {
             warn!(
                 "Disk size {} is not a multiple of sector size {}; \

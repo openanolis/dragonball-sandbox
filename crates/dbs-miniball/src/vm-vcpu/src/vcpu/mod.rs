@@ -459,7 +459,7 @@ impl KvmVcpu {
     // Configure sregs.
     #[cfg(target_arch = "x86_64")]
     fn configure_sregs<M: GuestMemory>(&self, guest_memory: &M) -> Result<()> {
-        let gdt_table: [u64; dbs_boot::layout::BOOT_GDT_MAX as usize] = [
+        let gdt_table: [u64; dbs_boot::layout::BOOT_GDT_MAX] = [
             gdt::gdt_entry(0, 0, 0),            // NULL
             gdt::gdt_entry(0xa09b, 0, 0xfffff), // CODE
             gdt::gdt_entry(0xc093, 0, 0xfffff), // DATA
@@ -549,7 +549,7 @@ impl KvmVcpu {
                     // println!("{:#?}", exit_reason);
                     match exit_reason {
                         VcpuExit::Shutdown | VcpuExit::Hlt => {
-                            println!("Guest shutdown: {:?}. Bye!", exit_reason);
+                            println!("Guest shutdown: {exit_reason:?}. Bye!");
                             if stdin().lock().set_canon_mode().is_err() {
                                 eprintln!("Failed to set canon mode. Stdin will not echo.");
                             }

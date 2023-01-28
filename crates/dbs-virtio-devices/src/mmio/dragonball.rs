@@ -178,7 +178,7 @@ mod tests {
         );
         assert_eq!(door.offset(), DRAGONBALL_MMIO_DOORBELL_OFFSET as u32);
         assert_eq!(door.scale(), DRAGONBALL_MMIO_DOORBELL_SCALE as u32);
-        assert_eq!(door.queue_offset(0), DRAGONBALL_MMIO_DOORBELL_OFFSET as u64);
+        assert_eq!(door.queue_offset(0), DRAGONBALL_MMIO_DOORBELL_OFFSET);
         assert_eq!(door.queue_offset(4), 0x1010);
         assert_eq!(door.register_data(), 0x1000 | 0x40000);
     }
