@@ -9,6 +9,7 @@ Dragonball-sandbox is a collection of Rust crates to help build custom Virtual M
 This repository contains the following crates:
 | Name | Description | Links |
 | --- | --- | --- |
+| [dbs-acpi](crates/dbs-acpi) | acpi definitions for virtual machines| TBD |
 | [dbs-address-space](crates/dbs-address-space) | manager for memory and MMIO resources resident in the guest physical address space | [![Crates.io](https://img.shields.io/crates/v/dbs-address-space)](https://crates.io/crates/dbs-address-space) |
 | [dbs-allocator](crates/dbs-allocator) | allocator for vmm resource | [![Crates.io](https://img.shields.io/crates/v/dbs-allocator)](https://crates.io/crates/dbs-allocator) |
 | [dbs-arch](crates/dbs-arch) | collections of CPU architecture related modules | [![Crates.io](https://img.shields.io/crates/v/dbs-arch)](https://crates.io/crates/dbs-arch) |
