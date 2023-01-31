@@ -421,7 +421,7 @@ mod tests {
         let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
 
         let tap = Tap::new().unwrap();
-        let ip_addr: Ipv4Addr = format!("{}{}", TAP_IP_PREFIX, next_ip).parse().unwrap();
+        let ip_addr: Ipv4Addr = format!("{TAP_IP_PREFIX}{next_ip}").parse().unwrap();
         let netmask: Ipv4Addr = SUBNET_MASK.parse().unwrap();
 
         let ret = tap.set_ip_addr(ip_addr);

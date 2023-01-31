@@ -354,7 +354,7 @@ impl VsockInnerConnector {
         self.conn_sender.send(internal_stream).map_err(|e| {
             Error::new(
                 ErrorKind::ConnectionRefused,
-                format!("vsock inner stream sender err: {}", e),
+                format!("vsock inner stream sender err: {e}"),
             )
         })?;
         self.backend_event.write(1)?;

@@ -17,9 +17,9 @@ impl fmt::Display for CfgArgParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ParsingFailed(param, err) => {
-                write!(f, "Param '{}', parsing failed: {}", param, err)
+                write!(f, "Param '{param}', parsing failed: {err}")
             }
-            Self::UnknownArg(err) => write!(f, "Unknown arguments found: '{}'", err),
+            Self::UnknownArg(err) => write!(f, "Unknown arguments found: '{err}'"),
         }
     }
 }
