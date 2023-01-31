@@ -338,7 +338,7 @@ impl Vmm {
         loop {
             match self.event_mgr.handle_events(-1) {
                 Ok(_) => (),
-                Err(e) => eprintln!("Failed to handle events: {:?}", e),
+                Err(e) => eprintln!("Failed to handle events: {e:?}"),
             }
             if !self.exit_handler.keep_running() {
                 break;

@@ -125,7 +125,7 @@ impl<S: UpcallClientService + Send> UpcallClientInfo<S> {
             .set_nonblocking(true)
             .map_err(UpcallClientError::ServerConnect)?;
 
-        let cmd = format!("CONNECT {}\n", SERVER_PORT);
+        let cmd = format!("CONNECT {SERVER_PORT}\n");
         stream
             .write_all(&cmd.into_bytes())
             .map_err(UpcallClientError::ServerConnect)?;
@@ -554,7 +554,7 @@ mod tests {
         assert!(inner_stream.read_exact(&mut read_buffer).is_ok());
         assert_eq!(
             read_buffer,
-            format!("CONNECT {}\n", SERVER_PORT).into_bytes()
+            format!("CONNECT {SERVER_PORT}\n",).into_bytes()
         );
 
         let writer_buffer = String::from("ERR").into_bytes();
@@ -660,10 +660,7 @@ mod tests {
         let mut inner_stream = vsock_backend.accept().unwrap();
         let mut read_buffer = vec![0; 12];
         assert!(inner_stream.read_exact(&mut read_buffer).is_ok());
-        assert_eq!(
-            read_buffer,
-            format!("CONNECT {}\n", SERVER_PORT).into_bytes()
-        );
+        assert_eq!(read_buffer, format!("CONNECT {SERVER_PORT}\n").into_bytes());
     }
 
     #[allow(clippy::mutex_atomic)]

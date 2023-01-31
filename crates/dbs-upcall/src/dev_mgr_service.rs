@@ -89,7 +89,7 @@ impl fmt::Debug for CpuDevRequest {
             if apic_id == &0 {
                 break;
             }
-            let _ = write!(apic_ids, "{}", apic_id);
+            let _ = write!(apic_ids, "{apic_id}");
             apic_ids.push(' ');
         }
         apic_ids.push_str(" ]");

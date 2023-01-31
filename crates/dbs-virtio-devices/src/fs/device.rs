@@ -480,7 +480,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
 
                 (
                     Rafs::new(&rafs_conf, mountpoint, file)
-                        .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {:?}", e)))?,
+                        .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {e:?}")))?,
                     cfg.clone(),
                 )
             }
@@ -493,7 +493,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         );
         rafs.0
             .import(rafs.1, prefetch_files)
-            .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {:?}", e)))?;
+            .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {e:?}")))?;
         info!(
             "{}: Rafs imported with prefetch_list_path {:?}",
             VIRTIO_FS_NAME, prefetch_list_path
@@ -529,8 +529,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         }
         if source.is_none() {
             return Err(FsError::BackendFs(format!(
-                "rafs mounted at {} doesn't have source configured",
-                mountpoint
+                "rafs mounted at {mountpoint} doesn't have source configured"
             )));
         }
         // safe because config is not None.
@@ -547,8 +546,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             },
             None => {
                 return Err(FsError::BackendFs(format!(
-                    "rafs mount point {} is not mounted",
-                    mountpoint
+                    "rafs mount point {mountpoint} is not mounted"
                 )));
             }
         };
@@ -557,26 +555,24 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                 Some(f) => f,
                 None => {
                     return Err(FsError::BackendFs(format!(
-                        "rafs get_rootfs() failed: mountpoint {} not mounted",
-                        mountpoint
+                        "rafs get_rootfs() failed: mountpoint {mountpoint} not mounted"
                     )));
                 }
             },
             Err(e) => {
                 return Err(FsError::BackendFs(format!(
-                    "rafs get_rootfs() failed: {:?}",
-                    e
+                    "rafs get_rootfs() failed: {e:?}"
                 )));
             }
         };
         let any_fs = rootfs.deref().as_any();
         if let Some(fs_swap) = any_fs.downcast_ref::<Rafs>() {
             let mut file = <dyn RafsIoRead>::from_file(&source)
-                .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {:?}", e)))?;
+                .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {e:?}")))?;
 
             fs_swap
                 .update(&mut file, &rafs_conf)
-                .map_err(|e| FsError::BackendFs(format!("Update rafs failed: {:?}", e)))?;
+                .map_err(|e| FsError::BackendFs(format!("Update rafs failed: {e:?}")))?;
             self.backend_fs.insert(mountpoint.to_string(), new_info);
             Ok(())
         } else {

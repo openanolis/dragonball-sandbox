@@ -64,11 +64,11 @@ impl fmt::Display for ConversionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ConversionError::*;
         match self {
-            ParseKernel(ref s) => write!(f, "Invalid input for kernel: {}", s),
-            ParseMemory(ref s) => write!(f, "Invalid input for memory: {}", s),
-            ParseVcpus(ref s) => write!(f, "Invalid input for vCPUs: {}", s),
-            ParseNet(ref s) => write!(f, "Invalid input for network: {}", s),
-            ParseBlock(ref s) => write!(f, "Invalid input for block: {}", s),
+            ParseKernel(ref s) => write!(f, "Invalid input for kernel: {s}"),
+            ParseMemory(ref s) => write!(f, "Invalid input for memory: {s}"),
+            ParseVcpus(ref s) => write!(f, "Invalid input for vCPUs: {s}"),
+            ParseNet(ref s) => write!(f, "Invalid input for network: {s}"),
+            ParseBlock(ref s) => write!(f, "Invalid input for block: {s}"),
         }
     }
 }

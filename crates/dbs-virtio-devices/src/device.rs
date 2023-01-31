@@ -545,7 +545,7 @@ impl VirtioDeviceInfo {
         self.epoll_manager.remove_subscriber(id).map_err(|e| {
             Error::IOError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("remove_event_handler failed: {:?}", e),
+                format!("remove_event_handler failed: {e:?}"),
             ))
         })
     }

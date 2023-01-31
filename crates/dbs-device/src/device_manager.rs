@@ -623,13 +623,13 @@ mod tests {
 
         assert!(err.source().is_none());
         assert_eq!(
-            format!("{}", err),
+            format!("{err}"),
             "device address conflicts with existing devices"
         );
 
         let err = super::Error::NoDevice;
         assert!(err.source().is_none());
-        assert_eq!(format!("{:#?}", err), "NoDevice");
+        assert_eq!(format!("{err:#?}"), "NoDevice");
     }
 
     #[test]
