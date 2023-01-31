@@ -267,12 +267,17 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                 })?;
 
                 // v6 doesn't support digest validation yet.
-                if conf.rafs.unwrap().validate {
+                if conf.rafs.ok_or(FsError::InvalidData)?.validate {
                     error!("config.digest_validate needs to be false");
                     return Err(FsError::InvalidData);
                 }
 
-                let blob_config = conf.cache.unwrap().file_cache;
+                let work_dir = conf
+                    .cache
+                    .ok_or(FsError::InvalidData)?
+                    .file_cache
+                    .ok_or(FsError::InvalidData)?
+                    .work_dir;
 
                 let blob_ondemand_cfg = format!(
                     r#"
@@ -281,12 +286,10 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                         "bootstrap_path": "{}",
                         "blob_cache_dir": "{}"
                     }}"#,
-                    cfg,
-                    source,
-                    blob_config.as_ref().unwrap().work_dir
+                    cfg, source, &work_dir
                 );
 
-                (blob_config.unwrap().work_dir, blob_ondemand_cfg)
+                (work_dir, blob_ondemand_cfg)
             }
             None => return Err(FsError::BackendFs("no rafs config file".to_string())),
         };
