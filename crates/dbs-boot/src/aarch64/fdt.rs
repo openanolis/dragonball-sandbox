@@ -104,7 +104,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<()> {
     let num_cpus = vcpu_mpidr.len();
 
     for (cpu_index, iter) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
-        let cpu_name = format!("cpu@{:x}", cpu_index);
+        let cpu_name = format!("cpu@{cpu_index:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "arm,arm-v8")?;
@@ -143,10 +143,7 @@ fn create_chosen_node(
     fdt.property_string("bootargs", cmdline)?;
 
     if let Some(initrd_config) = initrd {
-        fdt.property_u64(
-            "linux,initrd-start",
-            initrd_config.address.raw_value() as u64,
-        )?;
+        fdt.property_u64("linux,initrd-start", initrd_config.address.raw_value())?;
         fdt.property_u64(
             "linux,initrd-end",
             initrd_config.address.raw_value() + initrd_config.size as u64,
@@ -485,7 +482,7 @@ mod tests {
         set_size(&mut buf, pos, val);
         let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
         let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
+        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
     }
 
     #[test]
@@ -535,6 +532,6 @@ mod tests {
         set_size(&mut buf, pos, val);
         let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
         let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
+        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
     }
 }

@@ -29,7 +29,7 @@ fn main() {
             vmm.run().unwrap();
         }
         Err(e) => {
-            eprintln!("Failed to parse command line options. {}", e);
+            eprintln!("Failed to parse command line options. {e}");
         }
     }
 }
