@@ -886,7 +886,7 @@ mod tests {
 
     fn create_net_epoll_handler(id: String) -> NetEpollHandler<Arc<GuestMemoryMmap>> {
         let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
         let rx = RxVirtio::new(
             VirtioQueueConfig::create(256, 0).unwrap(),
             RateLimiter::default(),
@@ -924,7 +924,7 @@ mod tests {
     #[test]
     fn test_net_virtio_device_normal() {
         let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
         let epoll_mgr = EpollManager::default();
 
         let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
@@ -985,7 +985,7 @@ mod tests {
         {
             // config queue size is not 2
             let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
             let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
                 tap,
                 None,
@@ -1017,7 +1017,7 @@ mod tests {
         {
             // check queue sizes error
             let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
             let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
                 tap,
                 None,
@@ -1052,7 +1052,7 @@ mod tests {
         {
             // test no tap
             let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
             let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
                 tap,
                 None,
@@ -1086,7 +1086,7 @@ mod tests {
         {
             // Ok
             let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-            let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+            let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
             let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(
                 tap,
                 None,
@@ -1123,7 +1123,7 @@ mod tests {
     #[test]
     fn test_net_set_patch_rate_limiters() {
         let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-        let tap = Tap::open_named(&format!("tap{}", next_ip), false).unwrap();
+        let tap = Tap::open_named(&format!("tap{next_ip}"), false).unwrap();
         let epoll_mgr = EpollManager::default();
 
         let mut dev = Net::<Arc<GuestMemoryMmap>>::new_with_tap(

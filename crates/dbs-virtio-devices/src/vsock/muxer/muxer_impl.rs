@@ -978,7 +978,7 @@ mod tests {
             let (local_lsn_count, _) = self.count_epoll_listeners();
             assert_eq!(local_lsn_count, init_local_lsn_count + 1);
 
-            let buf = format!("CONNECT {}\n", peer_port);
+            let buf = format!("CONNECT {peer_port}\n");
             stream.write_all(buf.as_bytes()).unwrap();
             // The muxer would now get notified that data is available for reading from the locally
             // initiated connection.
@@ -1012,7 +1012,7 @@ mod tests {
 
             let mut buf = vec![0u8; 32];
             let len = stream.read(&mut buf[..]).unwrap();
-            assert_eq!(&buf[..len], format!("OK {}\n", local_port).as_bytes());
+            assert_eq!(&buf[..len], format!("OK {local_port}\n").as_bytes());
 
             (stream, local_port)
         }

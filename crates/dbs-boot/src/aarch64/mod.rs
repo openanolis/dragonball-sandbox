@@ -52,7 +52,7 @@ pub fn get_fdt_addr<M: GuestMemory>(mem: &M) -> u64 {
 /// Returns the memory address where the initrd could be loaded.
 pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (PAGE_SIZE as u64 - 1)) & !(PAGE_SIZE as u64 - 1);
-    match GuestAddress(get_fdt_addr(guest_mem)).checked_sub(round_to_pagesize(initrd_size) as u64) {
+    match GuestAddress(get_fdt_addr(guest_mem)).checked_sub(round_to_pagesize(initrd_size)) {
         Some(offset) => {
             if guest_mem.address_in_range(offset) {
                 Ok(offset.raw_value())
