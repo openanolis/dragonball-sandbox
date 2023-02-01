@@ -20,7 +20,7 @@ use dbs_utils::{
 };
 use log::{debug, error, info, warn};
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::GuestMemoryRegion;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -91,7 +91,7 @@ impl<AS: DbsGuestAddressSpace> Block<AS> {
 
         let disk_image = &mut disk_images[0];
 
-        let disk_size = disk_image.seek(SeekFrom::End(0)).map_err(Error::IOError)? as u64;
+        let disk_size = disk_image.seek(SeekFrom::End(0)).map_err(Error::IOError)?;
         if disk_size % SECTOR_SIZE != 0 {
             warn!(
                 "Disk size {} is not a multiple of sector size {}; \
@@ -201,7 +201,7 @@ impl<AS: DbsGuestAddressSpace> Block<AS> {
 impl<AS, Q, R> VirtioDevice<AS, Q, R> for Block<AS>
 where
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
     R: GuestMemoryRegion + Sync + Send + 'static,
 {
     fn device_type(&self) -> u32 {
@@ -376,7 +376,7 @@ mod tests {
     use dbs_interrupt::NoopNotifier;
     use dbs_utils::rate_limiter::{TokenBucket, TokenType};
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -871,38 +871,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::device_type(
-                &dev
-            ),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::device_type(&dev),
             TYPE_BLOCK
         );
         let queue_size = vec![128];
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::queue_max_sizes(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::queue_max_sizes(
                 &dev
             ),
             &queue_size[..]
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 0),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 0),
             dev.device_info.get_avail_features(0)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 1),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 1),
             dev.device_info.get_avail_features(1)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&dev, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 2),
             dev.device_info.get_avail_features(2)
         );
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::read_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut dev,
             0,
             &mut config,
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::write_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
         );
     }
@@ -963,7 +961,7 @@ mod tests {
             dev.disk_images = vec![];
 
             let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues = vec![VirtioQueueConfig::<QueueStateSync>::create(256, 0).unwrap()];
+            let queues = vec![VirtioQueueConfig::<QueueSync>::create(256, 0).unwrap()];
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -998,7 +996,7 @@ mod tests {
             .unwrap();
 
             let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues = vec![VirtioQueueConfig::<QueueStateSync>::create(256, 0).unwrap()];
+            let queues = vec![VirtioQueueConfig::<QueueSync>::create(256, 0).unwrap()];
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -1044,9 +1042,9 @@ mod tests {
 
     fn get_block_epoll_handler_with_file(
         file: DummyFile,
-    ) -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync> {
+    ) -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueSync> {
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
-        let queue = VirtioQueueConfig::create(255, 0).unwrap();
+        let queue = VirtioQueueConfig::create(256, 0).unwrap();
         let rate_limiter = RateLimiter::default();
         let disk_image: Box<dyn Ufile> = Box::new(file);
         let disk_image_id = build_device_id(disk_image.as_ref());
@@ -1072,7 +1070,7 @@ mod tests {
         }
     }
 
-    fn get_block_epoll_handler() -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync> {
+    fn get_block_epoll_handler() -> InnerBlockEpollHandler<Arc<GuestMemoryMmap>, QueueSync> {
         let mut file = DummyFile::new();
         file.capacity = 0x100000;
         get_block_epoll_handler_with_file(file)

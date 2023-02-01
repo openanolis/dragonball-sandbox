@@ -11,7 +11,7 @@ use std::ops::Deref;
 
 use dbs_utils::epoll_manager::{EventOps, EventSet, Events, MutEventSubscriber};
 use log::{error, trace, warn};
-use virtio_queue::{QueueStateOwnedT, QueueStateSync, QueueStateT};
+use virtio_queue::{QueueOwnedT, QueueSync, QueueT};
 use vm_memory::{GuestMemoryRegion, GuestRegionMmap};
 
 use super::defs;
@@ -55,7 +55,7 @@ const QUEUE_CFG: usize = 2;
 ///     virtio RX buffers.
 pub struct VsockEpollHandler<
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send = QueueStateSync,
+    Q: QueueT + Send = QueueSync,
     R: GuestMemoryRegion = GuestRegionMmap,
     M: VsockGenericMuxer = VsockMuxer,
 > {
@@ -68,7 +68,7 @@ pub struct VsockEpollHandler<
 impl<AS, Q, R, M> VsockEpollHandler<AS, Q, R, M>
 where
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send,
+    Q: QueueT + Send,
     R: GuestMemoryRegion,
     M: VsockGenericMuxer,
 {
@@ -240,7 +240,7 @@ where
 impl<AS, Q, R, M> MutEventSubscriber for VsockEpollHandler<AS, Q, R, M>
 where
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send,
+    Q: QueueT + Send,
     R: GuestMemoryRegion,
     M: VsockGenericMuxer + 'static,
 {

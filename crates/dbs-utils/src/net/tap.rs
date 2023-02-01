@@ -1,4 +1,5 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
@@ -320,7 +321,7 @@ mod tests {
             // The name of the tap should be {module_name}{index} so that
             // we make sure it stays different when tests are run concurrently.
             let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
-            Self::open_named(&format!("dbs_tap{}", next_ip), false)
+            Self::open_named(&format!("dbs_tap{next_ip}"), false)
         }
 
         /// Set the host-side IP address for the tap interface.
@@ -420,7 +421,7 @@ mod tests {
         let next_ip = NEXT_IP.fetch_add(1, Ordering::SeqCst);
 
         let tap = Tap::new().unwrap();
-        let ip_addr: Ipv4Addr = format!("{}{}", TAP_IP_PREFIX, next_ip).parse().unwrap();
+        let ip_addr: Ipv4Addr = format!("{TAP_IP_PREFIX}{next_ip}").parse().unwrap();
         let netmask: Ipv4Addr = SUBNET_MASK.parse().unwrap();
 
         let ret = tap.set_ip_addr(ip_addr);

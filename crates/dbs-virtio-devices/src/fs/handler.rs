@@ -15,7 +15,7 @@ use fuse_backend_rs::api::Vfs;
 use fuse_backend_rs::transport::{FsCacheReqHandler, Reader, VirtioFsWriter, Writer};
 use log::{debug, error, info, trace};
 use threadpool::ThreadPool;
-use virtio_queue::{QueueStateOwnedT, QueueStateT};
+use virtio_queue::{QueueOwnedT, QueueT};
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -95,7 +95,7 @@ impl FsCacheReqHandler for CacheHandler {
             libc::mmap(
                 addr as *mut libc::c_void,
                 len as usize,
-                libc::PROT_READ as i32,
+                libc::PROT_READ,
                 libc::MAP_SHARED | libc::MAP_FIXED,
                 fd,
                 foffset as libc::off_t,
@@ -169,7 +169,7 @@ impl FsCacheReqHandler for CacheHandler {
 
 pub(crate) struct VirtioFsEpollHandler<
     AS: 'static + GuestAddressSpace,
-    Q: QueueStateT,
+    Q: QueueT,
     R: GuestMemoryRegion,
 > {
     pub(crate) config: Arc<Mutex<VirtioDeviceConfig<AS, Q, R>>>,
@@ -187,7 +187,7 @@ where
     AS: GuestAddressSpace + Clone + Send,
     AS::T: Send,
     AS::M: Sync + Send,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
     R: GuestMemoryRegion + Send + Sync + 'static,
 {
     #[allow(clippy::too_many_arguments)]
@@ -299,7 +299,7 @@ where
         }
 
         let notify = !self.is_multi_thread() && used_count > 0;
-        // unlock QueueStateT
+        // unlock QueueT
         drop(queue_guard);
         while !self.is_multi_thread() && used_count > 0 {
             used_count -= 1;
@@ -368,7 +368,7 @@ where
     AS: GuestAddressSpace + Send + Sync + 'static + Clone,
     AS::T: Send,
     AS::M: Sync + Send,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
     R: GuestMemoryRegion + Send + Sync + 'static,
 {
     fn process(&mut self, events: Events, _ops: &mut EventOps) {

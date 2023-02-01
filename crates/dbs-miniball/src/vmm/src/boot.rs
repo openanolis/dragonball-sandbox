@@ -114,7 +114,7 @@ pub fn build_bootparams(
             // * last_addr - himem_start is also smaller than mmio_gap_start
             last_addr
                 .checked_offset_from(himem_start)
-                .ok_or(Error::HimemStartPastMemEnd)? as u64
+                .ok_or(Error::HimemStartPastMemEnd)?
                 + 1,
             E820_RAM,
         )
@@ -138,7 +138,7 @@ pub fn build_bootparams(
                 // The unchecked + 1 is safe because:
                 // * overflow could only occur if last_addr == u64::MAX and mmio_gap_end == 0
                 // * mmio_gap_end > mmio_gap_start, which is a valid u64 => mmio_gap_end > 0
-                last_addr.unchecked_offset_from(mmio_gap_end) as u64 + 1,
+                last_addr.unchecked_offset_from(mmio_gap_end) + 1,
                 E820_RAM,
             )
             .map_err(Error::BootSystem)?;
@@ -205,12 +205,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_START - 1),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg
+                kernel_cfg
                     .cmdline
                     .as_cstring()
                     .unwrap()
                     .as_bytes_with_nul()
-                    .len()) as usize,
+                    .len(),
             )
             .err(),
             Some(Error::MmioGapStartPastMmioGapEnd)
@@ -229,12 +229,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_END),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg
+                kernel_cfg
                     .cmdline
                     .as_cstring()
                     .unwrap()
                     .as_bytes_with_nul()
-                    .len()) as usize,
+                    .len(),
             )
             .err(),
             Some(Error::HimemStartPastMemEnd)
@@ -256,12 +256,12 @@ mod tests {
                 GuestAddress(layout::MMIO_LOW_START),
                 GuestAddress(layout::MMIO_LOW_END),
                 GuestAddress(cmdline_addr),
-                (kernel_cfg
+                kernel_cfg
                     .cmdline
                     .as_cstring()
                     .unwrap()
                     .as_bytes_with_nul()
-                    .len()) as usize,
+                    .len(),
             )
             .err(),
             Some(Error::HimemStartPastMmioGapStart)
@@ -280,12 +280,12 @@ mod tests {
             GuestAddress(layout::MMIO_LOW_START),
             GuestAddress(layout::MMIO_LOW_END),
             GuestAddress(cmdline_addr),
-            (kernel_cfg
+            kernel_cfg
                 .cmdline
                 .as_cstring()
                 .unwrap()
                 .as_bytes_with_nul()
-                .len()) as usize,
+                .len(),
         )
         .is_ok());
     }

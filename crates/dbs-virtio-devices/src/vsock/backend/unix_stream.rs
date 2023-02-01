@@ -154,7 +154,7 @@ mod tests {
     fn test_unix_backend_connect() {
         let host_sock_path = String::from("/tmp/host_sock_path_4");
         let local_server_port = 1;
-        let local_server_path = format!("{}_{}", host_sock_path, local_server_port);
+        let local_server_path = format!("{host_sock_path}_{local_server_port}");
         fs::remove_file(Path::new(&host_sock_path)).unwrap_or_default();
         fs::remove_file(Path::new(&local_server_path)).unwrap_or_default();
 

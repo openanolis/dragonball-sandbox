@@ -275,7 +275,7 @@ impl<EH: 'static + ExitHandler + Send> KvmVm<EH> {
             let memory_region = kvm_userspace_memory_region {
                 slot: index as u32,
                 guest_phys_addr: region.start_addr().raw_value(),
-                memory_size: region.len() as u64,
+                memory_size: region.len(),
                 // It's safe to unwrap because the guest address is valid.
                 userspace_addr: guest_memory.get_host_address(region.start_addr()).unwrap() as u64,
                 flags: 0,
@@ -399,7 +399,7 @@ impl<EH: 'static + ExitHandler + Send> KvmVm<EH> {
         for (id, mut vcpu) in self.vcpus.drain(..).enumerate() {
             let vcpu_exit_handler = self.exit_handler.clone();
             let vcpu_handle = thread::Builder::new()
-                .name(format!("vcpu_{}", id))
+                .name(format!("vcpu_{id}"))
                 .spawn(move || {
                     vcpu.run(vcpu_run_addr).unwrap();
                     vcpu_exit_handler.kick().unwrap();

@@ -11,7 +11,7 @@ use dbs_device::{DeviceIo, IoAddress};
 use dbs_interrupt::{InterruptStatusRegister32, KvmIrqManager};
 use kvm_ioctls::VmFd;
 use log::{debug, info, warn};
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::{GuestAddressSpace, GuestMemoryRegion};
 
 use crate::{
@@ -39,7 +39,7 @@ const DEVICE_STATUS_DRIVER_OK: u32 = DEVICE_STATUS_FEATURE_OK | DEVICE_DRIVER_OK
 ///
 /// Typically one page (4096 bytes) of MMIO address space is sufficient to handle this transport
 /// and inner virtio device.
-pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: GuestMemoryRegion> {
+pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueT, R: GuestMemoryRegion> {
     state: Mutex<MmioV2DeviceState<AS, Q, R>>,
     assigned_resources: DeviceResources,
     mmio_cfg_res: Resource,
@@ -52,7 +52,7 @@ pub struct MmioV2Device<AS: GuestAddressSpace + Clone, Q: QueueStateT, R: GuestM
 impl<AS, Q, R> MmioV2Device<AS, Q, R>
 where
     AS: GuestAddressSpace + Clone,
-    Q: QueueStateT + Clone,
+    Q: QueueT + Clone,
     R: GuestMemoryRegion,
 {
     /// Constructs a new MMIO transport for the given virtio device.
@@ -200,7 +200,8 @@ where
             if result.is_ok() {
                 if let Err(e) = state.activate(self) {
                     // Reset internal status to initial state on failure.
-                    state.reset();
+                    // Error is ignored since the device will go to DEVICE_FAILED status.
+                    let _ = state.reset();
                     warn!("failed to activate MMIO Virtio device: {:?}", e);
                     result = Err(DEVICE_FAILED);
                 }
@@ -214,11 +215,15 @@ where
                     warn!("failed to reset MMIO Virtio device: {:?}.", ret);
                 } else {
                     state.deactivate();
-                    state.reset();
                     // it should reset the device's status to init, otherwise, the guest would
                     // get the wrong device's status.
-                    result =
-                        self.exchange_driver_status(DEVICE_STATUS_DRIVER_OK, DEVICE_STATUS_INIT);
+                    if let Err(e) = state.reset() {
+                        warn!("failed to reset device state due to {:?}", e);
+                        result = Err(DEVICE_FAILED);
+                    } else {
+                        result = self
+                            .exchange_driver_status(DEVICE_STATUS_DRIVER_OK, DEVICE_STATUS_INIT);
+                    }
                 }
             }
         } else if v == self.driver_status() {
@@ -339,7 +344,7 @@ where
 impl<AS, Q, R> DeviceIo for MmioV2Device<AS, Q, R>
 where
     AS: 'static + GuestAddressSpace + Send + Sync + Clone,
-    Q: 'static + QueueStateT + Send + Clone,
+    Q: 'static + QueueT + Send + Clone,
     R: 'static + GuestMemoryRegion + Send + Sync,
 {
     fn read(&self, _base: IoAddress, offset: IoAddress, data: &mut [u8]) {
@@ -392,7 +397,7 @@ where
                     return;
                 }
             };
-            LittleEndian::write_u16(data, v as u16);
+            LittleEndian::write_u16(data, v);
         } else {
             info!(
                 "unknown virtio mmio register read: 0x{:x}/0x{:x}",
@@ -488,7 +493,7 @@ pub(crate) mod tests {
     use dbs_utils::epoll_manager::EpollManager;
     use kvm_bindings::kvm_userspace_memory_region;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{
         GuestAddress, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap, MemoryRegionAddress,
         MmapRegion,
@@ -524,7 +529,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> for MmioDevice {
+    impl VirtioDevice<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> for MmioDevice {
         fn device_type(&self) -> u32 {
             123
         }
@@ -620,7 +625,7 @@ pub(crate) mod tests {
     }
 
     pub fn set_driver_status(
-        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
+        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>,
         status: u32,
     ) {
         let mut buf = vec![0; 4];
@@ -657,7 +662,7 @@ pub(crate) mod tests {
         doorbell: bool,
         ctrl_queue_size: u16,
         resources: DeviceResources,
-    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
+    ) -> MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let device = MmioDevice::new(ctrl_queue_size);
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap());
         let kvm = Kvm::new().unwrap();
@@ -683,8 +688,7 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>
-    {
+    pub fn get_mmio_device() -> MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let resources = get_device_resource(false, false);
         get_mmio_device_inner(false, 0, resources)
     }
@@ -850,10 +854,7 @@ pub(crate) mod tests {
         d.device_vendor |= DRAGONBALL_FEATURE_MSI_INTR;
         let mut buf = vec![0; 2];
         d.read(IoAddress(0), IoAddress(REG_MMIO_MSI_CSR), &mut buf[..]);
-        assert_eq!(
-            LittleEndian::read_u16(&buf[..]),
-            MMIO_MSI_CSR_SUPPORTED as u16
-        );
+        assert_eq!(LittleEndian::read_u16(&buf[..]), MMIO_MSI_CSR_SUPPORTED);
 
         let mut dev_cfg = vec![0; 4];
         assert_eq!(
@@ -951,7 +952,7 @@ pub(crate) mod tests {
         LittleEndian::write_u32(&mut buf[..], 0b111);
         d.write(IoAddress(0), IoAddress(REG_MMIO_INTERRUPT_AC), &buf[..]);
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table(), 0);
 
         // When write descriptor, descriptor table will judge like this:
         // if desc_table.mask(0xf) != 0 {
@@ -960,30 +961,30 @@ pub(crate) mod tests {
         // desc_table is the data that will be written.
         LittleEndian::write_u32(&mut buf[..], 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table.0, 0x120);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().desc_table(), 0x120);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_DESC_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().desc_table.0,
+            d.state().queues_mut()[0].queue.lock().desc_table(),
             0x120 + (0x120 << 32)
         );
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring(), 0);
         LittleEndian::write_u32(&mut buf[..], 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring.0, 124);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().avail_ring(), 124);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_AVAIL_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().avail_ring.0,
+            d.state().queues_mut()[0].queue.lock().avail_ring(),
             124 + (124 << 32)
         );
 
-        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 0);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring(), 0);
         LittleEndian::write_u32(&mut buf[..], 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_LOW), &buf[..]);
-        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring.0, 128);
+        assert_eq!(d.state().queues_mut()[0].queue.lock().used_ring(), 128);
         d.write(IoAddress(0), IoAddress(REG_MMIO_QUEUE_USED_HIGH), &buf[..]);
         assert_eq!(
-            d.state().queues_mut()[0].queue.lock().used_ring.0,
+            d.state().queues_mut()[0].queue.lock().used_ring(),
             128 + (128 << 32)
         );
 
@@ -1085,9 +1086,7 @@ pub(crate) mod tests {
         assert_eq!(LittleEndian::read_u32(&buf[..]), 1);
     }
 
-    fn activate_device(
-        d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>,
-    ) {
+    fn activate_device(d: &mut MmioV2Device<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>) {
         set_driver_status(d, DEVICE_ACKNOWLEDGE);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER);
         set_driver_status(d, DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_FEATURES_OK);

@@ -16,7 +16,7 @@ use dbs_utils::{
 };
 use log::{debug, error, info, warn};
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::{QueueState, QueueStateOwnedT, QueueStateT};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryRegion, GuestRegionMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -36,7 +36,7 @@ pub const END_IO_EVENT: u32 = 2;
 // trigger the thread to deal with some specific event
 pub const KILL_EVENT: u32 = 4;
 
-pub(crate) struct InnerBlockEpollHandler<AS: DbsGuestAddressSpace, Q: QueueStateT> {
+pub(crate) struct InnerBlockEpollHandler<AS: DbsGuestAddressSpace, Q: QueueT> {
     pub(crate) disk_image: Box<dyn Ufile>,
     pub(crate) disk_image_id: Vec<u8>,
     pub(crate) rate_limiter: RateLimiter,
@@ -50,7 +50,7 @@ pub(crate) struct InnerBlockEpollHandler<AS: DbsGuestAddressSpace, Q: QueueState
     pub(crate) queue: VirtioQueueConfig<Q>,
 }
 
-impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
+impl<AS: DbsGuestAddressSpace, Q: QueueT> InnerBlockEpollHandler<AS, Q> {
     pub(crate) fn process_queue(&mut self) -> bool {
         let as_mem = self.vm_as.memory();
         let mem = as_mem.deref();
@@ -373,9 +373,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> InnerBlockEpollHandler<AS, Q> {
     }
 }
 
-impl<AS: DbsGuestAddressSpace, Q: QueueStateT> EpollHelperHandler
-    for InnerBlockEpollHandler<AS, Q>
-{
+impl<AS: DbsGuestAddressSpace, Q: QueueT> EpollHelperHandler for InnerBlockEpollHandler<AS, Q> {
     fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
         let slot = event.data as u32;
         match slot {
@@ -436,7 +434,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueStateT> EpollHelperHandler
 #[allow(dead_code)]
 pub(crate) struct BlockEpollHandler<
     AS: DbsGuestAddressSpace,
-    Q: QueueStateT + Send = QueueState,
+    Q: QueueT + Send = Queue,
     R: GuestMemoryRegion = GuestRegionMmap,
 > {
     pub(crate) evt_senders: Vec<Sender<KillEvent>>,
@@ -444,7 +442,7 @@ pub(crate) struct BlockEpollHandler<
     pub(crate) config: VirtioDeviceConfig<AS, Q, R>,
 }
 
-impl<AS: DbsGuestAddressSpace, Q: QueueStateT + Send, R: GuestMemoryRegion> MutEventSubscriber
+impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> MutEventSubscriber
     for BlockEpollHandler<AS, Q, R>
 {
     // a dumb impl for BlockEpollHandler to registe event manager for io drain.
