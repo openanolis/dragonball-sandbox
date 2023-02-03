@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use dbs_utils::epoll_manager::{EpollManager, EventOps, EventSet, Events, MutEventSubscriber};
 use dbs_virtio_devices::vsock::backend::{VsockInnerConnector, VsockStream};
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use timerfd::{SetTimeFlags, TimerFd, TimerState};
 
 pub use crate::dev_mgr_service::{
@@ -321,7 +321,7 @@ impl<S: UpcallClientService + Send> UpcallEpollHandler<S> {
         match info.state {
             UpcallClientState::WaitingServer => {
                 if let Err(e) = info.server_connection_check() {
-                    warn!("upcall connect server check failed, {}", e);
+                    debug!("upcall connect server check failed, {}", e);
                     info.set_state(UpcallClientState::WaitingServer);
                     if let Err(e) = self.set_reconnect() {
                         error!("set reconnect error: {}", e);
@@ -404,7 +404,7 @@ impl<S: UpcallClientService + Send> UpcallEpollHandler<S> {
                 error!("set reconnect error: {}", e);
             }
         }
-        info!("upcall reconnect server...");
+        debug!("upcall reconnect server...");
         // add new stream's fn to epoll
         if let Some(stream) = info.stream.as_ref() {
             ops.add(Events::new_raw(stream.as_raw_fd(), EventSet::IN))
