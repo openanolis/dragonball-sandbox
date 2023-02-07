@@ -19,7 +19,7 @@ mod address_space;
 pub use self::address_space::{AddressSpace, AddressSpaceBase};
 
 mod layout;
-pub use layout::AddressSpaceLayout;
+pub use layout::{AddressSpaceLayout, USABLE_END};
 
 mod memory;
 pub use memory::{GuestMemoryHybrid, GuestMemoryManager, GuestRegionHybrid, GuestRegionRaw};
