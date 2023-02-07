@@ -48,6 +48,8 @@ pub struct AddressSpaceRegion {
     file_offset: Option<FileOffset>,
     /// Mmap permission flags.
     perm_flags: i32,
+    /// Mmap protection flags.
+    prot_flags: i32,
     /// Hugepage madvise hint.
     ///
     /// It needs 'advise' or 'always' policy in host shmem config.
@@ -60,6 +62,7 @@ pub struct AddressSpaceRegion {
     is_anon: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl AddressSpaceRegion {
     /// Create an address space region with default configuration.
     pub fn new(ty: AddressSpaceRegionType, base: GuestAddress, size: GuestUsize) -> Self {
@@ -70,6 +73,7 @@ impl AddressSpaceRegion {
             host_numa_node_id: None,
             file_offset: None,
             perm_flags: libc::MAP_SHARED,
+            prot_flags: libc::PROT_READ | libc::PROT_WRITE,
             is_hugepage: false,
             is_hotplug: false,
             is_anon: false,
@@ -85,6 +89,7 @@ impl AddressSpaceRegion {
     /// * `numa_node_id` - Optional NUMA node id to allocate memory from
     /// * `file_offset` - Optional file descriptor and offset to map content from
     /// * `perm_flags` - mmap permission flags
+    /// * `prot_flags` - mmap protection flags
     /// * `is_hotplug` - Whether it's a region for hotplug.
     pub fn build(
         ty: AddressSpaceRegionType,
@@ -93,6 +98,7 @@ impl AddressSpaceRegion {
         host_numa_node_id: Option<u32>,
         file_offset: Option<FileOffset>,
         perm_flags: i32,
+        prot_flags: i32,
         is_hotplug: bool,
     ) -> Self {
         let mut region = Self::new(ty, base, size);
@@ -100,6 +106,7 @@ impl AddressSpaceRegion {
         region.set_host_numa_node_id(host_numa_node_id);
         region.set_file_offset(file_offset);
         region.set_perm_flags(perm_flags);
+        region.set_prot_flags(prot_flags);
         if is_hotplug {
             region.set_hotplug();
         }
@@ -133,6 +140,7 @@ impl AddressSpaceRegion {
             mem_type,
             mem_file_path,
             mem_prealloc,
+            libc::PROT_READ | libc::PROT_WRITE,
             is_hotplug,
         )
     }
@@ -147,6 +155,7 @@ impl AddressSpaceRegion {
     /// * `mem_file_path` - Memory file path
     /// * `mem_prealloc` - Whether to enable pre-allocation of guest memory
     /// * `is_hotplug` - Whether it's a region for hotplug.
+    /// * `prot_flags` - mmap protection flags
     pub fn create_memory_region(
         base: GuestAddress,
         size: GuestUsize,
@@ -154,6 +163,7 @@ impl AddressSpaceRegion {
         mem_type: &str,
         mem_file_path: &str,
         mem_prealloc: bool,
+        prot_flags: i32,
         is_hotplug: bool,
     ) -> Result<AddressSpaceRegion, AddressSpaceError> {
         let perm_flags = if mem_prealloc {
@@ -183,6 +193,7 @@ impl AddressSpaceRegion {
                     numa_node_id,
                     Some(FileOffset::new(file, 0)),
                     perm_flags,
+                    prot_flags,
                     is_hotplug,
                 )
             }
@@ -198,6 +209,7 @@ impl AddressSpaceRegion {
                     numa_node_id,
                     None,
                     perm_flags,
+                    prot_flags,
                     is_hotplug,
                 )
             }
@@ -223,6 +235,7 @@ impl AddressSpaceRegion {
                     numa_node_id,
                     Some(file_offset),
                     perm_flags,
+                    prot_flags,
                     is_hotplug,
                 )
             }
@@ -253,6 +266,7 @@ impl AddressSpaceRegion {
             size,
             None,
             None,
+            0,
             0,
             false,
         ))
@@ -287,6 +301,16 @@ impl AddressSpaceRegion {
     /// Set mmap permission flags for the address space region.
     pub fn set_perm_flags(&mut self, perm_flags: i32) {
         self.perm_flags = perm_flags;
+    }
+
+    /// Get mmap protection flags of the address space region.
+    pub fn prot_flags(&self) -> i32 {
+        self.prot_flags
+    }
+
+    /// Set mmap protection flags for the address space region.
+    pub fn set_prot_flags(&mut self, prot_flags: i32) {
+        self.prot_flags = prot_flags;
     }
 
     /// Get host_numa_node_id flags
@@ -396,6 +420,7 @@ mod tests {
         assert!(!reg1.has_file());
         assert!(reg1.file_offset().is_none());
         assert_eq!(reg1.perm_flags(), libc::MAP_SHARED);
+        assert_eq!(reg1.prot_flags(), libc::PROT_READ | libc::PROT_WRITE);
         assert_eq!(reg1.region_type(), AddressSpaceRegionType::DeviceMemory);
 
         let tmp_file = TempFile::new().unwrap();
@@ -409,6 +434,7 @@ mod tests {
             None,
             Some(FileOffset::new(f, 0x0)),
             0x5a,
+            0x5a,
             false,
         );
         assert_eq!(reg2.region_type(), AddressSpaceRegionType::DefaultMemory);
@@ -418,6 +444,7 @@ mod tests {
         assert!(reg2.has_file());
         assert!(reg2.file_offset().is_some());
         assert_eq!(reg2.perm_flags(), 0x5a);
+        assert_eq!(reg2.prot_flags(), 0x5a);
     }
 
     #[test]
