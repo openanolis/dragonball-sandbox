@@ -60,12 +60,12 @@ jobs:
           components: clippy
           target: ${{ matrix.arch }}-unknown-linux-gnu
           override: true
-      - uses: actions-rs/clippy-check@v1
+      - uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          use-cross: true
+          command: clippy
           args: --all-features --all-targets --target ${{ matrix.arch }}-unknown-linux-gnu -- -D warnings
-          name: Clippy Output
 
   deny:
     name: Deny

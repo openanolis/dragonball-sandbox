@@ -18,21 +18,22 @@ dbs-interrupt = { version = "0.2.0", path = "../dbs-interrupt", features = ["kvm
 dbs-utils = { version = "0.2.0", path = "../dbs-utils" }
 epoll = "4.0.1"
 io-uring = "0.5.2"
-fuse-backend-rs = { version = "0.9.6", optional = true }
+fuse-backend-rs = { version = "0.10.0", optional = true }
 kvm-bindings = "0.6.0"
-kvm-ioctls = "0.11.0"
+kvm-ioctls = "0.12.0"
 libc = "0.2.119"
 log = "0.4.14"
 nix = "0.23.1"
-nydus-blobfs = { version = "0.1.1", optional = true }
-nydus-rafs = { version = "0.1.1", optional = true }
+nydus-api = "0.2.0"
+nydus-blobfs = "0.2.0"
+nydus-rafs = "0.2.0"
 rlimit = "0.7.0"
 serde = "1.0.27"
 serde_json = "1.0.9"
 thiserror = "1"
 threadpool = "1"
 virtio-bindings = "0.1.0"
-virtio-queue = "0.4.0"
+virtio-queue = "0.6.0"
 vmm-sys-util = "0.11.0"
 vm-memory = { version = "0.9.0", features = [ "backend-mmap" ] }
 

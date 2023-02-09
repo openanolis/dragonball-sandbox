@@ -270,7 +270,7 @@ impl<T: InterruptManager> DeviceInterruptManager<T> {
             DeviceInterruptMode::GenericMsiIrq
             | DeviceInterruptMode::PciMsiIrq
             | DeviceInterruptMode::PciMsixIrq => {
-                let group = &self.intr_groups[self.current_idx as usize];
+                let group = &self.intr_groups[self.current_idx];
                 if index >= group.len() || index >= self.msi_config.len() as u32 {
                     return Err(Error::from_raw_os_error(libc::EINVAL));
                 }
@@ -489,7 +489,10 @@ pub(crate) mod tests {
 
     fn create_interrupt_manager() -> DeviceInterruptManager<Arc<KvmIrqManager>> {
         let vmfd = Arc::new(create_vm_fd());
+        #[cfg(target_arch = "x86_64")]
         vmfd.create_irq_chip().unwrap();
+        #[cfg(target_arch = "aarch64")]
+        let _ = dbs_arch::gic::create_gic(&vmfd, 1);
         let intr_mgr = Arc::new(KvmIrqManager::new(vmfd));
 
         let resource = create_init_resources();

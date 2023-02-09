@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::os::unix::io::FromRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
@@ -25,15 +25,12 @@ use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::VmFd;
 use log::{debug, error, info, trace, warn};
 use nix::sys::memfd;
+use nydus_api::ConfigV2;
 use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
-use nydus_rafs::{
-    fs::{Rafs, RafsConfig},
-    RafsIoRead,
-};
+use nydus_rafs::{fs::Rafs, RafsIoRead};
 use rlimit::Resource;
-use serde::Deserialize;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;
-use virtio_queue::QueueStateT;
+use virtio_queue::QueueT;
 use vm_memory::{
     FileOffset, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
 };
@@ -63,12 +60,6 @@ const CACHE_NONE_TIMEOUT: u64 = 0;
 pub(crate) const PASSTHROUGHFS: &str = "passthroughfs";
 pub(crate) const BLOBFS: &str = "blobfs";
 pub(crate) const RAFS: &str = "rafs";
-
-#[derive(Clone, Deserialize)]
-struct BlobCacheConfig {
-    #[serde(default)]
-    work_dir: String,
-}
 
 /// Info of backend filesystems of VirtioFs
 #[allow(dead_code)]
@@ -270,23 +261,23 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
     ) -> FsResult<(String, String, Option<u64>)> {
         let (blob_cache_dir, blob_ondemand_cfg) = match config.as_ref() {
             Some(cfg) => {
-                let conf = RafsConfig::from_str(cfg).map_err(|e| {
+                let conf = ConfigV2::from_str(cfg).map_err(|e| {
                     error!("failed to load rafs config {} error: {:?}", &cfg, e);
                     FsError::InvalidData
                 })?;
 
                 // v6 doesn't support digest validation yet.
-                if conf.digest_validate {
+                if conf.rafs.ok_or(FsError::InvalidData)?.validate {
                     error!("config.digest_validate needs to be false");
                     return Err(FsError::InvalidData);
                 }
 
-                let cache_config = conf.device.cache.cache_config;
-                let blob_config: BlobCacheConfig =
-                    serde_json::from_value(cache_config).map_err(|e| {
-                        error!("failed to get blob config");
-                        FsError::BackendFs(e.to_string())
-                    })?;
+                let work_dir = conf
+                    .cache
+                    .ok_or(FsError::InvalidData)?
+                    .file_cache
+                    .ok_or(FsError::InvalidData)?
+                    .work_dir;
 
                 let blob_ondemand_cfg = format!(
                     r#"
@@ -295,10 +286,10 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                         "bootstrap_path": "{}",
                         "blob_cache_dir": "{}"
                     }}"#,
-                    cfg, source, &blob_config.work_dir
+                    cfg, source, &work_dir
                 );
 
-                (blob_config.work_dir, blob_ondemand_cfg)
+                (work_dir, blob_ondemand_cfg)
             }
             None => return Err(FsError::BackendFs("no rafs config file".to_string())),
         };
@@ -480,16 +471,16 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         prefetch_list_path: Option<String>,
     ) -> FsResult<()> {
         debug!("http_server rafs");
-        let mut file = <dyn RafsIoRead>::from_file(&source)
-            .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {:?}", e)))?;
+        let file = Path::new(&source);
         let (mut rafs, rafs_cfg) = match config.as_ref() {
             Some(cfg) => {
-                let rafs_conf: RafsConfig =
-                    serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?;
+                let rafs_conf: Arc<ConfigV2> = Arc::new(
+                    serde_json::from_str(cfg).map_err(|e| FsError::BackendFs(e.to_string()))?,
+                );
 
                 (
-                    Rafs::new(rafs_conf, mountpoint, &mut file)
-                        .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {:?}", e)))?,
+                    Rafs::new(&rafs_conf, mountpoint, file)
+                        .map_err(|e| FsError::BackendFs(format!("Rafs::new() failed: {e:?}")))?,
                     cfg.clone(),
                 )
             }
@@ -500,13 +491,14 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             "{}: Import rafs with prefetch_files {:?}",
             VIRTIO_FS_NAME, prefetch_files
         );
-        rafs.import(file, prefetch_files)
-            .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {:?}", e)))?;
+        rafs.0
+            .import(rafs.1, prefetch_files)
+            .map_err(|e| FsError::BackendFs(format!("Import rafs failed: {e:?}")))?;
         info!(
             "{}: Rafs imported with prefetch_list_path {:?}",
             VIRTIO_FS_NAME, prefetch_list_path
         );
-        let fs = Box::new(rafs);
+        let fs = Box::new(rafs.0);
         match self.fs.mount(fs, mountpoint) {
             Ok(idx) => {
                 self.backend_fs.insert(
@@ -537,15 +529,14 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
         }
         if source.is_none() {
             return Err(FsError::BackendFs(format!(
-                "rafs mounted at {} doesn't have source configured",
-                mountpoint
+                "rafs mounted at {mountpoint} doesn't have source configured"
             )));
         }
         // safe because config is not None.
         let config = config.unwrap();
         let source = source.unwrap();
-        let rafs_conf: RafsConfig =
-            serde_json::from_str(&config).map_err(|e| FsError::BackendFs(e.to_string()))?;
+        let rafs_conf: Arc<ConfigV2> =
+            Arc::new(serde_json::from_str(&config).map_err(|e| FsError::BackendFs(e.to_string()))?);
         // Update rafs config, update BackendFsInfo as well.
         let new_info = match self.backend_fs.get(mountpoint) {
             Some(orig_info) => BackendFsInfo {
@@ -555,8 +546,7 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
             },
             None => {
                 return Err(FsError::BackendFs(format!(
-                    "rafs mount point {} is not mounted",
-                    mountpoint
+                    "rafs mount point {mountpoint} is not mounted"
                 )));
             }
         };
@@ -565,26 +555,24 @@ impl<AS: GuestAddressSpace> VirtioFs<AS> {
                 Some(f) => f,
                 None => {
                     return Err(FsError::BackendFs(format!(
-                        "rafs get_rootfs() failed: mountpoint {} not mounted",
-                        mountpoint
+                        "rafs get_rootfs() failed: mountpoint {mountpoint} not mounted"
                     )));
                 }
             },
             Err(e) => {
                 return Err(FsError::BackendFs(format!(
-                    "rafs get_rootfs() failed: {:?}",
-                    e
+                    "rafs get_rootfs() failed: {e:?}"
                 )));
             }
         };
         let any_fs = rootfs.deref().as_any();
         if let Some(fs_swap) = any_fs.downcast_ref::<Rafs>() {
             let mut file = <dyn RafsIoRead>::from_file(&source)
-                .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {:?}", e)))?;
+                .map_err(|e| FsError::BackendFs(format!("RafsIoRead failed: {e:?}")))?;
 
             fs_swap
-                .update(&mut file, rafs_conf)
-                .map_err(|e| FsError::BackendFs(format!("Update rafs failed: {:?}", e)))?;
+                .update(&mut file, &rafs_conf)
+                .map_err(|e| FsError::BackendFs(format!("Update rafs failed: {e:?}")))?;
             self.backend_fs.insert(mountpoint.to_string(), new_info);
             Ok(())
         } else {
@@ -772,7 +760,7 @@ where
     AS: 'static + GuestAddressSpace + Clone + Send + Sync,
     AS::T: Send,
     AS::M: Sync + Send,
-    Q: QueueStateT + Send + 'static,
+    Q: QueueT + Send + 'static,
 {
     fn device_type(&self) -> u32 {
         TYPE_VIRTIO_FS
@@ -978,7 +966,7 @@ pub mod tests {
     use dbs_device::resources::DeviceResources;
     use dbs_interrupt::NoopNotifier;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::GuestMemoryRegion;
     use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::tempfile::TempFile;
@@ -1045,7 +1033,7 @@ pub mod tests {
 
     pub(crate) fn create_fs_epoll_handler(
         id: String,
-    ) -> VirtioFsEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap> {
+    ) -> VirtioFsEpollHandler<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap> {
         let vfs = Arc::new(Vfs::new(VfsOptions::default()));
         let mem = Arc::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), 0x10000)]).unwrap());
         let queues = vec![
@@ -1152,44 +1140,42 @@ pub mod tests {
 
         assert!(!fs.is_dax_on());
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::device_type(
-                &fs
-            ),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::device_type(&fs),
             TYPE_VIRTIO_FS
         );
         let queue_size = vec![QUEUE_SIZE; NUM_QUEUE_OFFSET + NUM_QUEUES];
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::queue_max_sizes(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::queue_max_sizes(
                 &fs
             ),
             &queue_size[..]
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 0),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 0),
             fs.device_info.get_avail_features(0)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 1),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 1),
             fs.device_info.get_avail_features(1)
         );
         assert_eq!(
-            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 2),
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 2),
             fs.device_info.get_avail_features(2)
         );
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::set_acked_features(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::set_acked_features(
             &mut fs, 2, 0,
         );
         assert_eq!(
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::get_avail_features(&fs, 2),
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&fs, 2),
             0);
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::read_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut fs,
             0,
             &mut config,
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueStateSync, GuestRegionMmap>::write_config(
+        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut fs, 0, &config,
         );
     }
@@ -1220,7 +1206,7 @@ pub mod tests {
             .unwrap();
 
             let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-            let queues: Vec<VirtioQueueConfig<QueueStateSync>> = Vec::new();
+            let queues: Vec<VirtioQueueConfig<QueueSync>> = Vec::new();
 
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
@@ -1263,8 +1249,8 @@ pub mod tests {
 
             let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
             let queues = vec![
-                VirtioQueueConfig::<QueueStateSync>::create(1024, 0).unwrap(),
-                VirtioQueueConfig::<QueueStateSync>::create(2, 0).unwrap(),
+                VirtioQueueConfig::<QueueSync>::create(1024, 0).unwrap(),
+                VirtioQueueConfig::<QueueSync>::create(2, 0).unwrap(),
             ];
 
             let kvm = Kvm::new().unwrap();
@@ -1747,7 +1733,11 @@ pub mod tests {
             ResourceConstraint::new_mmio(0x1),
             ResourceConstraint::new_mmio(0x2),
         ];
-        VirtioDevice::<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>::get_resource_requirements(&fs, &mut requirements, true);
+        VirtioDevice::<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>::get_resource_requirements(
+            &fs,
+            &mut requirements,
+            true,
+        );
 
         assert_eq!(requirements[2], ResourceConstraint::LegacyIrq { irq: None });
         assert_eq!(requirements[3], ResourceConstraint::GenericIrq { size: 3 });
@@ -1793,10 +1783,9 @@ pub mod tests {
         let entry = dbs_device::resources::Resource::KvmMemSlot(0);
         resources.append(entry);
 
-        let res =
-            VirtioDevice::<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>::set_resource(
-                &mut fs, vm_fd, resources,
-            );
+        let res = VirtioDevice::<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap>::set_resource(
+            &mut fs, vm_fd, resources,
+        );
         assert!(res.is_ok());
         let content = res.unwrap().unwrap();
         assert_eq!(content.kvm_userspace_memory_region_slot, 0);

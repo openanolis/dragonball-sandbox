@@ -63,7 +63,7 @@ impl FromStr for MemorySourceType {
             "mmap" => Ok(MemorySourceType::MmapAnonymous),
             "hugeanon" => Ok(MemorySourceType::MmapAnonymousHugeTlbFs),
             "hugemmap" => Ok(MemorySourceType::MmapAnonymousHugeTlbFs),
-            _ => Err(format!("unknown memory source type {}", s)),
+            _ => Err(format!("unknown memory source type {s}")),
         }
     }
 }

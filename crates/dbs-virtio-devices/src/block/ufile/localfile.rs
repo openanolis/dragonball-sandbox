@@ -253,7 +253,7 @@ mod tests {
         let bytes_write = file_with_aio.write(original_content).unwrap();
         assert_eq!(bytes_write, size_of_content);
         file_with_aio.flush().unwrap();
-        file_with_aio.seek(SeekFrom::Start(0)).unwrap();
+        file_with_aio.rewind().unwrap();
         let mut content = vec![0; 11];
         let bytes_read = file_with_aio.read(&mut content).unwrap();
         assert_eq!(bytes_read, size_of_content);

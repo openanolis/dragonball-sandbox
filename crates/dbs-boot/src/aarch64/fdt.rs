@@ -13,6 +13,7 @@ use std::fmt::Debug;
 
 use dbs_arch::gic::its::ItsType::{self, PciMsiIts, PlatformMsiIts};
 use dbs_arch::gic::GICDevice;
+use dbs_arch::{pmu::VIRTUAL_PMU_IRQ, VpmuFeatureLevel};
 use dbs_arch::{DeviceInfoForFDT, DeviceType};
 
 use vm_fdt::FdtWriter;
@@ -56,6 +57,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     device_info: Option<&HashMap<(DeviceType, String), T>>,
     gic_device: &Box<dyn GICDevice>,
     initrd: &Option<InitrdConfig>,
+    vpmu_feature: &VpmuFeatureLevel,
 ) -> Result<Vec<u8>> {
     let mut fdt = FdtWriter::new()?;
 
@@ -81,6 +83,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     device_info.map_or(Ok(()), |v| create_devices_node(&mut fdt, v))?;
+    create_pmu_node(&mut fdt, vpmu_feature)?;
 
     // End Header node.
     fdt.end_node(root_node)?;
@@ -104,7 +107,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<()> {
     let num_cpus = vcpu_mpidr.len();
 
     for (cpu_index, iter) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
-        let cpu_name = format!("cpu@{:x}", cpu_index);
+        let cpu_name = format!("cpu@{cpu_index:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "arm,arm-v8")?;
@@ -143,10 +146,7 @@ fn create_chosen_node(
     fdt.property_string("bootargs", cmdline)?;
 
     if let Some(initrd_config) = initrd {
-        fdt.property_u64(
-            "linux,initrd-start",
-            initrd_config.address.raw_value() as u64,
-        )?;
+        fdt.property_u64("linux,initrd-start", initrd_config.address.raw_value())?;
         fdt.property_u64(
             "linux,initrd-end",
             initrd_config.address.raw_value() + initrd_config.size as u64,
@@ -368,20 +368,42 @@ fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
+fn create_pmu_node(fdt: &mut FdtWriter, vpmu_feature: &VpmuFeatureLevel) -> Result<()> {
+    if *vpmu_feature == VpmuFeatureLevel::Disabled {
+        return Ok(());
+    };
+
+    let pmu_node = fdt.begin_node("pmu")?;
+    fdt.property_string("compatible", "arm,armv8-pmuv3")?;
+    let pmu_intr_prop = [GIC_FDT_IRQ_TYPE_PPI, VIRTUAL_PMU_IRQ, IRQ_TYPE_LEVEL_HI];
+    fdt.property_array_u32("interrupts", &pmu_intr_prop)?;
+    fdt.end_node(pmu_node)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::aarch64::layout;
-    use dbs_arch::gic::create_gic;
-    use kvm_ioctls::Kvm;
     use std::cmp::min;
+    use std::collections::HashMap;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    use dbs_arch::{gic::create_gic, pmu::initialize_pmu, Error as ArchError};
+    use device_tree::DeviceTree;
+    use kvm_bindings::{kvm_vcpu_init, KVM_ARM_VCPU_PMU_V3, KVM_ARM_VCPU_PSCI_0_2};
+    use kvm_ioctls::{Kvm, VcpuFd, VmFd};
     use vm_memory::GuestMemoryMmap;
+
+    use super::*;
+    use crate::layout::{DRAM_MEM_MAX_SIZE, DRAM_MEM_START, FDT_MAX_SIZE};
 
     const LEN: u64 = 4096;
 
     fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
-        let dram_size = min(size as u64, layout::DRAM_MEM_MAX_SIZE) as usize;
-        vec![(GuestAddress(layout::DRAM_MEM_START), dram_size)]
+        let dram_size = min(size as u64, DRAM_MEM_MAX_SIZE) as usize;
+        vec![(GuestAddress(DRAM_MEM_START), dram_size)]
     }
 
     #[derive(Clone, Debug)]
@@ -394,7 +416,7 @@ mod tests {
         fn addr(&self) -> u64 {
             self.addr
         }
-        fn irq(&self) -> std::result::Result<u32, dbs_arch::Error> {
+        fn irq(&self) -> std::result::Result<u32, ArchError> {
             Ok(self.irq)
         }
         fn length(&self) -> u64 {
@@ -404,6 +426,7 @@ mod tests {
             None
         }
     }
+
     // The `load` function from the `device_tree` will mistakenly check the actual size
     // of the buffer with the allocated size. This works around that.
     fn set_size(buf: &mut [u8], pos: usize, val: usize) {
@@ -413,11 +436,42 @@ mod tests {
         buf[pos + 3] = (val & 0xff) as u8;
     }
 
+    // Initialize vcpu for pmu test
+    fn initialize_vcpu_with_pmu(vm: &VmFd, vcpu: &VcpuFd) -> Result<()> {
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi)
+            .expect("Cannot get preferred target");
+        kvi.features[0] = 1 << KVM_ARM_VCPU_PSCI_0_2 | 1 << KVM_ARM_VCPU_PMU_V3;
+        vcpu.vcpu_init(&kvi).map_err(|_| Error::InvalidArguments)?;
+        initialize_pmu(vm, vcpu).map_err(|_| Error::InvalidArguments)?;
+
+        Ok(())
+    }
+
+    // Create fdt dtb file
+    #[allow(dead_code)]
+    fn create_dtb_file(name: &str, dtb: &[u8]) {
+        // Use this code when wanting to generate a new DTB sample.
+        // Do manually check dtb files with dtc
+        // See https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/Documentation/manual.txt
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(path.join(format!("src/aarch64/test/{name}")))
+            .unwrap();
+        output
+            .set_len(FDT_MAX_SIZE as u64)
+            .map_err(|_| Error::InvalidArguments)
+            .unwrap();
+        output.write_all(dtb).unwrap();
+    }
+
     #[test]
     fn test_create_fdt_with_devices() {
-        let regions = arch_memory_regions(layout::FDT_MAX_SIZE + 0x1000);
+        let regions = arch_memory_regions(FDT_MAX_SIZE + 0x1000);
         let mem = GuestMemoryMmap::<()>::from_ranges(&regions).expect("Cannot initialize memory");
-        let dev_info: HashMap<(DeviceType, std::string::String), MMIODeviceInfo> = [
+        let dev_info: HashMap<(DeviceType, String), MMIODeviceInfo> = [
             (
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
                 MMIODeviceInfo { addr: 0x00, irq: 1 },
@@ -440,57 +494,55 @@ mod tests {
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
-        assert!(create_fdt(&mem, vec![0], "console=tty0", Some(&dev_info), &gic, &None,).is_ok())
+        let vpmu_feature = VpmuFeatureLevel::Disabled;
+        assert!(create_fdt(
+            &mem,
+            vec![0],
+            "console=tty0",
+            Some(&dev_info),
+            &gic,
+            &None,
+            &vpmu_feature
+        )
+        .is_ok())
     }
 
     #[test]
     fn test_create_fdt() {
-        let regions = arch_memory_regions(layout::FDT_MAX_SIZE + 0x1000);
+        let regions = arch_memory_regions(FDT_MAX_SIZE + 0x1000);
         let mem = GuestMemoryMmap::<()>::from_ranges(&regions).expect("Cannot initialize memory");
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
+        let vpmu_feature = VpmuFeatureLevel::Disabled;
         let dtb = create_fdt(
             &mem,
             vec![0],
             "console=tty0",
-            None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
+            None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
             &gic,
             &None,
+            &vpmu_feature,
         )
         .unwrap();
 
-        // // Use this code when wanting to generate a new DTB sample.
-        // // Do manually check dtb files with dtc
-        // // See https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/Documentation/manual.txt
-        // {
-        //     use std::fs;
-        //     use std::io::Write;
-        //     use std::path::PathBuf;
-        //     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        //     let mut output = fs::OpenOptions::new()
-        //         .write(true)
-        //         .create(true)
-        //         .open(path.join("src/aarch64/output.dtb"))
-        //         .unwrap();
-        //     output.write_all(&dtb).unwrap();
-        // }
+        // create_dtb_file("output.dtb", &dtb);
 
         let bytes = include_bytes!("test/output.dtb");
         let pos = 4;
-        let val = layout::FDT_MAX_SIZE;
+        let val = FDT_MAX_SIZE;
         let mut buf = vec![];
         buf.extend_from_slice(bytes);
-
         set_size(&mut buf, pos, val);
-        let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
-        let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
+
+        let original_fdt = DeviceTree::load(&buf).unwrap();
+        let generated_fdt = DeviceTree::load(&dtb).unwrap();
+        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
     }
 
     #[test]
     fn test_create_fdt_with_initrd() {
-        let regions = arch_memory_regions(layout::FDT_MAX_SIZE + 0x1000);
+        let regions = arch_memory_regions(FDT_MAX_SIZE + 0x1000);
         let mem = GuestMemoryMmap::<()>::from_ranges(&regions).expect("Cannot initialize memory");
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
@@ -499,42 +551,66 @@ mod tests {
             address: GuestAddress(0x10000000),
             size: 0x1000,
         };
+        let vpmu_feature = VpmuFeatureLevel::Disabled;
+        let dtb = create_fdt(
+            &mem,
+            vec![0],
+            "console=tty0",
+            None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
+            &gic,
+            &Some(initrd),
+            &vpmu_feature,
+        )
+        .unwrap();
 
+        // create_dtb_file("output_with_initrd.dtb", &dtb);
+
+        let bytes = include_bytes!("test/output_with_initrd.dtb");
+        let pos = 4;
+        let val = FDT_MAX_SIZE;
+        let mut buf = vec![];
+        buf.extend_from_slice(bytes);
+        set_size(&mut buf, pos, val);
+
+        let original_fdt = DeviceTree::load(&buf).unwrap();
+        let generated_fdt = DeviceTree::load(&dtb).unwrap();
+        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
+    }
+
+    #[test]
+    fn test_create_fdt_with_pmu() {
+        let regions = arch_memory_regions(FDT_MAX_SIZE + 0x1000);
+        let mem = GuestMemoryMmap::<()>::from_ranges(&regions).expect("Cannot initialize memory");
+        let kvm = Kvm::new().unwrap();
+        let vm = kvm.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let gic = create_gic(&vm, 1).unwrap();
+
+        assert!(initialize_vcpu_with_pmu(&vm, &vcpu).is_ok());
+
+        let vpmu_feature = VpmuFeatureLevel::FullyEnabled;
         let dtb = create_fdt(
             &mem,
             vec![0],
             "console=tty0",
             None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
             &gic,
-            &Some(initrd),
+            &None,
+            &vpmu_feature,
         )
         .unwrap();
 
-        // // Use this code when wanting to generate a new DTB sample.
-        // // Do manually check dtb files with dtc
-        // // See https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/Documentation/manual.txt
-        // {
-        //     use std::fs;
-        //     use std::io::Write;
-        //     use std::path::PathBuf;
-        //     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        //     let mut output = fs::OpenOptions::new()
-        //         .write(true)
-        //         .create(true)
-        //         .open(path.join("src/aarch64/output_with_initrd.dtb"))
-        //         .unwrap();
-        //     output.write_all(&dtb).unwrap();
-        // }
+        // create_dtb_file("output_with_pmu.dtb", &dtb);
 
-        let bytes = include_bytes!("test/output_with_initrd.dtb");
+        let bytes = include_bytes!("test/output_with_pmu.dtb");
         let pos = 4;
-        let val = layout::FDT_MAX_SIZE;
+        let val = FDT_MAX_SIZE;
         let mut buf = vec![];
         buf.extend_from_slice(bytes);
-
         set_size(&mut buf, pos, val);
-        let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
-        let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
+
+        let original_fdt = DeviceTree::load(&buf).unwrap();
+        let generated_fdt = DeviceTree::load(&dtb).unwrap();
+        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
     }
 }

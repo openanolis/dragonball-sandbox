@@ -652,15 +652,9 @@ mod tests {
             .write_all(original_content)
             .unwrap();
         // Rewind file pointer after write operation.
-        file_to_write_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_to_write_mmap_region.rewind().unwrap();
         guest_region
-            .read_from(
-                write_addr,
-                &mut file_to_write_mmap_region,
-                size_of_file as usize,
-            )
+            .read_from(write_addr, &mut file_to_write_mmap_region, size_of_file)
             .unwrap();
         let mut file_read_from_mmap_region = TempFile::new().unwrap().into_file();
         file_read_from_mmap_region
@@ -670,9 +664,7 @@ mod tests {
             .write_all_to(write_addr, &mut file_read_from_mmap_region, size_of_file)
             .unwrap();
         // Rewind file pointer after write operation.
-        file_read_from_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_read_from_mmap_region.rewind().unwrap();
         let mut content = String::new();
         file_read_from_mmap_region
             .read_to_string(&mut content)
@@ -725,15 +717,9 @@ mod tests {
             .write_all(original_content)
             .unwrap();
         // Rewind file pointer after write operation.
-        file_to_write_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_to_write_mmap_region.rewind().unwrap();
         guest_region
-            .read_from(
-                write_addr,
-                &mut file_to_write_mmap_region,
-                size_of_file as usize,
-            )
+            .read_from(write_addr, &mut file_to_write_mmap_region, size_of_file)
             .unwrap();
         let mut file_read_from_mmap_region = TempFile::new().unwrap().into_file();
         file_read_from_mmap_region
@@ -743,9 +729,7 @@ mod tests {
             .write_all_to(write_addr, &mut file_read_from_mmap_region, size_of_file)
             .unwrap();
         // Rewind file pointer after write operation.
-        file_read_from_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_read_from_mmap_region.rewind().unwrap();
         let mut content = String::new();
         file_read_from_mmap_region
             .read_to_string(&mut content)
@@ -802,9 +786,7 @@ mod tests {
         file_to_write_mmap_region
             .write_all(original_content)
             .unwrap();
-        file_to_write_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_to_write_mmap_region.rewind().unwrap();
         guest_mmap_region
             .read_exact_from(write_addr, &mut file_to_write_mmap_region, size_of_file)
             .unwrap();
@@ -815,9 +797,7 @@ mod tests {
         guest_mmap_region
             .write_all_to(write_addr, &mut file_read_from_mmap_region, size_of_file)
             .unwrap();
-        file_read_from_mmap_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_read_from_mmap_region.rewind().unwrap();
         let mut content = String::new();
         file_read_from_mmap_region
             .read_to_string(&mut content)
@@ -836,9 +816,7 @@ mod tests {
         file_to_write_raw_region
             .write_all(original_content)
             .unwrap();
-        file_to_write_raw_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_to_write_raw_region.rewind().unwrap();
         guest_raw_region
             .read_exact_from(write_addr, &mut file_to_write_raw_region, size_of_file)
             .unwrap();
@@ -849,9 +827,7 @@ mod tests {
         guest_raw_region
             .write_all_to(write_addr, &mut file_read_from_raw_region, size_of_file)
             .unwrap();
-        file_read_from_raw_region
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        file_read_from_raw_region.rewind().unwrap();
         let mut content = String::new();
         file_read_from_raw_region
             .read_to_string(&mut content)
