@@ -25,3 +25,12 @@
 
 - update the license information for dbs-boot
 - vm-memory update to 0.9.0
+
+## v0.3.1
+
+### Updated
+
+- Update kvm-bindings to v0.6.0
+- Use caret dependencies for kvm-ioctls
+- Update kvm-ioctls to v0.12.0
+- Update fdt in aarch64 to support vPMU

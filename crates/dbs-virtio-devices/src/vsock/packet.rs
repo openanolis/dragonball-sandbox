@@ -117,9 +117,7 @@ impl HdrWrapper {
         // TODO: check buffer alignment
 
         mem.checked_offset(desc.addr(), VSOCK_PKT_HDR_SIZE)
-            .ok_or_else(|| {
-                VsockError::GuestMemoryBounds(desc.addr().0, VSOCK_PKT_HDR_SIZE as usize)
-            })?;
+            .ok_or_else(|| VsockError::GuestMemoryBounds(desc.addr().0, VSOCK_PKT_HDR_SIZE))?;
 
         // It's safe to create the wrapper from this pointer, as:
         // - the guest driver aligned the data; and
@@ -448,7 +446,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 mod tests {
-    use virtio_queue::QueueStateT;
+    use virtio_queue::QueueT;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     use super::super::defs::MAX_PKT_BUF_SIZE;

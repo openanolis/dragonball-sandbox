@@ -63,13 +63,16 @@ pub struct MmioDevRequest {
 pub struct CpuDevRequest {
     /// hotplug or hot unplug cpu count
     pub count: u8,
+    #[cfg(target_arch = "x86_64")]
     /// apic version
     pub apic_ver: u8,
+    #[cfg(target_arch = "x86_64")]
     /// apic id array
     pub apic_ids: [u8; 256],
 }
 
 impl PartialEq for CpuDevRequest {
+    #[cfg(target_arch = "x86_64")]
     fn eq(&self, other: &CpuDevRequest) -> bool {
         self.count == other.count
             && self.apic_ver == other.apic_ver
@@ -79,9 +82,15 @@ impl PartialEq for CpuDevRequest {
                 .zip(other.apic_ids.iter())
                 .all(|(s, o)| s == o)
     }
+
+    #[cfg(target_arch = "aarch64")]
+    fn eq(&self, other: &CpuDevRequest) -> bool {
+        self.count == other.count
+    }
 }
 
 impl fmt::Debug for CpuDevRequest {
+    #[cfg(target_arch = "x86_64")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use std::fmt::Write as _;
         let mut apic_ids = String::from("[ ");
@@ -89,7 +98,7 @@ impl fmt::Debug for CpuDevRequest {
             if apic_id == &0 {
                 break;
             }
-            let _ = write!(apic_ids, "{}", apic_id);
+            let _ = write!(apic_ids, "{apic_id}");
             apic_ids.push(' ');
         }
         apic_ids.push_str(" ]");
@@ -97,6 +106,13 @@ impl fmt::Debug for CpuDevRequest {
             .field("count", &self.count)
             .field("apic_ver", &self.apic_ver)
             .field("apic_ids", &apic_ids)
+            .finish()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CpuDevRequest")
+            .field("count", &self.count)
             .finish()
     }
 }
@@ -161,8 +177,12 @@ impl DevMgrRequest {
 #[repr(C)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CpuDevResponse {
+    #[cfg(target_arch = "x86_64")]
     /// apic id index of last act cpu
     pub apic_id_index: u32,
+    #[cfg(target_arch = "aarch64")]
+    /// cpu id of last act cpu
+    pub cpu_id: u32,
 }
 
 /// Device manager's response inner message.
@@ -318,7 +338,9 @@ mod tests {
         {
             let cpu_dev_request = CpuDevRequest {
                 count: 1,
+                #[cfg(target_arch = "x86_64")]
                 apic_ver: 2,
+                #[cfg(target_arch = "x86_64")]
                 apic_ids: [3; 256],
             };
             let dev_mgr_request = DevMgrRequest::AddVcpu(cpu_dev_request.clone());
@@ -343,7 +365,9 @@ mod tests {
         {
             let cpu_dev_request = CpuDevRequest {
                 count: 1,
+                #[cfg(target_arch = "x86_64")]
                 apic_ver: 2,
+                #[cfg(target_arch = "x86_64")]
                 apic_ids: [3; 256],
             };
             let dev_mgr_request = DevMgrRequest::DelVcpu(cpu_dev_request.clone());
@@ -386,12 +410,23 @@ mod tests {
             let mut vcpu_result = unsafe {
                 &mut *(buffer[(size_hdr + mem::size_of::<u32>())..].as_ptr() as *mut CpuDevResponse)
             };
-            vcpu_result.apic_id_index = 1;
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                vcpu_result.apic_id_index = 1;
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                vcpu_result.cpu_id = 1;
+            }
 
             match DevMgrResponse::make(&buffer).unwrap() {
                 DevMgrResponse::CpuDev(resp) => {
                     assert_eq!(resp.result, 0);
+                    #[cfg(target_arch = "x86_64")]
                     assert_eq!(resp.info.apic_id_index, 1);
+                    #[cfg(target_arch = "aarch64")]
+                    assert_eq!(resp.info.cpu_id, 1);
                 }
                 _ => unreachable!(),
             }

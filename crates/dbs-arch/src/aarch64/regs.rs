@@ -5,6 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+//! Constants and utilities for aarch64 CPU generic, system and model specific registers.
+
 use std::{mem, result};
 
 use kvm_bindings::*;
@@ -111,20 +113,20 @@ arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
 /// * `mem` - Reserved DRAM for current VM.
 pub fn setup_regs(vcpu: &VcpuFd, cpu_id: u8, boot_ip: u64, fdt_address: u64) -> Result<()> {
     // Get the register index of the PSTATE (Processor State) register.
-    vcpu.set_one_reg(arm64_core_reg!(pstate), PSTATE_FAULT_BITS_64)
+    vcpu.set_one_reg(arm64_core_reg!(pstate), PSTATE_FAULT_BITS_64 as u128)
         .map_err(Error::SetCoreRegister)?;
 
     // Other vCPUs are powered off initially awaiting PSCI wakeup.
     if cpu_id == 0 {
         // Setting the PC (Processor Counter) to the current program address (kernel address).
-        vcpu.set_one_reg(arm64_core_reg!(pc), boot_ip)
+        vcpu.set_one_reg(arm64_core_reg!(pc), boot_ip as u128)
             .map_err(Error::SetCoreRegister)?;
 
         // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
         // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
         // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arm64/booting.txt.
         // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
-        vcpu.set_one_reg(arm64_core_reg!(regs), fdt_address)
+        vcpu.set_one_reg(arm64_core_reg!(regs), fdt_address as u128)
             .map_err(Error::SetCoreRegister)?;
     }
     Ok(())
@@ -154,7 +156,7 @@ pub fn is_system_register(regid: u64) -> bool {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn read_mpidr(vcpu: &VcpuFd) -> Result<u64> {
+pub fn read_mpidr(vcpu: &VcpuFd) -> Result<u128> {
     vcpu.get_one_reg(MPIDR_EL1).map_err(Error::GetSysRegister)
 }
 
@@ -178,6 +180,7 @@ mod tests {
 
         assert!(setup_regs(&vcpu, 0, 0x0, crate::gic::GIC_REG_END_ADDRESS).is_ok());
     }
+
     #[test]
     fn test_read_mpidr() {
         let kvm = Kvm::new().unwrap();

@@ -24,7 +24,7 @@ use dbs_interrupt::{InterruptNotifier, NoopNotifier};
 use dbs_utils::epoll_manager::{EpollManager, EpollSubscriber, SubscriberId};
 use kvm_ioctls::VmFd;
 use log::{error, warn};
-use virtio_queue::{DescriptorChain, QueueStateOwnedT, QueueStateSync, QueueStateT};
+use virtio_queue::{DescriptorChain, QueueOwnedT, QueueSync, QueueT};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
     GuestUsize,
@@ -37,7 +37,7 @@ use crate::{ActivateError, ActivateResult, Error, Result};
 ///
 /// The `VirtioQueueConfig` maintains configuration information for a Virtio queue.
 /// It also provides methods to access the queue and associated interrupt/event notifiers.
-pub struct VirtioQueueConfig<Q: QueueStateT = QueueStateSync> {
+pub struct VirtioQueueConfig<Q: QueueT = QueueSync> {
     /// Virtio queue object to access the associated queue.
     pub queue: Q,
     /// EventFd to receive queue notification from guest.
@@ -48,7 +48,7 @@ pub struct VirtioQueueConfig<Q: QueueStateT = QueueStateSync> {
     index: u16,
 }
 
-impl<Q: QueueStateT> VirtioQueueConfig<Q> {
+impl<Q: QueueT> VirtioQueueConfig<Q> {
     /// Create a `VirtioQueueConfig` object.
     pub fn new(
         queue: Q,
@@ -68,8 +68,9 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
     pub fn create(queue_size: u16, index: u16) -> Result<Self> {
         let eventfd = EventFd::new(EFD_NONBLOCK).map_err(Error::IOError)?;
 
+        let queue = Q::new(queue_size)?;
         Ok(VirtioQueueConfig {
-            queue: Q::new(queue_size),
+            queue,
             eventfd: Arc::new(eventfd),
             notifier: Arc::new(NoopNotifier::new()),
             index,
@@ -151,7 +152,7 @@ impl<Q: QueueStateT> VirtioQueueConfig<Q> {
     }
 }
 
-impl<Q: QueueStateT + Clone> Clone for VirtioQueueConfig<Q> {
+impl<Q: QueueT + Clone> Clone for VirtioQueueConfig<Q> {
     fn clone(&self) -> Self {
         VirtioQueueConfig {
             queue: self.queue.clone(),
@@ -169,7 +170,7 @@ impl<Q: QueueStateT + Clone> Clone for VirtioQueueConfig<Q> {
 /// object. On VirtioDevice::reset(), the configuration object should be returned to the caller.
 pub struct VirtioDeviceConfig<
     AS: GuestAddressSpace,
-    Q: QueueStateT = QueueStateSync,
+    Q: QueueT = QueueSync,
     R: GuestMemoryRegion = GuestRegionMmap,
 > {
     /// `GustMemoryAddress` object to access the guest memory.
@@ -191,7 +192,7 @@ pub struct VirtioDeviceConfig<
 impl<AS, Q, R> VirtioDeviceConfig<AS, Q, R>
 where
     AS: GuestAddressSpace,
-    Q: QueueStateT,
+    Q: QueueT,
     R: GuestMemoryRegion,
 {
     /// Creates a new `VirtioDeviceConfig` object.
@@ -339,7 +340,7 @@ pub trait VirtioRegionHandler: Send {
 /// and all the events, memory, and queues for device operation will be moved into the device.
 /// Optionally, a virtio device can implement device reset in which it returns said resources and
 /// resets its internal.
-pub trait VirtioDevice<AS: GuestAddressSpace, Q: QueueStateT, R: GuestMemoryRegion>: Send {
+pub trait VirtioDevice<AS: GuestAddressSpace, Q: QueueT, R: GuestMemoryRegion>: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
 
@@ -521,10 +522,7 @@ impl VirtioDeviceInfo {
     }
 
     /// Validate size of queues and queue eventfds.
-    pub fn check_queue_sizes<Q: QueueStateT>(
-        &self,
-        queues: &[VirtioQueueConfig<Q>],
-    ) -> ActivateResult {
+    pub fn check_queue_sizes<Q: QueueT>(&self, queues: &[VirtioQueueConfig<Q>]) -> ActivateResult {
         if queues.is_empty() || queues.len() != self.queue_sizes.len() {
             error!(
                 "{}: invalid configuration: maximum {} queue(s), got {} queues",
@@ -547,7 +545,7 @@ impl VirtioDeviceInfo {
         self.epoll_manager.remove_subscriber(id).map_err(|e| {
             Error::IOError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("remove_event_handler failed: {:?}", e),
+                format!("remove_event_handler failed: {e:?}"),
             ))
         })
     }
@@ -563,7 +561,7 @@ pub(crate) mod tests {
     };
     use dbs_utils::epoll_manager::{EventOps, Events, MutEventSubscriber};
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
 
     pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
@@ -583,7 +581,7 @@ pub(crate) mod tests {
         let mut queues = Vec::new();
         for idx in 0..8 {
             queues.push(VirtioQueueConfig::new(
-                QueueStateSync::new(512),
+                QueueSync::new(512).unwrap(),
                 Arc::new(EventFd::new(0).unwrap()),
                 Arc::new(LegacyNotifier::new(
                     group.clone(),
@@ -613,7 +611,7 @@ pub(crate) mod tests {
         let status = Arc::new(InterruptStatusRegister32::new());
         let notifier = Arc::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
 
-        let mut cfg = VirtioQueueConfig::<QueueStateSync>::create(1024, 1).unwrap();
+        let mut cfg = VirtioQueueConfig::<QueueSync>::create(1024, 1).unwrap();
         cfg.set_interrupt_notifier(notifier);
 
         let mem =
@@ -638,7 +636,7 @@ pub(crate) mod tests {
         let status = Arc::new(InterruptStatusRegister32::new());
         let notifier = Arc::new(LegacyNotifier::new(group, status, VIRTIO_INTR_VRING));
 
-        let mut cfg = VirtioQueueConfig::<QueueStateSync>::create(1024, 1).unwrap();
+        let mut cfg = VirtioQueueConfig::<QueueSync>::create(1024, 1).unwrap();
         cfg.set_interrupt_notifier(notifier);
         let mut cfg = cfg.clone();
 
@@ -700,9 +698,7 @@ pub(crate) mod tests {
         device_info: VirtioDeviceInfo,
     }
 
-    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap>
-        for DummyDevice
-    {
+    impl VirtioDevice<GuestMemoryAtomic<GuestMemoryMmap>, QueueSync, GuestRegionMmap> for DummyDevice {
         fn device_type(&self) -> u32 {
             0xffff
         }
@@ -821,7 +817,7 @@ pub(crate) mod tests {
         assert!(matches!(
             device
                 .device_info
-                .check_queue_sizes::<QueueStateSync>(&queue_size),
+                .check_queue_sizes::<QueueSync>(&queue_size),
             Err(ActivateError::InvalidParam)
         ));
 
@@ -846,8 +842,8 @@ pub(crate) mod tests {
         let gm = GuestMemoryAtomic::<GuestMemoryMmap>::new(gmm);
 
         let queues = vec![
-            VirtioQueueConfig::create(0, 0).unwrap(),
-            VirtioQueueConfig::create(0, 0).unwrap(),
+            VirtioQueueConfig::create(2, 0).unwrap(),
+            VirtioQueueConfig::create(2, 0).unwrap(),
         ];
         let kvm = Kvm::new().unwrap();
         let vm_fd = Arc::new(kvm.create_vm().unwrap());

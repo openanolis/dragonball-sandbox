@@ -186,7 +186,7 @@ mod tests {
     use dbs_interrupt::NoopNotifier;
     use dbs_utils::epoll_manager::EpollManager;
     use kvm_ioctls::Kvm;
-    use virtio_queue::QueueStateSync;
+    use virtio_queue::QueueSync;
     use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryMmap, GuestRegionMmap};
     use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -337,9 +337,9 @@ mod tests {
         pub fn create_event_handler_context(&self) -> EventHandlerContext {
             const QSIZE: u16 = 256;
 
-            let guest_rxvq = GuestQ::new(GuestAddress(0x0010_0000), &self.mem, QSIZE as u16);
-            let guest_txvq = GuestQ::new(GuestAddress(0x0020_0000), &self.mem, QSIZE as u16);
-            let guest_evvq = GuestQ::new(GuestAddress(0x0030_0000), &self.mem, QSIZE as u16);
+            let guest_rxvq = GuestQ::new(GuestAddress(0x0010_0000), &self.mem, QSIZE);
+            let guest_txvq = GuestQ::new(GuestAddress(0x0020_0000), &self.mem, QSIZE);
+            let guest_evvq = GuestQ::new(GuestAddress(0x0030_0000), &self.mem, QSIZE);
             let rxvq = guest_rxvq.create_queue();
             let txvq = guest_txvq.create_queue();
             let evvq = guest_evvq.create_queue();
@@ -412,10 +412,9 @@ mod tests {
 
     pub struct EventHandlerContext<'a> {
         pub device: Vsock<Arc<GuestMemoryMmap>, TestMuxer>,
-        pub epoll_handler: Option<
-            VsockEpollHandler<Arc<GuestMemoryMmap>, QueueStateSync, GuestRegionMmap, TestMuxer>,
-        >,
-        pub queues: Vec<VirtioQueueConfig<QueueStateSync>>,
+        pub epoll_handler:
+            Option<VsockEpollHandler<Arc<GuestMemoryMmap>, QueueSync, GuestRegionMmap, TestMuxer>>,
+        pub queues: Vec<VirtioQueueConfig<QueueSync>>,
         pub guest_rxvq: GuestQ<'a>,
         pub guest_txvq: GuestQ<'a>,
         pub guest_evvq: GuestQ<'a>,
@@ -428,7 +427,7 @@ mod tests {
             let kvm = Kvm::new().unwrap();
             let vm_fd = Arc::new(kvm.create_vm().unwrap());
             let resources = DeviceResources::new();
-            let config = VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueStateSync>::new(
+            let config = VirtioDeviceConfig::<Arc<GuestMemoryMmap<()>>, QueueSync>::new(
                 Arc::new(mem.clone()),
                 vm_fd,
                 resources,

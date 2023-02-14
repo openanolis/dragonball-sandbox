@@ -6,6 +6,8 @@
 
 /// Module for the global interrupt controller configuration.
 pub mod gic;
+/// Module for PMU virtualization.
+pub mod pmu;
 /// Logic for configuring aarch64 registers.
 pub mod regs;
 
@@ -39,7 +41,7 @@ pub enum DeviceType {
 
 impl fmt::Display for DeviceType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 

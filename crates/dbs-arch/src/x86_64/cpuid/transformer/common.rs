@@ -72,7 +72,7 @@ pub fn update_extended_topology_entry(
             // maximum 2 hyperthreads per core that can be represented by 1 bit.
             entry
                 .eax
-                .write_bits_in_range(&eax::APICID_BITRANGE, thread_width as u32);
+                .write_bits_in_range(&eax::APICID_BITRANGE, thread_width);
             // When cpu_count == 1 or HT is disabled, there is 1 logical core at this level
             // Otherwise there are 2
             entry.ebx.write_bits_in_range(
@@ -88,14 +88,14 @@ pub fn update_extended_topology_entry(
         1 => {
             entry
                 .eax
-                .write_bits_in_range(&eax::APICID_BITRANGE, core_width as u32);
+                .write_bits_in_range(&eax::APICID_BITRANGE, core_width);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(vm_spec.threads_per_core * vm_spec.cores_per_die),
             );
             entry
                 .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_CORE);
@@ -148,7 +148,7 @@ pub fn update_extended_topology_v2_entry(
             // maximum 2 hyperthreads per core that can be represented by 1 bit.
             entry
                 .eax
-                .write_bits_in_range(&eax::APICID_BITRANGE, thread_width as u32);
+                .write_bits_in_range(&eax::APICID_BITRANGE, thread_width);
             // When cpu_count == 1 or HT is disabled, there is 1 logical core at this level
             // Otherwise there are 2
             entry.ebx.write_bits_in_range(
@@ -163,14 +163,14 @@ pub fn update_extended_topology_v2_entry(
         1 => {
             entry
                 .eax
-                .write_bits_in_range(&eax::APICID_BITRANGE, core_width as u32);
+                .write_bits_in_range(&eax::APICID_BITRANGE, core_width);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(vm_spec.threads_per_core * vm_spec.cores_per_die),
             );
             entry
                 .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_CORE);
@@ -179,7 +179,7 @@ pub fn update_extended_topology_v2_entry(
         5 => {
             entry
                 .eax
-                .write_bits_in_range(&eax::APICID_BITRANGE, die_width as u32);
+                .write_bits_in_range(&eax::APICID_BITRANGE, die_width);
             entry.ebx.write_bits_in_range(
                 &ebx::NUM_LOGICAL_PROCESSORS_BITRANGE,
                 u32::from(
@@ -188,7 +188,7 @@ pub fn update_extended_topology_v2_entry(
             );
             entry
                 .ecx
-                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index as u32);
+                .write_bits_in_range(&ecx::LEVEL_NUMBER_BITRANGE, entry.index);
             entry
                 .ecx
                 .write_bits_in_range(&ecx::LEVEL_TYPE_BITRANGE, LEVEL_TYPE_DIE);

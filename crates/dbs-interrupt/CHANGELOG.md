@@ -22,3 +22,10 @@
 ### Updated
 
 - Update vmm-sys-utils to 0.11.0
+
+## v0.2.2
+
+### Updated
+
+- Update kvm-bindings to 0.6.0
+- Update kvm-ioctls to 0.12.0

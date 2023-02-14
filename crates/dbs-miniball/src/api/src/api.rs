@@ -61,8 +61,8 @@ impl Cli {
         let help_msg = String::from_utf8_lossy(&help_msg_buf);
 
         let matches = app.get_matches_from_safe(cmdline_args).map_err(|e| {
-            eprintln!("{}", help_msg);
-            format!("Invalid command line arguments: {}", e)
+            eprintln!("{help_msg}");
+            format!("Invalid command line arguments: {e}")
         })?;
 
         VMMConfig::builder()
@@ -72,7 +72,7 @@ impl Cli {
             .net_config(matches.value_of("net"))
             .block_config(matches.value_of("block"))
             .build()
-            .map_err(|e| format!("{:?}", e))
+            .map_err(|e| format!("{e:?}"))
     }
 }
 

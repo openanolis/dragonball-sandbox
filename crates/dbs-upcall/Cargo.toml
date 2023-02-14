@@ -1,6 +1,6 @@
 [package]
 name = "dbs-upcall"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Alibaba Dragonball Team"]
 license = "Apache-2.0"
 edition = "2018"
@@ -17,4 +17,4 @@ thiserror = "1"
 timerfd = "1.2.0"
 
 dbs-utils = { path = "../dbs-utils", version = "0.2" }
-dbs-virtio-devices = { path = "../dbs-virtio-devices", version = "0.1", features = ["virtio-vsock"] }
+dbs-virtio-devices = { path = "../dbs-virtio-devices", version = "0.2", features = ["virtio-vsock"] }
