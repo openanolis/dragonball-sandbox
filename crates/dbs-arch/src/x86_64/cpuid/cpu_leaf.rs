@@ -311,6 +311,52 @@ pub mod leaf_0x1f {
     }
 }
 
+/// KVM CPUID bits
+/// A guest running on a kvm host, can check some of its features using cpuid. This is not always guaranteed to work,
+/// since userspace can mask-out some, or even all KVM-related cpuid features before launching a guest.
+/// More information: https://docs.kernel.org/virt/kvm/x86/cpuid.html
+pub mod leaf_0x4000_0001 {
+    pub const LEAF_NUM: u32 = 0x4000_0001;
+    pub mod eax {
+        /// kvmclock available at msrs 0x11 and 0x12
+        pub const KVM_FEATURE_CLOCKSOURCE_BITINDEX: u32 = 0;
+        /// not necessary to perform delays on PIO operations
+        pub const KVM_FEATURE_NOP_IO_DELAY_BITINDEX: u32 = 1;
+        /// deprecated
+        pub const KVM_FEATURE_MMU_OP_BITINDEX: u32 = 2;
+        /// kvmclock available at msrs 0x4b564d00 and 0x4b564d01
+        pub const KVM_FEATURE_CLOCKSOURCE2_BITINDEX: u32 = 3;
+        /// async pf can be enabled by writing to msr 0x4b564d02
+        pub const KVM_FEATURE_ASYNC_PF_BITINDEX: u32 = 4;
+        /// steal time can be enabled by writing to msr 0x4b564d03
+        pub const KVM_FEATURE_STEAL_TIME_BITINDEX: u32 = 5;
+        /// paravirtualized end of interrupt handler can be enabled by writing to msr 0x4b564d04
+        pub const KVM_FEATURE_PV_EOI_BITINDEX: u32 = 6;
+        /// guest checks this feature bit before enabling paravirtualized spinlock support
+        pub const KVM_FEATURE_PV_UNHALT_BITINDEX: u32 = 7;
+        /// guest checks this feature bit before enabling paravirtualized tlb flush
+        pub const KVM_FEATURE_PV_TLB_FLUSH_BITINDEX: u32 = 9;
+        /// paravirtualized async PF VM EXIT can be enabled by setting bit 2 when writing to msr 0x4b564d02
+        pub const KVM_FEATURE_ASYNC_PF_VMEXIT_BITINDEX: u32 = 10;
+        /// guest checks this feature bit before enabling paravirtualized send IPIs
+        pub const KVM_FEATURE_PV_SEND_IPI_BITINDEX: u32 = 11;
+        /// host-side polling on HLT can be disabled by writing to msr 0x4b564d05.
+        pub const KVM_FEATURE_POLL_CONTROL_BITINDEX: u32 = 12;
+        /// guest checks this feature bit before using paravirtualized sched yield.
+        pub const KVM_FEATURE_PV_SCHED_YIELD_BITINDEX: u32 = 13;
+        /// guest checks this feature bit before using the second async pf control msr 0x4b564d06 and async pf acknowledgment msr 0x4b564d07.
+        pub const KVM_FEATURE_ASYNC_PF_INT_BITINDEX: u32 = 14;
+        /// guest checks this feature bit before using extended destination ID bits in MSI address bits 11-5.
+        pub const KVM_FEATURE_MSI_EXT_DEST_ID_BITINDEX: u32 = 15;
+        /// guest checks this feature bit before using the map gpa range hypercall to notify the page state change
+        pub const KVM_FEATURE_HC_MAP_GPA_RANGE_BITINDEX: u32 = 16;
+        /// guest checks this feature bit before using MSR_KVM_MIGRATION_CONTROL
+        pub const KVM_FEATURE_MIGRATION_CONTROL_BITINDEX: u32 = 17;
+        /// host will warn if no guest-side per-cpu warps are expected in kvmclock
+        pub const KVM_FEATURE_CLOCKSOURCE_STABLE_BITINDEX: u32 = 24;
+    }
+}
+
 pub mod leaf_0x80000000 {
     pub const LEAF_NUM: u32 = 0x8000_0000;
 
