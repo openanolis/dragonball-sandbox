@@ -263,38 +263,7 @@ mod tests {
     const GUEST_DEVICE_START: u64 = GUEST_MEM_END + 1;
 
     #[test]
-    fn test_is_reserved_region() {
-        let page_size = 4096;
-        let address_space_region = vec![
-            Arc::new(AddressSpaceRegion::new(
-                AddressSpaceRegionType::DefaultMemory,
-                GuestAddress(page_size),
-                page_size as GuestUsize,
-            )),
-            Arc::new(AddressSpaceRegion::new(
-                AddressSpaceRegionType::DefaultMemory,
-                GuestAddress(page_size * 2),
-                page_size as GuestUsize,
-            )),
-            Arc::new(AddressSpaceRegion::new(
-                AddressSpaceRegionType::DAXMemory,
-                GuestAddress(GUEST_DEVICE_START),
-                page_size as GuestUsize,
-            )),
-        ];
-        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let address_space = AddressSpace::from_regions(address_space_region, layout);
-
-        assert!(!address_space.is_dax_region(GuestAddress(page_size)));
-        assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
-        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START)));
-        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + 1)));
-        assert!(!address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size)));
-        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size - 1)));
-    }
-
-    #[test]
-    fn test_create_address_space_base() {
+    fn test_address_space_base_from_regions() {
         let mut file = TempFile::new().unwrap().into_file();
         let sample_buf = &[1, 2, 3, 4, 5];
         assert!(file.write_all(sample_buf).is_ok());
@@ -312,7 +281,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Invalid region")]
-    fn test_create_address_space_base_when_region_invalid() {
+    fn test_address_space_base_from_regions_when_region_invalid() {
         let reg = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -330,7 +299,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "address space regions intersect with each other")]
-    fn test_create_address_space_base_when_region_intersected() {
+    fn test_address_space_base_from_regions_when_region_intersected() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -357,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_region() {
+    fn test_address_space_base_insert_region() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -427,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_walk_regions() {
+    fn test_address_space_base_walk_regions() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -468,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn test_last_addr() {
+    fn test_address_space_base_last_addr() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -497,7 +466,73 @@ mod tests {
     }
 
     #[test]
-    fn test_numa_node_id() {
+    fn test_address_space_base_is_dax_region() {
+        let page_size = 4096;
+        let address_space_region = vec![
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size * 2),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DAXMemory,
+                GuestAddress(GUEST_DEVICE_START),
+                page_size as GuestUsize,
+            )),
+        ];
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpaceBase::from_regions(address_space_region, layout);
+
+        assert!(!address_space.is_dax_region(GuestAddress(page_size)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size - 1)));
+    }
+
+    #[test]
+    fn test_address_space_base_prot_flags() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            Some(0),
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::new(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x300,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        // Normal case, reg1.
+        assert_eq!(address_space.prot_flags(GuestAddress(0x200)).unwrap(), 0);
+        // Normal case, reg2.
+        assert_eq!(
+            address_space.prot_flags(GuestAddress(0x500)).unwrap(),
+            libc::PROT_READ | libc::PROT_WRITE
+        );
+        // Inquire gpa where no region is set.
+        assert!(matches!(
+            address_space.prot_flags(GuestAddress(0x600)),
+            Err(AddressSpaceError::InvalidRegionType)
+        ));
+    }
+
+    #[test]
+    fn test_address_space_base_numa_node_id() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -531,14 +566,14 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_into_vm_as() {
+    fn test_address_space_convert_into_vm_as() {
         // ! Further and detailed test is needed here.
         let gmm = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0x0), 0x400)]).unwrap();
         let _vm = AddressSpace::convert_into_vm_as(gmm);
     }
 
     #[test]
-    fn test_insert_region_on_address_space() {
+    fn test_address_space_insert_region() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -607,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn test_walk_regions_on_address_space() {
+    fn test_address_space_walk_regions() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -646,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn test_layout_on_address_space() {
+    fn test_address_space_layout() {
         let reg = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -665,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn test_last_addr_on_address_space() {
+    fn test_address_space_last_addr() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -691,6 +726,37 @@ mod tests {
         let address_space = AddressSpace::from_regions(regions, layout);
 
         assert_eq!(address_space.last_addr(), GuestAddress(0x500 - 1));
+    }
+
+    #[test]
+    fn test_address_space_is_dax_region() {
+        let page_size = 4096;
+        let address_space_region = vec![
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size * 2),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DAXMemory,
+                GuestAddress(GUEST_DEVICE_START),
+                page_size as GuestUsize,
+            )),
+        ];
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpace::from_regions(address_space_region, layout);
+
+        assert!(!address_space.is_dax_region(GuestAddress(page_size)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size - 1)));
     }
 
     #[test]
@@ -729,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn test_numa_node_id_address_space() {
+    fn test_address_space_numa_node_id() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
