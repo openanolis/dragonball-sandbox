@@ -156,8 +156,10 @@ pub fn is_system_register(regid: u64) -> bool {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn read_mpidr(vcpu: &VcpuFd) -> Result<u128> {
-    vcpu.get_one_reg(MPIDR_EL1).map_err(Error::GetSysRegister)
+pub fn read_mpidr(vcpu: &VcpuFd) -> Result<u64> {
+    vcpu.get_one_reg(MPIDR_EL1)
+        .map(|value| value as u64)
+        .map_err(Error::GetSysRegister)
 }
 
 #[cfg(test)]
