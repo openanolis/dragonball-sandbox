@@ -310,7 +310,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion>
             let mut offset = 0u64;
             while offset < avail_desc_len as u64 {
                 // Get pfn
-                let pfn: u64 = match mem.read_obj(GuestAddress(avail_desc.addr().0 + offset)) {
+                let pfn: u32 = match mem.read_obj(GuestAddress(avail_desc.addr().0 + offset)) {
                     Ok(ret) => ret,
                     Err(e) => {
                         error!(
@@ -345,8 +345,10 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion>
 
                 let guest_addr = pfn << VIRTIO_BALLOON_PFN_SHIFT;
 
-                if let Some(region) = mem.find_region(GuestAddress(guest_addr)) {
-                    let host_addr = mem.get_host_address(GuestAddress(guest_addr)).unwrap();
+                if let Some(region) = mem.find_region(GuestAddress(guest_addr.into())) {
+                    let host_addr = mem
+                        .get_host_address(GuestAddress(guest_addr.into()))
+                        .unwrap();
                     if advice == libc::MADV_DONTNEED && region.file_offset().is_some() {
                         advice = libc::MADV_REMOVE;
                     }
