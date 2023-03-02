@@ -16,11 +16,11 @@ This repository contains the following crates:
 | [dbs-boot](crates/dbs-boot) | collections of constants, structs and utilities used during VM boot stage | [![Crates.io](https://img.shields.io/crates/v/dbs-boot)](https://crates.io/crates/dbs-boot) |
 | [dbs-device](crates/dbs-device) | virtual machine's device model | [![Crates.io](https://img.shields.io/crates/v/dbs-device)](https://crates.io/crates/dbs-device) |
 | [dbs-interrupt](crates/dbs-interrupt) | virtual machine's interrupt model | [![Crates.io](https://img.shields.io/crates/v/dbs-interrupt)](https://crates.io/crates/dbs-interrupt) |
-| [dbs-legacy-devices](crates/dbs-legacy-devices) | emulation for legacy devices | TBD |
+| [dbs-legacy-devices](crates/dbs-legacy-devices) | emulation for legacy devices | [![Crates.io](https://img.shields.io/crates/v/dbs-legacy-devices)](https://crates.io/crates/dbs-legacy-devices) |
 | [dbs-utils](crates/dbs-utils) | helpers and utilities used by multiple `dragonball-sandbox` components | [![Crates.io](https://img.shields.io/crates/v/dbs-utils)](https://crates.io/crates/dbs-utils) |
-| [dbs-virtio-devices](crates/dbs-virtio-devices) | emulation for virtio devices | TBD |
-| [dbs-upcall](crates/dbs-upcall) | dbs-upcall is a direct communication tool between VMM and guest developed upon vsock. | TBD |
-| [dbs-miniball](crates/dbs-miniball) | dbs-miniball is a minimal virtual machine manager using components from dragonball-sandbox and rust-vmm. | TBD |
+| [dbs-virtio-devices](crates/dbs-virtio-devices) | emulation for virtio devices | [![Crates.io](https://img.shields.io/crates/v/dbs-virtio-devices)](https://crates.io/crates/dbs-virtio-devices) |
+| [dbs-upcall](crates/dbs-upcall) | dbs-upcall is a direct communication tool between VMM and guest developed upon vsock. | [![Crates.io](https://img.shields.io/crates/v/dbs-upcall)](https://crates.io/crates/dbs-upcall) |
+| [dbs-miniball](crates/dbs-miniball) | dbs-miniball is a minimal virtual machine manager using components from dragonball-sandbox and rust-vmm. | / |
 
 (Dragonball is a virtual machine monitor developed by Alibaba and dbs is the abbreviation for Dragonball.)
 

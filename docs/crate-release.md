@@ -149,7 +149,7 @@ cargo owner --add codeowner-github-handle
 2. Update the `CHANGELOG.md` file in the subdirectory of the crate.
 3. Update the version field in Cargo.toml in the root of the crate's repository.
 4. Add a commit with the changelog and toml updates in the release pull request.
-5. Follow the steps 7-10 of [Initial Release](#initial-release)
+5. Follow the steps 7-11 of [Initial Release](#initial-release)
 
 ## Patch Release
 
