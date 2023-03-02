@@ -36,3 +36,9 @@
 ### Added
 
 - vPMU support in aarch64
+
+## v0.2.3
+
+### Fixed
+
+- read_mpidr return u64 instead of u128
