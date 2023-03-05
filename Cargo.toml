@@ -10,6 +10,8 @@ members = [
     "crates/dbs-virtio-devices",
     "crates/dbs-upcall",
     "crates/dbs-utils",
+    "crates/dbs-versionize",
+    "crates/dbs-versionize-derive",
     "crates/dbs-interrupt",
     "crates/dbs-miniball",
 ]

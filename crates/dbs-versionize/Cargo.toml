@@ -1,0 +1,30 @@
+[package]
+name = "dbs-versionize"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Alibaba Dragonball Team"]
+description = "A version tolerant serialization/deserialization framework for Dragonball-sandbox."
+homepage = "https://github.com/openanolis/dragonball-sandbox"
+repository = "https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-versionize"
+keywords = ["serialization", "deserialization", "version"]
+readme = "README.md"
+edition = "2018"
+
+[dependencies]
+serde = "1.0.27"
+serde_derive = "1.0.27"
+bincode = "1.2.1"
+crc64 = "1.0.0"
+vmm-sys-util = "0.11.0"
+semver = "1.0.16"
+
+[build-dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "1.0.13", features=["default","full"]}
+
+[dev-dependencies]
+byteorder = "1.4.3"
+
+[badges]
+maintenance = { status = "experimental" }
