@@ -391,6 +391,7 @@ fn create_pmu_node(fdt: &mut FdtWriter, vpmu_feature: &VpmuFeatureLevel) -> Resu
 mod tests {
     use std::cmp::min;
     use std::collections::HashMap;
+    use std::env;
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::path::PathBuf;
@@ -454,8 +455,13 @@ mod tests {
     }
 
     // Create fdt dtb file
-    #[allow(dead_code)]
     fn create_dtb_file(name: &str, dtb: &[u8]) {
+        // Control whether to create new dtb files for unit test.
+        // Usage: FDT_CREATE_DTB=1 cargo test
+        if env::var("FDT_CREATE_DTB").is_err() {
+            return;
+        }
+
         // Use this code when wanting to generate a new DTB sample.
         // Do manually check dtb files with dtc
         // See https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/Documentation/manual.txt
@@ -531,7 +537,7 @@ mod tests {
         )
         .unwrap();
 
-        // create_dtb_file("output.dtb", &dtb);
+        create_dtb_file("output.dtb", &dtb);
 
         let bytes = include_bytes!("test/output.dtb");
         let pos = 4;
@@ -568,7 +574,7 @@ mod tests {
         )
         .unwrap();
 
-        // create_dtb_file("output_with_initrd.dtb", &dtb);
+        create_dtb_file("output_with_initrd.dtb", &dtb);
 
         let bytes = include_bytes!("test/output_with_initrd.dtb");
         let pos = 4;
@@ -605,7 +611,7 @@ mod tests {
         )
         .unwrap();
 
-        // create_dtb_file("output_with_pmu.dtb", &dtb);
+        create_dtb_file("output_with_pmu.dtb", &dtb);
 
         let bytes = include_bytes!("test/output_with_pmu.dtb");
         let pos = 4;
