@@ -20,8 +20,9 @@ use vm_fdt::FdtWriter;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
+use super::fdt_utils::*;
 use super::Error;
-use crate::{InitrdConfig, Result};
+use crate::Result;
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
@@ -48,19 +49,15 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
 
-#[allow(clippy::borrowed_box)]
 /// Creates the flattened device tree for this aarch64 microVM.
-pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
-    guest_mem: &M,
-    // field 0: boot_onlined, decides whether to online this cpu at boot
-    // field 1: vcpu_mpidr
-    vcpu_state: Vec<(u32, u64)>,
-    cmdline: &str,
-    device_info: Option<&HashMap<(DeviceType, String), T>>,
-    gic_device: &Box<dyn GICDevice>,
-    initrd: &Option<InitrdConfig>,
-    vpmu_feature: &VpmuFeatureLevel,
-) -> Result<Vec<u8>> {
+pub fn create_fdt<T>(
+    fdt_vm_info: FdtVmInfo,
+    _fdt_numa_info: FdtNumaInfo,
+    fdt_device_info: FdtDeviceInfo<T>,
+) -> Result<Vec<u8>>
+where
+    T: DeviceInfoForFDT + Clone + Debug,
+{
     let mut fdt = FdtWriter::new()?;
 
     // For an explanation why these nodes were introduced in the blob take a look at
@@ -77,15 +74,17 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
-    create_cpu_nodes(&mut fdt, &vcpu_state)?;
-    create_memory_node(&mut fdt, guest_mem)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
-    create_gic_node(&mut fdt, gic_device.as_ref())?;
+    create_cpu_nodes(&mut fdt, &fdt_vm_info)?;
+    create_memory_node(&mut fdt, fdt_vm_info.get_guest_memory())?;
+    create_chosen_node(&mut fdt, &fdt_vm_info)?;
+    create_gic_node(&mut fdt, fdt_device_info.get_irqchip())?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
-    device_info.map_or(Ok(()), |v| create_devices_node(&mut fdt, v))?;
-    create_pmu_node(&mut fdt, vpmu_feature)?;
+    fdt_device_info
+        .get_mmio_device_info()
+        .map_or(Ok(()), |v| create_devices_node(&mut fdt, v))?;
+    create_pmu_node(&mut fdt, fdt_vm_info.get_vpmu_feature())?;
 
     // End Header node.
     fdt.end_node(root_node)?;
@@ -94,21 +93,25 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     let fdt_final = fdt.finish()?;
 
     // Write FDT to memory.
-    let fdt_address = GuestAddress(super::get_fdt_addr(guest_mem));
-    guest_mem.write_slice(fdt_final.as_slice(), fdt_address)?;
+    let fdt_address = GuestAddress(super::get_fdt_addr(fdt_vm_info.get_guest_memory()));
+    fdt_vm_info
+        .get_guest_memory()
+        .write_slice(fdt_final.as_slice(), fdt_address)?;
     Ok(fdt_final)
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_state: &[(u32, u64)]) -> Result<()> {
+fn create_cpu_nodes(fdt: &mut FdtWriter, fdt_vm_info: &FdtVmInfo) -> Result<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     let cpus_node = fdt.begin_node("cpus")?;
     // As per documentation, on ARM v8 64-bit systems value should be set to 2.
     fdt.property_u32("#address-cells", 0x02)?;
     fdt.property_u32("#size-cells", 0x0)?;
-    let num_cpus = vcpu_state.len();
+    let vcpu_mpidr = fdt_vm_info.get_vcpu_mpidr();
+    let vcpu_boot_onlined = fdt_vm_info.get_boot_onlined();
+    let num_cpus = vcpu_mpidr.len();
 
-    for (cpu_index, iter) in vcpu_state.iter().enumerate().take(num_cpus) {
+    for (cpu_index, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{cpu_index:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
@@ -119,10 +122,10 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_state: &[(u32, u64)]) -> Result<()
         }
         // boot-onlined attribute is used to indicate whether this cpu should be onlined at boot.
         // 0 means offline, 1 means online.
-        fdt.property_u32("boot-onlined", iter.0)?;
+        fdt.property_u32("boot-onlined", vcpu_boot_onlined[cpu_index])?;
         // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
-        fdt.property_u64("reg", iter.1 & 0x7FFFFF)?;
+        fdt.property_u64("reg", mpidr & 0x7FFFFF)?;
         fdt.end_node(cpu_node)?;
     }
     fdt.end_node(cpus_node)?;
@@ -142,15 +145,11 @@ fn create_memory_node<M: GuestMemory>(fdt: &mut FdtWriter, guest_mem: &M) -> Res
     Ok(())
 }
 
-fn create_chosen_node(
-    fdt: &mut FdtWriter,
-    cmdline: &str,
-    initrd: &Option<InitrdConfig>,
-) -> Result<()> {
+fn create_chosen_node(fdt: &mut FdtWriter, fdt_vm_info: &FdtVmInfo) -> Result<()> {
     let chosen_node = fdt.begin_node("chosen")?;
-    fdt.property_string("bootargs", cmdline)?;
+    fdt.property_string("bootargs", fdt_vm_info.get_cmdline())?;
 
-    if let Some(initrd_config) = initrd {
+    if let Some(initrd_config) = fdt_vm_info.get_initrd_config() {
         fdt.property_u64("linux,initrd-start", initrd_config.address.raw_value())?;
         fdt.property_u64(
             "linux,initrd-end",
@@ -373,8 +372,8 @@ fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_pmu_node(fdt: &mut FdtWriter, vpmu_feature: &VpmuFeatureLevel) -> Result<()> {
-    if *vpmu_feature == VpmuFeatureLevel::Disabled {
+fn create_pmu_node(fdt: &mut FdtWriter, vpmu_feature: VpmuFeatureLevel) -> Result<()> {
+    if vpmu_feature == VpmuFeatureLevel::Disabled {
         return Ok(());
     };
 
@@ -396,41 +395,22 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
 
-    use dbs_arch::{gic::create_gic, pmu::initialize_pmu, Error as ArchError};
+    use dbs_arch::{gic::create_gic, pmu::initialize_pmu};
     use device_tree::DeviceTree;
     use kvm_bindings::{kvm_vcpu_init, KVM_ARM_VCPU_PMU_V3, KVM_ARM_VCPU_PSCI_0_2};
     use kvm_ioctls::{Kvm, VcpuFd, VmFd};
     use vm_memory::GuestMemoryMmap;
 
+    use super::super::tests::MMIODeviceInfo;
     use super::*;
     use crate::layout::{DRAM_MEM_MAX_SIZE, DRAM_MEM_START, FDT_MAX_SIZE};
+    use crate::InitrdConfig;
 
     const LEN: u64 = 4096;
 
     fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
         let dram_size = min(size as u64, DRAM_MEM_MAX_SIZE) as usize;
         vec![(GuestAddress(DRAM_MEM_START), dram_size)]
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct MMIODeviceInfo {
-        addr: u64,
-        irq: u32,
-    }
-
-    impl DeviceInfoForFDT for MMIODeviceInfo {
-        fn addr(&self) -> u64 {
-            self.addr
-        }
-        fn irq(&self) -> std::result::Result<u32, ArchError> {
-            Ok(self.irq)
-        }
-        fn length(&self) -> u64 {
-            LEN
-        }
-        fn get_device_id(&self) -> Option<u32> {
-            None
-        }
     }
 
     // The `load` function from the `device_tree` will mistakenly check the actual size
@@ -485,18 +465,15 @@ mod tests {
         let dev_info: HashMap<(DeviceType, String), MMIODeviceInfo> = [
             (
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
-                MMIODeviceInfo { addr: 0x00, irq: 1 },
+                MMIODeviceInfo::new(0, 1),
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
-                MMIODeviceInfo { addr: LEN, irq: 2 },
+                MMIODeviceInfo::new(LEN, 2),
             ),
             (
                 (DeviceType::RTC, "rtc".to_string()),
-                MMIODeviceInfo {
-                    addr: 2 * LEN,
-                    irq: 3,
-                },
+                MMIODeviceInfo::new(2 * LEN, 3),
             ),
         ]
         .iter()
@@ -507,13 +484,14 @@ mod tests {
         let gic = create_gic(&vm, 1).unwrap();
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         assert!(create_fdt(
-            &mem,
-            vec![(1, 0)],
-            "console=tty0",
-            Some(&dev_info),
-            &gic,
-            &None,
-            &vpmu_feature
+            FdtVmInfo::new(
+                &mem,
+                "console=tty0",
+                None,
+                FdtVcpuInfo::new(vec![0], vec![1], vpmu_feature, false)
+            ),
+            FdtNumaInfo::default(),
+            FdtDeviceInfo::new(Some(&dev_info), gic.as_ref())
         )
         .is_ok())
     }
@@ -527,13 +505,14 @@ mod tests {
         let gic = create_gic(&vm, 1).unwrap();
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         let dtb = create_fdt(
-            &mem,
-            vec![(1, 0)],
-            "console=tty0",
-            None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
-            &gic,
-            &None,
-            &vpmu_feature,
+            FdtVmInfo::new(
+                &mem,
+                "console=tty0",
+                None,
+                FdtVcpuInfo::new(vec![0], vec![1], vpmu_feature, false),
+            ),
+            FdtNumaInfo::default(),
+            FdtDeviceInfo::<MMIODeviceInfo>::new(None, gic.as_ref()),
         )
         .unwrap();
 
@@ -548,7 +527,7 @@ mod tests {
 
         let original_fdt = DeviceTree::load(&buf).unwrap();
         let generated_fdt = DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
+        assert_eq!(format!("{original_fdt:?}"), format!("{generated_fdt:?}"));
     }
 
     #[test]
@@ -564,13 +543,14 @@ mod tests {
         };
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         let dtb = create_fdt(
-            &mem,
-            vec![(1, 0)],
-            "console=tty0",
-            None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
-            &gic,
-            &Some(initrd),
-            &vpmu_feature,
+            FdtVmInfo::new(
+                &mem,
+                "console=tty0",
+                Some(&initrd),
+                FdtVcpuInfo::new(vec![0], vec![1], vpmu_feature, false),
+            ),
+            FdtNumaInfo::default(),
+            FdtDeviceInfo::<MMIODeviceInfo>::new(None, gic.as_ref()),
         )
         .unwrap();
 
@@ -585,7 +565,7 @@ mod tests {
 
         let original_fdt = DeviceTree::load(&buf).unwrap();
         let generated_fdt = DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
+        assert_eq!(format!("{original_fdt:?}"), format!("{generated_fdt:?}"));
     }
 
     #[test]
@@ -601,13 +581,14 @@ mod tests {
 
         let vpmu_feature = VpmuFeatureLevel::FullyEnabled;
         let dtb = create_fdt(
-            &mem,
-            vec![(1, 0)],
-            "console=tty0",
-            None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
-            &gic,
-            &None,
-            &vpmu_feature,
+            FdtVmInfo::new(
+                &mem,
+                "console=tty0",
+                None,
+                FdtVcpuInfo::new(vec![0], vec![1], vpmu_feature, false),
+            ),
+            FdtNumaInfo::default(),
+            FdtDeviceInfo::<MMIODeviceInfo>::new(None, gic.as_ref()),
         )
         .unwrap();
 
@@ -622,6 +603,6 @@ mod tests {
 
         let original_fdt = DeviceTree::load(&buf).unwrap();
         let generated_fdt = DeviceTree::load(&dtb).unwrap();
-        assert!(format!("{original_fdt:?}") == format!("{generated_fdt:?}"));
+        assert_eq!(format!("{original_fdt:?}"), format!("{generated_fdt:?}"));
     }
 }
