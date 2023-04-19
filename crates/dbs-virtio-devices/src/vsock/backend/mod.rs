@@ -6,7 +6,7 @@
 /// or even the protocol created by us.
 use std::any::Any;
 use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 mod inner;
@@ -15,6 +15,7 @@ mod unix_stream;
 
 pub use self::inner::{VsockInnerBackend, VsockInnerConnector, VsockInnerStream};
 pub use self::tcp::VsockTcpBackend;
+pub use self::unix_stream::HybridUnixStreamBackend;
 pub use self::unix_stream::VsockUnixStreamBackend;
 
 /// The type of vsock backend.
@@ -57,6 +58,14 @@ pub trait VsockStream: Read + Write + AsRawFd + Send {
     }
     /// Set the write timeout to the time duration specified.
     fn set_write_timeout(&mut self, _dur: Option<Duration>) -> std::io::Result<()> {
+        Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    }
+    /// Receive the port and fd from the peer.
+    fn recv_data_fd(
+        &self,
+        _bytes: &mut [u8],
+        _fds: &mut [RawFd],
+    ) -> std::io::Result<(usize, usize)> {
         Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
     }
     /// Used to downcast to the specific type.
