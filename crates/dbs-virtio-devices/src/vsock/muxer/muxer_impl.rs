@@ -37,11 +37,14 @@
 ///       `HashMap` object, mapping `RawFd`s to `EpollListener`s.
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
+use std::os::fd::FromRawFd;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
 
 use log::{debug, error, info, trace, warn};
 
-use super::super::backend::{VsockBackend, VsockBackendType, VsockStream};
+use super::super::backend::{HybridUnixStreamBackend, VsockBackend, VsockBackendType, VsockStream};
+
 use super::super::csm::{ConnState, VsockConnection};
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
@@ -68,6 +71,11 @@ pub enum MuxerRx {
     RstPkt { local_port: u32, peer_port: u32 },
 }
 
+enum ReadPortResult {
+    PassFd,
+    Connect(u32),
+}
+
 /// An epoll listener, registered under the muxer's nested epoll FD.
 pub enum EpollListener {
     /// The listener is a `VsockConnection`, identified by `key`, and interested
@@ -84,6 +92,9 @@ pub enum EpollListener {
     /// A listener interested in reading host "connect <port>" commands from a
     /// freshly connected host socket.
     LocalStream(Box<dyn VsockStream>),
+    /// A listener interested in recvmsg from host to get the <port> and a
+    /// socket/pipe fd.
+    PassFdStream(Box<dyn VsockStream>),
 }
 
 /// The vsock connection multiplexer.
@@ -415,6 +426,7 @@ impl VsockMuxer {
                             // from a "connect" command received on this socket,
                             // so the next step is to ask to be notified the
                             // moment we can read from it.
+
                             self.add_listener(
                                 stream.as_raw_fd(),
                                 EpollListener::LocalStream(stream),
@@ -433,15 +445,55 @@ impl VsockMuxer {
             Some(EpollListener::LocalStream(_)) => {
                 if let Some(EpollListener::LocalStream(mut stream)) = self.remove_listener(fd) {
                     Self::read_local_stream_port(&mut stream)
-                        .map(|peer_port| (self.allocate_local_port(), peer_port))
-                        .and_then(|(local_port, peer_port)| {
+                        .and_then(|read_port_result| match read_port_result {
+                            ReadPortResult::Connect(peer_port) => {
+                                let local_port = self.allocate_local_port();
+                                self.add_connection(
+                                    ConnMapKey {
+                                        local_port,
+                                        peer_port,
+                                    },
+                                    VsockConnection::new_local_init(
+                                        stream,
+                                        uapi::VSOCK_HOST_CID,
+                                        self.cid,
+                                        local_port,
+                                        peer_port,
+                                    ),
+                                )
+                            }
+                            ReadPortResult::PassFd => self.add_listener(
+                                stream.as_raw_fd(),
+                                EpollListener::PassFdStream(stream),
+                            ),
+                        })
+                        .unwrap_or_else(|err| {
+                            info!("vsock: error adding local-init connection: {:?}", err);
+                        })
+                }
+            }
+
+            Some(EpollListener::PassFdStream(_)) => {
+                if let Some(EpollListener::PassFdStream(mut stream)) = self.remove_listener(fd) {
+                    Self::passfd_read_port_and_fd(&mut stream)
+                        .map(|(nfd, peer_port)| (nfd, self.allocate_local_port(), peer_port))
+                        .and_then(|(nfd, local_port, peer_port)| {
+                            // Here we should make sure the nfd the sole owner to convert it
+                            // into an UnixStream object, otherwise, it could cause memory unsafety.
+                            let nstream = unsafe { UnixStream::from_raw_fd(nfd) };
+
+                            let hybridstream = HybridUnixStreamBackend {
+                                unix_stream: Box::new(nstream),
+                                slave_stream: Some(stream),
+                            };
+
                             self.add_connection(
                                 ConnMapKey {
                                     local_port,
                                     peer_port,
                                 },
                                 VsockConnection::new_local_init(
-                                    stream,
+                                    Box::new(hybridstream),
                                     uapi::VSOCK_HOST_CID,
                                     self.cid,
                                     local_port,
@@ -450,7 +502,10 @@ impl VsockMuxer {
                             )
                         })
                         .unwrap_or_else(|err| {
-                            info!("vsock: error adding local-init connection: {:?}", err);
+                            info!(
+                                "vsock: error adding local-init passthrough fd connection: {:?}",
+                                err
+                            );
                         })
                 }
             }
@@ -465,22 +520,23 @@ impl VsockMuxer {
     }
 
     /// Parse a host "connect" command, and extract the destination vsock port.
-    fn read_local_stream_port(stream: &mut Box<dyn VsockStream>) -> Result<u32> {
+    fn read_local_stream_port(stream: &mut Box<dyn VsockStream>) -> Result<ReadPortResult> {
         let mut buf = [0u8; 32];
 
         // This is the minimum number of bytes that we should be able to read,
-        // when parsing a valid connection request. I.e. `b"connect 0\n".len()`.
-        const MIN_READ_LEN: usize = 10;
+        // when parsing a valid connection request. I.e. `b"passfd\n"`, otherwise,
+        // it would be `b"connect 0\n".len()`.
+        const MIN_READ_LEN: usize = 7;
 
         // Bring in the minimum number of bytes that we should be able to read.
         stream
             .read(&mut buf[..MIN_READ_LEN])
             .map_err(Error::BackendRead)?;
 
-        // Now, finish reading the destination port number, by bringing in one
-        // byte at a time, until we reach an EOL terminator (or our buffer space
-        // runs out).  Yeah, not particularly proud of this approach, but it
-        // will have to do for now.
+        // Now, finish reading the destination port number if it's connect <port> command,
+        // by bringing in one byte at a time, until we reach an EOL terminator (or our buffer
+        // space runs out).  Yeah, not particularly proud of this approach, but it will have to
+        // do for now.
         let mut blen = MIN_READ_LEN;
         while buf[blen - 1] != b'\n' && blen < buf.len() {
             stream
@@ -497,15 +553,57 @@ impl VsockMuxer {
             .next()
             .ok_or(Error::InvalidPortRequest)
             .and_then(|word| {
-                if word.to_lowercase() == "connect" {
-                    Ok(())
+                let key = word.to_lowercase();
+                if key == "connect" {
+                    Ok(true)
+                } else if key == "passfd" {
+                    Ok(false)
                 } else {
                     Err(Error::InvalidPortRequest)
                 }
             })
-            .and_then(|_| word_iter.next().ok_or(Error::InvalidPortRequest))
-            .and_then(|word| word.parse::<u32>().map_err(|_| Error::InvalidPortRequest))
+            .and_then(|connect| {
+                if connect {
+                    word_iter.next().ok_or(Error::InvalidPortRequest).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
+            .and_then(|word| {
+                word.map_or_else(
+                    || Ok(ReadPortResult::PassFd),
+                    |word| {
+                        word.parse::<u32>()
+                            .map_or(Err(Error::InvalidPortRequest), |word| {
+                                Ok(ReadPortResult::Connect(word))
+                            })
+                    },
+                )
+            })
             .map_err(|_| Error::InvalidPortRequest)
+    }
+
+    fn passfd_read_port_and_fd(stream: &mut Box<dyn VsockStream>) -> Result<(RawFd, u32)> {
+        let mut buf = [0u8; 32];
+        let mut fds = [0, 1];
+        let (data_len, fd_len) = stream
+            .recv_data_fd(&mut buf, &mut fds)
+            .map_err(Error::BackendRead)?;
+
+        if fd_len != 1 || fds[0] <= 0 {
+            return Err(Error::InvalidPortRequest);
+        }
+
+        let mut port_iter = std::str::from_utf8(&buf[..data_len])
+            .map_err(|_| Error::InvalidPortRequest)?
+            .split_whitespace();
+
+        let port = port_iter
+            .next()
+            .ok_or(Error::InvalidPortRequest)
+            .and_then(|word| word.parse::<u32>().map_err(|_| Error::InvalidPortRequest))?;
+
+        Ok((fds[0], port))
     }
 
     /// Add a new connection to the active connection pool.
@@ -582,6 +680,7 @@ impl VsockMuxer {
             EpollListener::Connection { evset, .. } => evset,
             EpollListener::LocalStream(_) => epoll::Events::EPOLLIN,
             EpollListener::Backend(_) => epoll::Events::EPOLLIN,
+            EpollListener::PassFdStream(_) => epoll::Events::EPOLLIN,
         };
 
         epoll::ctl(
