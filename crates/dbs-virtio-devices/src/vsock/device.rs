@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use dbs_device::resources::ResourceConstraint;
 use dbs_utils::epoll_manager::{EpollManager, SubscriberId};
+use log::debug;
 use log::trace;
+use log::warn;
 use virtio_queue::QueueT;
 use vm_memory::GuestAddressSpace;
 use vm_memory::GuestMemoryRegion;
@@ -186,6 +188,18 @@ where
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn remove(&mut self) {
+        let subscriber_id = self.subscriber_id.take();
+        if let Some(subscriber_id) = subscriber_id {
+            match self.device_info.remove_event_handler(subscriber_id) {
+                Ok(_) => debug!("virtio-vsock: removed subscriber_id {:?}", subscriber_id),
+                Err(err) => warn!("virtio-vsock: failed to remove event handler: {:?}", err),
+            };
+        } else {
+            self.muxer.take();
+        }
     }
 }
 

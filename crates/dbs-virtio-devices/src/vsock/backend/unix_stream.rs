@@ -91,6 +91,12 @@ impl VsockBackend for VsockUnixStreamBackend {
     }
 }
 
+impl Drop for VsockUnixStreamBackend {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.host_sock_path).ok();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
