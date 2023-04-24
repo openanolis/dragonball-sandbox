@@ -347,8 +347,10 @@ fn bindgen_test_layout_ethhdr() {
         1usize,
         concat!("Alignment of ", stringify!(ethhdr))
     );
+    let ethhdr_test = ethhdr::default();
+    let p_ethhdr_test = &ethhdr_test as *const ethhdr as usize;
     assert_eq!(
-        unsafe { &(*(0 as *const ethhdr)).h_dest as *const _ as usize },
+        std::ptr::addr_of!(ethhdr_test.h_dest) as usize - p_ethhdr_test,
         0usize,
         concat!(
             "Alignment of field: ",
@@ -358,7 +360,7 @@ fn bindgen_test_layout_ethhdr() {
         )
     );
     assert_eq!(
-        unsafe { &(*(0 as *const ethhdr)).h_source as *const _ as usize },
+        std::ptr::addr_of!(ethhdr_test.h_source) as usize - p_ethhdr_test,
         6usize,
         concat!(
             "Alignment of field: ",
@@ -368,7 +370,7 @@ fn bindgen_test_layout_ethhdr() {
         )
     );
     assert_eq!(
-        unsafe { &(*(0 as *const ethhdr)).h_proto as *const _ as usize },
+        std::ptr::addr_of!(ethhdr_test.h_proto) as usize - p_ethhdr_test,
         12usize,
         concat!(
             "Alignment of field: ",
