@@ -12,4 +12,5 @@ members = [
     "crates/dbs-utils",
     "crates/dbs-interrupt",
     "crates/dbs-miniball",
+    "crates/dbs-versionize",
 ]

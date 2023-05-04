@@ -27,12 +27,6 @@
 //! extensive testing.
 //! - Semantic serialization and deserialization is available only for
 //! structures.
-extern crate bincode;
-extern crate crc64;
-extern crate serde;
-extern crate serde_derive;
-extern crate versionize_derive;
-extern crate vmm_sys_util;
 
 pub mod crc;
 pub mod primitives;
@@ -97,9 +91,7 @@ pub type VersionizeResult<T> = std::result::Result<T, VersionizeError>;
 ///
 /// Example implementation
 /// ```
-/// extern crate versionize;
-/// extern crate versionize_derive;
-/// use versionize::{VersionMap, Versionize, VersionizeResult};
+/// use dbs_versionize::{VersionMap, Versionize, VersionizeResult};
 /// use versionize_derive::Versionize;
 ///
 /// struct MyType<T>(T);
@@ -172,7 +164,7 @@ mod tests {
     #[test]
     fn test_error_debug_display() {
         // Validates Debug and Display are implemented.
-        use VersionizeError::*;
+        use crate::VersionizeError::*;
         let str = String::from("test");
         format!("{:?}{}", Io(0), Io(0));
         format!("{:?}{}", Serialize(str.clone()), Serialize(str.clone()));

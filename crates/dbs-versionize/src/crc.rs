@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 ///
 /// ```
 /// use std::io::Read;
-/// use versionize::crc::CRC64Reader;
+/// use dbs_versionize::crc::CRC64Reader;
 ///
 /// let buf = vec![1, 2, 3, 4, 5];
 /// let mut read_buf = Vec::new();
@@ -58,7 +58,7 @@ where
 ///
 /// ```
 /// use std::io::Write;
-/// use versionize::crc::CRC64Writer;
+/// use dbs_versionize::crc::CRC64Writer;
 ///
 /// let mut buf = vec![0; 16];
 /// let write_buf = vec![123; 16];

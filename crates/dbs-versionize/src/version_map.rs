@@ -6,10 +6,7 @@
 //! structures composed of individually versioned structures or enums.
 //!
 //! ```rust
-//! extern crate versionize;
-//! extern crate versionize_derive;
-//!
-//! use versionize::{VersionMap, Versionize, VersionizeResult};
+//! use dbs_versionize::{VersionMap, Versionize, VersionizeResult};
 //! use versionize_derive::Versionize;
 //!
 //! #[derive(Versionize)]
@@ -162,7 +159,7 @@ impl VersionMap {
 mod tests {
     use super::{TypeId, VersionMap, BASE_VERSION};
     use std::sync::Arc;
-    use version_map::VersionFilter;
+    use crate::version_map::VersionFilter;
 
     pub struct MyType;
     pub struct MySecondType;

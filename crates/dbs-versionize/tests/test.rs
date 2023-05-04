@@ -3,17 +3,13 @@
 
 #![allow(clippy::missing_safety_doc)]
 
-extern crate versionize;
-extern crate versionize_derive;
-extern crate vmm_sys_util;
-
 use std::fmt::{Debug, Formatter, Result};
 use std::num::Wrapping;
 
 use vmm_sys_util::fam::{FamStruct, FamStructWrapper};
 use vmm_sys_util::generate_fam_struct_impl;
 
-use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
+use dbs_versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
 use versionize_derive::Versionize;
 
 #[derive(Debug, PartialEq, Versionize, Eq)]
