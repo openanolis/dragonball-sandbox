@@ -1,0 +1,20 @@
+[package]
+name = "versionize_derive"
+version = "0.1.5"
+license = "Apache-2.0"
+authors = ["Amazon Firecracker team <firecracker-devel@amazon.com>"]
+description = "Implements the Versionize derive proc macro."
+readme = "README.md"
+repository = "https://github.com/firecracker-microvm/versionize_derive"
+keywords = ["serialization", "version"]
+
+[dependencies]
+proc-macro2 = "1.0.47"
+quote = "1.0.21"
+syn = { version = "1.0.13", features=["full", "extra-traits"]}
+
+[lib]
+proc-macro = true
+
+[badges]
+maintenance = { status = "experimental" }
