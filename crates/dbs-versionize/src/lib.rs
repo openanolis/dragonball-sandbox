@@ -1,3 +1,4 @@
+// Copyright 2023 Alibaba Cloud. All rights reserved.
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 #![deny(missing_docs)]
@@ -9,10 +10,10 @@
 //! - `Versionize` trait
 //! - `VersionMap` helper
 //!
-//! `VersionMap` maps individual structure/enum versions to a root version
-//! (app version). This mapping is required both when serializing or
-//! deserializing structures as it needs to know which version of structure
-//! to serialize for a given target app version.
+//! `VersionMap` maps individual crate name to the crate Semver Version.
+//! This mapping is required both when serializing or deserializing structures
+//! as it needs to record the crate version and crate name for serializing,
+//! and to know which crate version to be used for deserializing.
 //!
 //! `Versionize` trait is implemented for the following primitives:
 //! u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, char, f32, f64,
@@ -32,13 +33,12 @@ pub mod crc;
 pub mod primitives;
 pub mod version_map;
 
-use std::any::TypeId;
-use std::io::{Read, Write};
+pub use semver;
 pub use version_map::VersionMap;
-use versionize_derive::Versionize;
+
+use std::io::{Read, Write};
 
 /// Versioned serialization/deserialization error definitions.
-#[allow(clippy::derive_partial_eq_without_eq)] // FIXME: next major release
 #[derive(Debug, PartialEq)]
 pub enum VersionizeError {
     /// An IO error occured.
@@ -53,6 +53,16 @@ pub enum VersionizeError {
     StringLength(usize),
     /// Vector length exceeded.
     VecLength(usize),
+    /// HashMap length exceeded.
+    HashMapLength(usize),
+    /// HashSet length exceeded.
+    HashSetLength(usize),
+    /// Unsupported version.
+    UnsuportVersion(String),
+    /// Multiple version
+    MultipleVersion(String, String, String),
+    /// Not found version
+    NotFound(String),
 }
 
 impl std::fmt::Display for VersionizeError {
@@ -76,6 +86,25 @@ impl std::fmt::Display for VersionizeError {
                 bad_len,
                 primitives::MAX_VEC_SIZE
             ),
+            HashMapLength(bad_len) => write!(
+                f,
+                "HashMap of length exceeded {} > {} bytes",
+                bad_len,
+                primitives::MAX_HASH_MAP_LEN
+            ),
+            HashSetLength(bad_len) => write!(
+                f,
+                "HashSet of length exceeded {} > {} bytes",
+                bad_len,
+                primitives::MAX_HASH_SET_LEN
+            ),
+            UnsuportVersion(ver) => write!(f, "{} version is NOT supported.", ver),
+            MultipleVersion(rcrate, a, b) => write!(
+                f,
+                "There are multiple version {}, {} in {} crate.",
+                a, b, rcrate,
+            ),
+            NotFound(v) => write!(f, "Not found {}.", v),
         }
     }
 }
@@ -103,60 +132,32 @@ pub type VersionizeResult<T> = std::result::Result<T, VersionizeError>;
 ///     #[inline]
 ///     fn serialize<W: std::io::Write>(
 ///         &self,
-///         writer: &mut W,
-///         version_map: &VersionMap,
-///         app_version: u16,
+///         writer: W,
+///         version_map: &mut VersionMap,
 ///     ) -> VersionizeResult<()> {
-///         self.0.serialize(writer, version_map, app_version)
+///         self.0.serialize(writer, version_map)
 ///     }
 ///
 ///     #[inline]
 ///     fn deserialize<R: std::io::Read>(
-///         reader: &mut R,
+///         reader: R,
 ///         version_map: &VersionMap,
-///         app_version: u16,
 ///     ) -> VersionizeResult<Self> {
-///         Ok(MyType(T::deserialize(reader, version_map, app_version)?))
-///     }
-///
-///     fn version() -> u16 {
-///         1
+///         Ok(MyType(T::deserialize(reader, version_map)?))
 ///     }
 /// }
 /// ```
 /// [1]: https://docs.rs/versionize_derive/latest/versionize_derive/derive.Versionize.html
 pub trait Versionize {
-    /// Serializes `self` to `target_verion` using the specficifed `writer` and
+    /// Serializes `self` using the specficifed `writer` and
     /// `version_map`.
-    fn serialize<W: Write>(
-        &self,
-        writer: &mut W,
-        version_map: &VersionMap,
-        target_version: u16,
-    ) -> VersionizeResult<()>;
+    fn serialize<W: Write>(&self, writer: W, version_map: &mut VersionMap) -> VersionizeResult<()>;
 
-    /// Returns a new instance of `Self` by deserializing from `source_version`
-    /// using the specficifed `reader` and `version_map`.
-    fn deserialize<R: Read>(
-        reader: &mut R,
-        version_map: &VersionMap,
-        source_version: u16,
-    ) -> VersionizeResult<Self>
+    /// Returns a new instance of `Self` by deserializing using the specficifed `reader`
+    /// and `version_map`.
+    fn deserialize<R: Read>(reader: R, version_map: &VersionMap) -> VersionizeResult<Self>
     where
         Self: Sized;
-
-    /// Returns the `Self` type id.
-    /// The returned ID represents a globally unique identifier for a type.
-    /// It is required by the `VersionMap` implementation.
-    fn type_id() -> std::any::TypeId
-    where
-        Self: 'static,
-    {
-        TypeId::of::<Self>()
-    }
-
-    /// Returns latest `Self` version number.
-    fn version() -> u16;
 }
 
 #[cfg(test)]
