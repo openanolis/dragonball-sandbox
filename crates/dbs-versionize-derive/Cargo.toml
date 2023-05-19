@@ -1,12 +1,14 @@
 [package]
-name = "versionize_derive"
-version = "0.1.5"
+name = "dbs_versionize_derive"
+version = "0.1.0"
 license = "Apache-2.0"
-authors = ["Amazon Firecracker team <firecracker-devel@amazon.com>"]
+authors = ["Amazon Firecracker team <firecracker-devel@amazon.com>", "Alibaba Dragonball Team"]
 description = "Implements the Versionize derive proc macro."
 readme = "README.md"
-repository = "https://github.com/firecracker-microvm/versionize_derive"
-keywords = ["serialization", "version"]
+homepage = "https://github.com/openanolis/dragonball-sandbox"
+repository = "https://github.com/openanolis/dragonball-sandbox/tree/main/crates/dbs-versionize-derive"
+keywords = ["serialization", "deserialization", "version"]
+edition = "2018"
 
 [dependencies]
 proc-macro2 = "1.0.47"
