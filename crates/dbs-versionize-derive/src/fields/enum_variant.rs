@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::super::DEFAULT_FN;
-use common::Exists;
-use helpers::{get_end_version, get_ident_attr, get_start_version, parse_field_attributes};
+use crate::common::Exists;
+use crate::helpers::{get_end_version, get_ident_attr, get_start_version, parse_field_attributes};
 use quote::{format_ident, quote};
 use std::collections::hash_map::HashMap;
 

@@ -1,9 +1,9 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use common::{Descriptor, GenericDescriptor};
-use fields::struct_field::*;
-use helpers::compute_version;
+use crate::common::{Descriptor, GenericDescriptor};
+use crate::fields::struct_field::*;
+use crate::helpers::compute_version;
 use quote::{format_ident, quote};
 
 pub(crate) type StructDescriptor = GenericDescriptor<StructField>;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{ATTRIBUTE_NAME, END_VERSION, START_VERSION};
-use common::Exists;
+use crate::common::Exists;
 use quote::format_ident;
 use std::cmp::max;
 use std::collections::hash_map::HashMap;

@@ -20,11 +20,6 @@
 //! extensive testing.
 //! - Semantic serialization and deserialization is available only for structures.
 
-extern crate proc_macro;
-extern crate proc_macro2;
-extern crate quote;
-extern crate syn;
-
 mod common;
 mod descriptors;
 mod fields;
@@ -67,7 +62,7 @@ pub(crate) const END_VERSION: &str = "end";
 /// extern crate versionize;
 /// extern crate versionize_derive;
 /// use versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use versionize_derive::Versionize;
+/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct Test {
@@ -96,10 +91,8 @@ pub(crate) const END_VERSION: &str = "end";
 /// the `Default` trait isused to initialize the field.
 ///
 /// ```ignore
-/// extern crate versionize;
-/// extern crate versionize_derive;
 /// use versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use versionize_derive::Versionize;
+/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct TestStruct {
@@ -146,10 +139,8 @@ pub(crate) const END_VERSION: &str = "end";
 /// translation or semantic validations.
 ///
 /// ```ignore
-/// extern crate versionize;
-/// extern crate versionize_derive;
 /// use versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use versionize_derive::Versionize;
+/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct SomeStruct {
@@ -184,10 +175,8 @@ pub(crate) const END_VERSION: &str = "end";
 /// always called first and `de_fn` last.
 ///
 /// ```ignore
-/// extern crate versionize;
-/// extern crate versionize_derive;
 /// use versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use versionize_derive::Versionize;
+/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Clone, Versionize)]
 /// struct SomeStruct {
