@@ -1,11 +1,11 @@
+// Copyright 2023 Alibaba Cloud. All rights reserved.
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ATTRIBUTE_NAME, END_VERSION, START_VERSION};
+use super::ATTRIBUTE_NAME;
 use crate::common::Exists;
 use quote::format_ident;
-use std::cmp::max;
-use std::collections::hash_map::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // Returns a string literal attribute as an Ident.
 pub(crate) fn get_ident_attr(
@@ -20,24 +20,28 @@ pub(crate) fn get_ident_attr(
     })
 }
 
-pub(crate) fn get_start_version(attrs: &HashMap<String, syn::Lit>) -> Option<u16> {
-    if let Some(start_version) = attrs.get(START_VERSION) {
-        return Some(match start_version {
-            syn::Lit::Int(lit_int) => lit_int.base10_parse().unwrap(),
-            _ => panic!("Field start/end version number must be an integer"),
-        });
+pub(crate) fn get_version(key: &str, attrs: &HashMap<String, syn::Lit>) -> Vec<semver::Version> {
+    if let Some(version) = attrs.get(key) {
+        return match version {
+            syn::Lit::Str(lit_str) => parse_version(&lit_str.value()),
+            _ => panic!("Field start/end version must be an semver"),
+        };
     }
-    None
+    Vec::new()
 }
 
-pub(crate) fn get_end_version(attrs: &HashMap<String, syn::Lit>) -> Option<u16> {
-    if let Some(start_version) = attrs.get(END_VERSION) {
-        return Some(match start_version {
-            syn::Lit::Int(lit_int) => lit_int.base10_parse().unwrap(),
-            _ => panic!("Field start/end version number must be an integer"),
-        });
-    }
-    None
+pub(crate) fn parse_version(versions: &str) -> Vec<semver::Version> {
+    versions
+        .split(',')
+        .filter(|x| !x.is_empty())
+        .map(|version| {
+            let v = semver::Version::parse(version.trim()).expect("parse semver");
+            if !v.pre.is_empty() || !v.build.is_empty() {
+                panic!("Unsupported pre-release and build metadata.");
+            }
+            v
+        })
+        .collect()
 }
 
 // Returns an attribute hash_map constructed by processing a vector of syn::Attribute.
@@ -70,14 +74,223 @@ pub(crate) fn parse_field_attributes(attributes: &[syn::Attribute]) -> HashMap<S
     attrs
 }
 
-// Compute current struct version by finding the latest field change version.
-pub(crate) fn compute_version<T>(fields: &[T]) -> u16
+pub(crate) fn collect_version<T>(fields: &[T]) -> BTreeMap<u64, Vec<u64>>
 where
     T: Exists,
 {
-    let mut version = 0;
+    let mut vers = vec![];
     for field in fields {
-        version = max(version, max(field.start_version(), field.end_version()));
+        vers.append(&mut field.list_versions());
     }
-    version
+    vers.sort();
+    vers.dedup();
+    let mut rets: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for v in &vers {
+        if let Some(p) = rets.get_mut(&v.minor) {
+            p.push(v.patch);
+        } else {
+            rets.insert(v.minor, vec![v.patch]);
+        }
+    }
+    rets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_version() {
+        let versions = parse_version("2.7.14,2.8.4");
+        assert_eq!(versions[0], semver::Version::new(2, 7, 14));
+        assert_eq!(versions[1], semver::Version::new(2, 8, 4));
+
+        let versions = parse_version(" 2.7.14, 2.8.4 ");
+        assert_eq!(versions[0], semver::Version::new(2, 7, 14));
+        assert_eq!(versions[1], semver::Version::new(2, 8, 4));
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsupported pre-release and build metadata.")]
+    fn test_parse_version_panic_1() {
+        parse_version("2.7.14-alpha");
+    }
+
+    #[test]
+    #[should_panic(expected = "parse semver")]
+    fn test_parse_version_panic_2() {
+        parse_version("aaa");
+    }
+
+    struct TestField {
+        start: Vec<semver::Version>,
+        end: Vec<semver::Version>,
+    }
+
+    impl Exists for TestField {
+        fn start_version(&self) -> &[semver::Version] {
+            &self.start
+        }
+        fn end_version(&self) -> &[semver::Version] {
+            &self.end
+        }
+    }
+
+    #[test]
+    fn test_collect_version() {
+        let vers = vec![
+            TestField {
+                start: parse_version("2.7.7,2.8.3"),
+                end: parse_version("2.7.11, 2.8.8"),
+            },
+            TestField {
+                start: parse_version("2.8.0"),
+                end: parse_version("2.8.8"),
+            },
+        ];
+        let rets = collect_version(&vers);
+        assert_eq!(
+            rets,
+            BTreeMap::from([(7, vec![7, 11]), (8, vec![0, 3, 8]),])
+        );
+
+        assert_eq!(
+            collect_version(&vec![
+                TestField {
+                    start: parse_version("2.7.0"),
+                    end: vec![],
+                },
+                TestField {
+                    start: parse_version("2.7.3"),
+                    end: vec![],
+                },
+                TestField {
+                    start: parse_version("2.7.4"),
+                    end: parse_version("2.7.5"),
+                },
+                TestField {
+                    start: parse_version("2.8.0"),
+                    end: vec![],
+                },
+                TestField {
+                    start: parse_version("2.7.8, 2.8.3"),
+                    end: vec![],
+                },
+                TestField {
+                    start: parse_version("2.7.8, 2.8.4"),
+                    end: vec![],
+                },
+                TestField {
+                    start: parse_version("2.9.0"),
+                    end: vec![],
+                },
+            ]),
+            BTreeMap::from([(7, vec![0, 3, 4, 5, 8]), (8, vec![0, 3, 4]), (9, vec![0])])
+        );
+    }
+
+    #[test]
+    fn test_exists_at() {
+        let field = TestField {
+            start: parse_version("2.7.7,2.8.3"),
+            end: parse_version("2.7.11, 2.8.8"),
+        };
+
+        assert!(!field.exists_at(0, 0));
+        assert!(!field.exists_at(7, 0));
+        assert!(field.exists_at(7, 7));
+        assert!(field.exists_at(7, 10));
+        assert!(!field.exists_at(7, 11));
+        assert!(!field.exists_at(8, 0));
+        assert!(field.exists_at(8, 3));
+        assert!(field.exists_at(8, 7));
+        assert!(!field.exists_at(8, 8));
+        assert!(!field.exists_at(9, 0));
+        assert!(!field.exists_at(999, 9999));
+
+        let field = TestField {
+            start: parse_version(""),
+            end: parse_version(""),
+        };
+        assert!(field.exists_at(0, 0));
+        assert!(field.exists_at(7, 0));
+        assert!(field.exists_at(7, 99));
+        assert!(field.exists_at(8, 0));
+        assert!(field.exists_at(8, 99));
+        assert!(field.exists_at(9, 0));
+        assert!(field.exists_at(999, 9999));
+
+        let field = TestField {
+            start: parse_version("2.8.1"),
+            end: parse_version(""),
+        };
+        assert!(!field.exists_at(0, 0));
+        assert!(!field.exists_at(7, 0));
+        assert!(!field.exists_at(7, 999));
+        assert!(!field.exists_at(8, 0));
+        assert!(field.exists_at(8, 1));
+        assert!(field.exists_at(8, 999));
+        assert!(field.exists_at(9, 0));
+        assert!(field.exists_at(999, 9999));
+
+        let field = TestField {
+            start: parse_version(""),
+            end: parse_version("2.8.8"),
+        };
+        assert!(field.exists_at(0, 0));
+        assert!(field.exists_at(7, 0));
+        assert!(field.exists_at(7, 999));
+        assert!(field.exists_at(8, 0));
+        assert!(field.exists_at(8, 7));
+        assert!(!field.exists_at(8, 8));
+        assert!(!field.exists_at(8, 999));
+        assert!(!field.exists_at(9, 0));
+        assert!(!field.exists_at(999, 9999));
+
+        let field = TestField {
+            start: parse_version(""),
+            end: parse_version("2.7.3, 2.8.8"),
+        };
+        assert!(field.exists_at(0, 0));
+        assert!(field.exists_at(7, 2));
+        assert!(!field.exists_at(7, 3));
+        assert!(!field.exists_at(7, 999));
+        assert!(field.exists_at(8, 0));
+        assert!(field.exists_at(8, 7));
+        assert!(!field.exists_at(8, 8));
+        assert!(!field.exists_at(8, 999));
+        assert!(!field.exists_at(9, 0));
+        assert!(!field.exists_at(999, 9999));
+
+        let field = TestField {
+            start: parse_version("2.7.7, 2.9.3, 2.11.10"),
+            end: parse_version("2.7.11, 2.9.8, 2.11.15"),
+        };
+
+        assert!(!field.exists_at(0, 0));
+        assert!(!field.exists_at(7, 0));
+        assert!(field.exists_at(7, 7));
+        assert!(field.exists_at(7, 10));
+        assert!(!field.exists_at(7, 11));
+        assert!(!field.exists_at(7, 999));
+        assert!(!field.exists_at(8, 0));
+        assert!(!field.exists_at(8, 5));
+        assert!(!field.exists_at(8, 999));
+        assert!(!field.exists_at(9, 0));
+        assert!(!field.exists_at(9, 2));
+        assert!(field.exists_at(9, 3));
+        assert!(field.exists_at(9, 7));
+        assert!(!field.exists_at(9, 8));
+        assert!(!field.exists_at(9, 999));
+        assert!(!field.exists_at(10, 0));
+        assert!(!field.exists_at(10, 5));
+        assert!(!field.exists_at(10, 999));
+        assert!(!field.exists_at(11, 0));
+        assert!(!field.exists_at(11, 9));
+        assert!(field.exists_at(11, 10));
+        assert!(field.exists_at(11, 14));
+        assert!(!field.exists_at(11, 15));
+        assert!(!field.exists_at(11, 99999));
+        assert!(!field.exists_at(999, 9999));
+    }
 }

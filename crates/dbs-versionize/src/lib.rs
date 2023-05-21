@@ -63,6 +63,8 @@ pub enum VersionizeError {
     MultipleVersion(String, String, String),
     /// Not found version
     NotFound(String),
+    /// Version parse error.
+    ParseVersion(String, String),
 }
 
 impl std::fmt::Display for VersionizeError {
@@ -105,6 +107,7 @@ impl std::fmt::Display for VersionizeError {
                 a, b, rcrate,
             ),
             NotFound(v) => write!(f, "Not found {}.", v),
+            ParseVersion(ver, err) => write!(f, "Parse version {} failed. {}", ver, err),
         }
     }
 }
@@ -123,6 +126,7 @@ pub type VersionizeResult<T> = std::result::Result<T, VersionizeError>;
 /// use dbs_versionize::{VersionMap, Versionize, VersionizeResult};
 /// use versionize_derive::Versionize;
 ///
+/// #[derive(Clone)]
 /// struct MyType<T>(T);
 ///
 /// impl<T> Versionize for MyType<T>
@@ -148,7 +152,7 @@ pub type VersionizeResult<T> = std::result::Result<T, VersionizeError>;
 /// }
 /// ```
 /// [1]: https://docs.rs/versionize_derive/latest/versionize_derive/derive.Versionize.html
-pub trait Versionize {
+pub trait Versionize: Clone {
     /// Serializes `self` using the specficifed `writer` and
     /// `version_map`.
     fn serialize<W: Write>(&self, writer: W, version_map: &mut VersionMap) -> VersionizeResult<()>;

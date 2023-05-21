@@ -74,7 +74,7 @@ impl Versionize for String {
     #[inline]
     fn serialize<W: std::io::Write>(
         &self,
-        writer: W,
+        mut writer: W,
         version_map: &mut VersionMap,
     ) -> VersionizeResult<()> {
         // It is better to fail early at serialization time.
@@ -82,7 +82,7 @@ impl Versionize for String {
             return Err(VersionizeError::StringLength(self.len()));
         }
 
-        self.len().serialize(writer, version_map)?;
+        self.len().serialize(&mut writer, version_map)?;
         writer
             .write_all(self.as_bytes())
             .map_err(|e| VersionizeError::Io(e.raw_os_error().unwrap_or(0)))?;
@@ -119,11 +119,11 @@ macro_rules! impl_versionize_array_with_size {
             #[inline]
             fn serialize<W: std::io::Write>(
                 &self,
-                writer: W,
+                mut writer: W,
                 version_map: &mut VersionMap,
             ) -> VersionizeResult<()> {
                 for element in self {
-                    element.serialize(writer, version_map)?;
+                    element.serialize(&mut writer, version_map)?;
                 }
 
                 Ok(())
@@ -131,12 +131,12 @@ macro_rules! impl_versionize_array_with_size {
 
             #[inline]
             fn deserialize<R: std::io::Read>(
-                reader: R,
+                mut reader: R,
                 version_map: &VersionMap,
             ) -> VersionizeResult<Self> {
                 let mut array = [T::default(); $ty];
                 for i in 0..$ty {
-                    array[i] = T::deserialize(reader, version_map)?;
+                    array[i] = T::deserialize(&mut reader, version_map)?;
                 }
                 Ok(array)
             }
@@ -214,58 +214,17 @@ where
     #[inline]
     fn serialize<W: std::io::Write>(
         &self,
-        writer: W,
+        mut writer: W,
         version_map: &mut VersionMap,
     ) -> VersionizeResult<()> {
         // Serialize an Option just like bincode does: u8, T.
         match self {
             Some(value) => {
-                1u8.serialize(writer, version_map)?;
-                value.serialize(writer, version_map)
+                1u8.serialize(&mut writer, version_map)?;
+                value.serialize(&mut writer, version_map)
             }
-            None => 0u8.serialize(writer, version_map),
+            None => 0u8.serialize(&mut writer, version_map),
         }
-    }
-
-    #[inline]
-    fn deserialize<R: std::io::Read>(
-        reader: R,
-        version_map: &VersionMap,
-    ) -> VersionizeResult<Self> {
-        let option = u8::deserialize(reader, version_map)?;
-        match option {
-            0u8 => Ok(None),
-            1u8 => Ok(Some(T::deserialize(reader, version_map)?)),
-            value => Err(VersionizeError::Deserialize(format!(
-                "Invalid option value {}",
-                value
-            ))),
-        }
-    }
-}
-
-impl<T> Versionize for Vec<T>
-where
-    T: Versionize,
-{
-    #[inline]
-    fn serialize<W: std::io::Write>(
-        &self,
-        mut writer: W,
-        version_map: &mut VersionMap,
-    ) -> VersionizeResult<()> {
-        if self.len() > MAX_VEC_SIZE / std::mem::size_of::<T>() {
-            return Err(VersionizeError::VecLength(self.len()));
-        }
-        // Serialize in the same fashion as bincode:
-        // Write len.
-        bincode::serialize_into(&mut writer, &self.len())
-            .map_err(|ref err| VersionizeError::Serialize(format!("{:?}", err)))?;
-        // Walk the vec and write each element.
-        for element in self {
-            element.serialize(writer, version_map)?;
-        }
-        Ok(())
     }
 
     #[inline]
@@ -273,20 +232,15 @@ where
         mut reader: R,
         version_map: &VersionMap,
     ) -> VersionizeResult<Self> {
-        let mut v = Vec::new();
-        let len: usize = bincode::deserialize_from(&mut reader)
-            .map_err(|ref err| VersionizeError::Deserialize(format!("{:?}", err)))?;
-
-        if len > MAX_VEC_SIZE / std::mem::size_of::<T>() {
-            return Err(VersionizeError::VecLength(len));
+        let option = u8::deserialize(&mut reader, version_map)?;
+        match option {
+            0u8 => Ok(None),
+            1u8 => Ok(Some(T::deserialize(&mut reader, version_map)?)),
+            value => Err(VersionizeError::Deserialize(format!(
+                "Invalid option value {}",
+                value
+            ))),
         }
-
-        for _ in 0..len {
-            let element: T = T::deserialize(reader, version_map)
-                .map_err(|ref err| VersionizeError::Deserialize(format!("{:?}", err)))?;
-            v.push(element);
-        }
-        Ok(v)
     }
 }
 
@@ -315,10 +269,10 @@ where
 
     #[inline]
     fn deserialize<R: std::io::Read>(
-        reader: R,
+        mut reader: R,
         version_map: &VersionMap,
     ) -> VersionizeResult<Self> {
-        let header = T::deserialize(reader, version_map)
+        let header = T::deserialize(&mut reader, version_map)
             .map_err(|ref err| VersionizeError::Deserialize(format!("{:?}", err)))?;
         let entries: Vec<<T as FamStruct>::Entry> = Vec::deserialize(reader, version_map)
             .map_err(|ref err| VersionizeError::Deserialize(format!("{:?}", err)))?;
@@ -349,22 +303,22 @@ impl<T: Versionize, U: Versionize> Versionize for (T, U) {
     #[inline]
     fn serialize<W: std::io::Write>(
         &self,
-        writer: W,
+        mut writer: W,
         version_map: &mut VersionMap,
     ) -> VersionizeResult<()> {
-        self.0.serialize(writer, version_map)?;
-        self.1.serialize(writer, version_map)?;
+        self.0.serialize(&mut writer, version_map)?;
+        self.1.serialize(&mut writer, version_map)?;
         Ok(())
     }
 
     #[inline]
     fn deserialize<R: std::io::Read>(
-        reader: R,
+        mut reader: R,
         version_map: &VersionMap,
     ) -> VersionizeResult<Self> {
         Ok((
-            T::deserialize(reader, version_map)?,
-            U::deserialize(reader, version_map)?,
+            T::deserialize(&mut reader, version_map)?,
+            U::deserialize(&mut reader, version_map)?,
         ))
     }
 }
@@ -528,7 +482,7 @@ mod tests {
     #![allow(clippy::undocumented_unsafe_blocks)]
 
     use super::*;
-    use crate::{VersionMap, Versionize, VersionizeResult};
+    use crate::{VersionMap, Versionize};
 
     // Generate primitive tests using this macro.
     macro_rules! primitive_int_test {
@@ -656,15 +610,14 @@ mod tests {
         assert_eq!(store, restore);
     }
 
-    /*
-    #[derive(Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
+    #[derive(Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
     enum CompatibleEnum {
         A,
         B(String),
         C(u64, u64, char),
     }
 
-    #[derive(Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
+    #[derive(Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
     struct TestCompatibility {
         _string: String,
         _array: [u8; 32],
@@ -721,7 +674,7 @@ mod tests {
             _box: Box::new("Box".to_owned()),
         };
 
-        Versionize::serialize(&test_struct, &mut snapshot_mem.as_mut_slice(), &vm, 1).unwrap();
+        Versionize::serialize(&test_struct, &mut snapshot_mem.as_mut_slice(), &mut vm).unwrap();
 
         let restored_state: TestCompatibility =
             bincode::deserialize_from(snapshot_mem.as_slice()).unwrap();
@@ -763,7 +716,7 @@ mod tests {
         bincode::serialize_into(snapshot_mem.as_mut_slice(), &test_struct).unwrap();
 
         let restored_state: TestCompatibility =
-            Versionize::deserialize(&mut snapshot_mem.as_slice(), &vm, 1).unwrap();
+            Versionize::deserialize(&mut snapshot_mem.as_slice(), &mut vm).unwrap();
         assert_eq!(test_struct, restored_state);
     }
     */
@@ -854,8 +807,8 @@ mod tests {
         );
         // Corrupt `snapshot_mem` by changing the most significant bit from 1 (`Some(type)`) to 0 (`None`).
         snapshot_mem[0] = 0;
-        restore = <Option<String> as Versionize>::deserialize(&mut snapshot_mem.as_slice(), &vm, 1)
-            .unwrap();
+        restore =
+            <Option<String> as Versionize>::deserialize(&mut snapshot_mem.as_slice(), &vm).unwrap();
         assert_ne!(store, restore);
     }
 

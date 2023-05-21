@@ -1,3 +1,4 @@
+// Copyright 2023 Alibaba Cloud. All rights reserved.
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 #![deny(missing_docs)]
@@ -19,6 +20,8 @@
 //! - Versionize trait implementations for repr(C) unions must be backed by
 //! extensive testing.
 //! - Semantic serialization and deserialization is available only for structures.
+//! - Serialization now only supports the current version, i.e. the current
+//! version of the application can only take snapshots of the current version.
 
 mod common;
 mod descriptors;
@@ -56,26 +59,25 @@ pub(crate) const END_VERSION: &str = "end";
 /// To facilitate version tolerant serialization "history metadata" is attached
 /// to the structure or enum. This is done by using the `version` attribute in
 /// their definition. In the below example a new field is added to the
-/// structure starting with version 2: `#[version(start = 2)]`.
+/// structure starting with version 0.3.1: `#[version(start = "0.3.1")]`.
+/// THis version is the same as the crate version.
 ///
 /// ```ignore
-/// extern crate versionize;
-/// extern crate versionize_derive;
-/// use versionize::{Versionize, VersionizeError, VersionizeResult};
+/// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
 /// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct Test {
 ///     a: u32,
-///     #[version(start = 2)]
+///     #[version(start = "0.3.1")]
 ///     b: u8,
 /// }
 /// ```
 ///
 /// Multiple version annotations can be defined for a field, like for example:
-/// `#[version(start = 2, end = 3)]`. Field was added in structure version 2
-/// and removed in version 3. The generated code will attempt to (de)serialize
-/// this field only for version 2 of the structure.
+/// `#[version(start = "0.3.1", end = "0.3.3")]`. Field was added in structure
+/// v0.3.1 and removed in v0.3.3. The generated code will attempt to (de)serialize
+/// this field only for v0.3.1 and v0.3.2 of the structure.
 ///
 /// ### Supported field attributes and usage
 ///
@@ -91,13 +93,13 @@ pub(crate) const END_VERSION: &str = "end";
 /// the `Default` trait isused to initialize the field.
 ///
 /// ```ignore
-/// use versionize::{Versionize, VersionizeError, VersionizeResult};
+/// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
 /// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct TestStruct {
 ///     a: u32,
-///     #[version(start = 2, default_fn = "default_b")]
+///     #[version(start = "0.3.2", default_fn = "default_b")]
 ///     b: u8,
 /// }
 ///
@@ -118,9 +120,9 @@ pub(crate) const END_VERSION: &str = "end";
 /// start version of the structure when first defining them and can be later
 /// on removed from serialization logic by adding and end version.
 ///
-/// For example: `#[version(start = 2, end = 4)]`. The field would be present
-/// in the structure v2 and v3, but starting with v4 it would no longer be
-/// serialized or deserialized.
+/// For example: `#[version(start = "0.3.2", end = "0.3.4")]`. The field would
+/// be present in the structure v0.3.2 and v0.3.3, but starting with v0.3.4 it
+/// would no longer be serialized or deserialized.
 ///
 /// Once a field is removed, it can never be added again in a future version.
 ///
@@ -139,13 +141,13 @@ pub(crate) const END_VERSION: &str = "end";
 /// translation or semantic validations.
 ///
 /// ```ignore
-/// use versionize::{Versionize, VersionizeError, VersionizeResult};
+/// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
 /// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct SomeStruct {
 ///     some_u32: u32,
-///     #[version(start = 2, ser_fn = "ser_u16")]
+///     #[version(start = "0.3.2", ser_fn = "ser_u16")]
 ///     some_u16: u16,
 /// }
 ///
@@ -175,13 +177,13 @@ pub(crate) const END_VERSION: &str = "end";
 /// always called first and `de_fn` last.
 ///
 /// ```ignore
-/// use versionize::{Versionize, VersionizeError, VersionizeResult};
+/// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
 /// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Clone, Versionize)]
 /// struct SomeStruct {
 ///     some_u32: u32,
-///     #[version(start = 2, ser_fn = "ser_u16", de_fn = "de_u16")]
+///     #[version(start = "0.3.2", ser_fn = "ser_u16", de_fn = "de_u16")]
 ///     some_u16: u16,
 /// }
 ///
@@ -217,33 +219,24 @@ pub fn impl_versionize(input: TokenStream) -> proc_macro::TokenStream {
         }
     };
 
-    let version = descriptor.version();
     let versioned_serializer = descriptor.generate_serializer();
     let deserializer = descriptor.generate_deserializer();
     let serializer = quote! {
-        // Get the struct version for the input app_version.
-        let version = version_map.get_type_version(app_version, <Self as Versionize>::type_id());
+        // Set the crate version with the crate name.
+        let current = version_map.set_crate_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))?;
         // We will use this copy to perform semantic serialization.
         let mut copy_of_self = self.clone();
-        match version {
-            #versioned_serializer
-            _ => panic!("Unknown {:?} version {}.", &<Self as Versionize>::type_id(), version)
-        }
+        #versioned_serializer
     };
     (quote! {
         impl Versionize for #ident #generics {
-            fn serialize<W: std::io::Write>(&self, writer: &mut W, version_map: &VersionMap, app_version: u16) -> VersionizeResult<()> {
+            fn serialize<W: std::io::Write>(&self, writer: &mut W, version_map: &VersionMap) -> VersionizeResult<()> {
                 #serializer
                 Ok(())
             }
 
-            fn deserialize<R: std::io::Read>(mut reader: &mut R, version_map: &VersionMap, app_version: u16) -> VersionizeResult<Self> {
+            fn deserialize<R: std::io::Read>(mut reader: &mut R, version_map: &VersionMap) -> VersionizeResult<Self> {
                 #deserializer
-            }
-
-            // Returns struct current version.
-            fn version() -> u16 {
-                #version
             }
         }
     }).into()
