@@ -52,7 +52,9 @@ const IRQ_TYPE_LEVEL_HI: u32 = 4;
 /// Creates the flattened device tree for this aarch64 microVM.
 pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     guest_mem: &M,
-    vcpu_mpidr: Vec<u64>,
+    // field 0: boot_onlined, decides whether to online this cpu at boot
+    // field 1: vcpu_mpidr
+    vcpu_state: Vec<(u32, u64)>,
     cmdline: &str,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
     gic_device: &Box<dyn GICDevice>,
@@ -75,7 +77,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
-    create_cpu_nodes(&mut fdt, &vcpu_mpidr)?;
+    create_cpu_nodes(&mut fdt, &vcpu_state)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_gic_node(&mut fdt, gic_device.as_ref())?;
@@ -98,15 +100,15 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, M: GuestMemory>(
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<()> {
+fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_state: &[(u32, u64)]) -> Result<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     let cpus_node = fdt.begin_node("cpus")?;
     // As per documentation, on ARM v8 64-bit systems value should be set to 2.
     fdt.property_u32("#address-cells", 0x02)?;
     fdt.property_u32("#size-cells", 0x0)?;
-    let num_cpus = vcpu_mpidr.len();
+    let num_cpus = vcpu_state.len();
 
-    for (cpu_index, iter) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
+    for (cpu_index, iter) in vcpu_state.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{cpu_index:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
@@ -115,9 +117,12 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<()> {
             // This is required on armv8 64-bit. See aforementioned documentation.
             fdt.property_string("enable-method", "psci")?;
         }
+        // boot-onlined attribute is used to indicate whether this cpu should be onlined at boot.
+        // 0 means offline, 1 means online.
+        fdt.property_u32("boot-onlined", iter.0)?;
         // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
-        fdt.property_u64("reg", iter & 0x7FFFFF)?;
+        fdt.property_u64("reg", iter.1 & 0x7FFFFF)?;
         fdt.end_node(cpu_node)?;
     }
     fdt.end_node(cpus_node)?;
@@ -497,7 +502,7 @@ mod tests {
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         assert!(create_fdt(
             &mem,
-            vec![0],
+            vec![(1, 0)],
             "console=tty0",
             Some(&dev_info),
             &gic,
@@ -517,7 +522,7 @@ mod tests {
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         let dtb = create_fdt(
             &mem,
-            vec![0],
+            vec![(1, 0)],
             "console=tty0",
             None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
             &gic,
@@ -554,7 +559,7 @@ mod tests {
         let vpmu_feature = VpmuFeatureLevel::Disabled;
         let dtb = create_fdt(
             &mem,
-            vec![0],
+            vec![(1, 0)],
             "console=tty0",
             None::<&HashMap<(DeviceType, String), MMIODeviceInfo>>,
             &gic,
@@ -591,7 +596,7 @@ mod tests {
         let vpmu_feature = VpmuFeatureLevel::FullyEnabled;
         let dtb = create_fdt(
             &mem,
-            vec![0],
+            vec![(1, 0)],
             "console=tty0",
             None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
             &gic,
