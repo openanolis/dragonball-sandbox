@@ -1,6 +1,6 @@
 [package]
 name = "dbs-boot"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Alibaba Dragonball Team"]
 description = "Traits and structs for booting sandbox"
 license = "Apache-2.0 AND BSD-3-Clause"

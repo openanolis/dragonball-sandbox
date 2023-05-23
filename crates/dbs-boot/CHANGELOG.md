@@ -34,3 +34,9 @@
 - Use caret dependencies for kvm-ioctls
 - Update kvm-ioctls to v0.12.0
 - Update fdt in aarch64 to support vPMU
+
+## v0.3.2
+
+### Updated
+
+- Update create_fdt interface
