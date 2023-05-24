@@ -82,7 +82,7 @@ impl EnumVariant {
             let data_ident = format_ident!("data_{}", index);
             data_tuple.extend(quote!(#data_ident,));
             serialize_data.extend(quote! {
-                Versionize::serialize(#data_ident, &mut writer, version_map)?;
+                dbs_versionize::Versionize::serialize(#data_ident, &mut writer, version_map)?;
             });
         }
 
@@ -90,14 +90,14 @@ impl EnumVariant {
             quote! {
                 Self::#field_ident => {
                     let index: u32 = #variant_index;
-                    Versionize::serialize(&index, &mut writer, version_map)?;
+                    dbs_versionize::Versionize::serialize(&index, &mut writer, version_map)?;
                 },
             }
         } else {
             quote! {
                 Self::#field_ident(#data_tuple) => {
                     let index: u32 = #variant_index;
-                    Versionize::serialize(&index, &mut writer, version_map)?;
+                    dbs_versionize::Versionize::serialize(&index, &mut writer, version_map)?;
                     #serialize_data
                 },
             }
@@ -124,7 +124,7 @@ impl EnumVariant {
             data_tuple.extend(quote!(#data_ident,));
             deserialize_data.extend(
                 quote! {
-                    let #data_ident = <#data_type as Versionize>::deserialize(&mut reader, version_map)?;
+                    let #data_ident = <#data_type as dbs_versionize::Versionize>::deserialize(&mut reader, version_map)?;
                 }
             );
         }

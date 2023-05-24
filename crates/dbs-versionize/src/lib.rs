@@ -36,6 +36,11 @@ pub mod version_map;
 pub use semver;
 pub use version_map::VersionMap;
 
+// Re-export semver Version.
+pub use semver::Version;
+// Re-export #[derive(Versionize)].
+pub use dbs_versionize_derive::Versionize;
+
 use std::io::{Read, Write};
 
 /// Versioned serialization/deserialization error definitions.
@@ -124,7 +129,6 @@ pub type VersionizeResult<T> = std::result::Result<T, VersionizeError>;
 /// Example implementation
 /// ```
 /// use dbs_versionize::{VersionMap, Versionize, VersionizeResult};
-/// use versionize_derive::Versionize;
 ///
 /// #[derive(Clone)]
 /// struct MyType<T>(T);

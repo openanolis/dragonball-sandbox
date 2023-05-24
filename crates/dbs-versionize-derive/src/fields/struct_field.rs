@@ -87,11 +87,11 @@ impl StructField {
         match &self.ty {
             syn::Type::Array(_) => quote! {
                 for element in copy_of_self.#field_ident.iter() {
-                    Versionize::serialize(element, &mut writer, version_map)?;
+                    dbs_versionize::Versionize::serialize(element, &mut writer, version_map)?;
                 }
             },
             syn::Type::Path(_) => quote! {
-                Versionize::serialize(&copy_of_self.#field_ident, &mut writer, version_map)?;
+                dbs_versionize::Versionize::serialize(&copy_of_self.#field_ident, &mut writer, version_map)?;
             },
             syn::Type::Reference(_) => quote! {
                 copy_of_self.#field_ident.serialize(&mut writer, version_map)?;
@@ -144,10 +144,10 @@ impl StructField {
                 }
             }
             syn::Type::Path(_) => quote! {
-                #field_ident: <#ty as Versionize>::deserialize(&mut reader, version_map)?,
+                #field_ident: <#ty as dbs_versionize::Versionize>::deserialize(&mut reader, version_map)?,
             },
             syn::Type::Reference(_) => quote! {
-                #field_ident: <#ty as Versionize>::deserialize(&mut reader, version_map)?,
+                #field_ident: <#ty as dbs_versionize::Versionize>::deserialize(&mut reader, version_map)?,
             },
             _ => panic!("Unsupported field type {:?}", self.ty),
         }
@@ -164,7 +164,7 @@ impl StructField {
             #field_ident: {
                 let mut array = [#array_type_token::default() ; #array_len];
                 for i in 0..#array_len {
-                    array[i] = <#array_type_token as Versionize>::deserialize(&mut reader, version_map)?;
+                    array[i] = <#array_type_token as dbs_versionize::Versionize>::deserialize(&mut reader, version_map)?;
                 }
                 array
             },

@@ -39,7 +39,7 @@ impl Descriptor for EnumDescriptor {
             let variant_index = <u32 as dbs_versionize::Versionize>::deserialize(&mut reader, version_map)?;
             match variant_index {
                 #versioned_deserializers
-                x => return Err(VersionizeError::Deserialize(format!("Unknown variant_index {}", x)))
+                x => return Err(dbs_versionize::VersionizeError::Deserialize(format!("Unknown variant_index {}", x)))
             }
         }
     }

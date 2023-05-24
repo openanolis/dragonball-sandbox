@@ -477,6 +477,11 @@ where
     }
 }
 
+// For tests, enables the crate to use its own macros internally.
+// https://github.com/rust-lang/rust/issues/54647
+#[cfg(test)]
+mod dbs_versionize { pub use super::*; }
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::undocumented_unsafe_blocks)]

@@ -94,7 +94,6 @@ pub(crate) const END_VERSION: &str = "end";
 ///
 /// ```ignore
 /// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct TestStruct {
@@ -142,7 +141,6 @@ pub(crate) const END_VERSION: &str = "end";
 ///
 /// ```ignore
 /// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Versionize)]
 /// struct SomeStruct {
@@ -178,7 +176,6 @@ pub(crate) const END_VERSION: &str = "end";
 ///
 /// ```ignore
 /// use dbs_versionize::{Versionize, VersionizeError, VersionizeResult};
-/// use dbs_versionize_derive::Versionize;
 ///
 /// #[derive(Clone, Versionize)]
 /// struct SomeStruct {
@@ -229,13 +226,13 @@ pub fn impl_versionize(input: TokenStream) -> proc_macro::TokenStream {
         #versioned_serializer
     };
     (quote! {
-        impl Versionize for #ident #generics {
-            fn serialize<W: std::io::Write>(&self, writer: &mut W, version_map: &VersionMap) -> VersionizeResult<()> {
+        impl dbs_versionize::Versionize for #ident #generics {
+            fn serialize<W: std::io::Write>(&self, mut writer: W, version_map: &mut dbs_versionize::VersionMap) -> dbs_versionize::VersionizeResult<()> {
                 #serializer
                 Ok(())
             }
 
-            fn deserialize<R: std::io::Read>(mut reader: &mut R, version_map: &VersionMap) -> VersionizeResult<Self> {
+            fn deserialize<R: std::io::Read>(mut reader: R, version_map: &dbs_versionize::VersionMap) -> dbs_versionize::VersionizeResult<Self> {
                 #deserializer
             }
         }
