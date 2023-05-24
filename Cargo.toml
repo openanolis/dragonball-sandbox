@@ -14,4 +14,5 @@ members = [
     "crates/dbs-miniball",
     "crates/dbs-versionize",
     "crates/dbs-versionize-derive",
+    "crates/dbs-versionize/test-data",
 ]

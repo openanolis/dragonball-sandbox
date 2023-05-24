@@ -480,7 +480,9 @@ where
 // For tests, enables the crate to use its own macros internally.
 // https://github.com/rust-lang/rust/issues/54647
 #[cfg(test)]
-mod dbs_versionize { pub use super::*; }
+mod dbs_versionize {
+    pub use super::*;
+}
 
 #[cfg(test)]
 mod tests {
@@ -615,14 +617,18 @@ mod tests {
         assert_eq!(store, restore);
     }
 
-    #[derive(Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
+    #[derive(
+        Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize,
+    )]
     enum CompatibleEnum {
         A,
         B(String),
         C(u64, u64, char),
     }
 
-    #[derive(Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize)]
+    #[derive(
+        Clone, Debug, serde_derive::Deserialize, PartialEq, serde_derive::Serialize, Versionize,
+    )]
     struct TestCompatibility {
         _string: String,
         _array: [u8; 32],
@@ -719,12 +725,13 @@ mod tests {
         };
 
         bincode::serialize_into(snapshot_mem.as_mut_slice(), &test_struct).unwrap();
+        vm.set_crate_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+            .unwrap();
 
         let restored_state: TestCompatibility =
-            Versionize::deserialize(&mut snapshot_mem.as_slice(), &mut vm).unwrap();
+            Versionize::deserialize(&mut snapshot_mem.as_slice(), &vm).unwrap();
         assert_eq!(test_struct, restored_state);
     }
-    */
 
     #[test]
     fn test_ser_de_bool() {
@@ -855,7 +862,7 @@ mod tests {
         // We need extra 8 bytes for vector len.
         let mut snapshot_mem = vec![0u8; MAX_VEC_SIZE + 8];
         let err = vec![123u8; MAX_VEC_SIZE + 1]
-            .serialize(&mut snapshot_mem.as_mut_slice(), &mut VersionMap::new())
+            .serialize(snapshot_mem.as_mut_slice(), &mut VersionMap::new())
             .unwrap_err();
         assert_eq!(err, VersionizeError::VecLength(MAX_VEC_SIZE + 1));
         assert_eq!(
@@ -870,7 +877,7 @@ mod tests {
         let mut snapshot_mem = vec![0u8; MAX_STRING_LEN + 8];
         let err = String::from_utf8(vec![123u8; MAX_STRING_LEN + 1])
             .unwrap()
-            .serialize(&mut snapshot_mem.as_mut_slice(), &mut VersionMap::new())
+            .serialize(snapshot_mem.as_mut_slice(), &mut VersionMap::new())
             .unwrap_err();
         assert_eq!(err, VersionizeError::StringLength(MAX_STRING_LEN + 1));
         assert_eq!(
@@ -944,7 +951,7 @@ mod tests {
         // We need extra 8 bytes for vector len.
         let mut snapshot_mem = vec![0u8; MAX_VEC_SIZE + 8];
         let err = VecDeque::from(vec![123u8; MAX_VEC_SIZE + 1])
-            .serialize(&mut snapshot_mem.as_mut_slice(), &mut VersionMap::new())
+            .serialize(snapshot_mem.as_mut_slice(), &mut VersionMap::new())
             .unwrap_err();
 
         assert_eq!(err, VersionizeError::VecLength(MAX_VEC_SIZE + 1));
@@ -1029,7 +1036,7 @@ mod tests {
         }
 
         let err = err
-            .serialize(&mut snapshot_mem.as_mut_slice(), &mut VersionMap::new())
+            .serialize(snapshot_mem.as_mut_slice(), &mut VersionMap::new())
             .unwrap_err();
         assert_eq!(err, VersionizeError::HashMapLength(MAX_HASH_MAP_LEN + 16));
 
@@ -1112,7 +1119,7 @@ mod tests {
         }
 
         let err = err
-            .serialize(&mut snapshot_mem.as_mut_slice(), &mut VersionMap::new())
+            .serialize(snapshot_mem.as_mut_slice(), &mut VersionMap::new())
             .unwrap_err();
         assert_eq!(err, VersionizeError::HashSetLength(MAX_HASH_SET_LEN + 8));
         assert_eq!(

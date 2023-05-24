@@ -19,6 +19,9 @@ vmm-sys-util = "0.11.0"
 semver = "1.0.16"
 dbs-versionize-derive = { path = "../dbs-versionize-derive" }
 
+[dev-dependencies]
+dbs-versionize-tests = { path = "./test-data" }
+
 [build-dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
