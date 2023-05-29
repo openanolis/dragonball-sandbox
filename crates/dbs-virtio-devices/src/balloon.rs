@@ -55,17 +55,13 @@ const PMD_SIZE: u64 = 1 << PMD_SHIFT;
 const INFLATE_QUEUE_AVAIL_EVENT: u32 = 0;
 // New descriptors are pending on the virtio queue.
 const DEFLATE_QUEUE_AVAIL_EVENT: u32 = 1;
-//// New descriptors are pending on the virtio queue.
+// New descriptors are pending on the virtio queue.
 const REPORTING_QUEUE_AVAIL_EVENT: u32 = 2;
-// New descriptors are pending on the virtio queue.
-const INFLATE_CONT_QUEUE_AVAIL_EVENT: u32 = 3;
-// New descriptors are pending on the virtio queue.
-const DEFLATE_CONT_QUEUE_AVAIL_EVENT: u32 = 4;
 // The device has been dropped.
-const KILL_EVENT: u32 = 5;
+const KILL_EVENT: u32 = 3;
 // The device should be paused.
-const PAUSE_EVENT: u32 = 6;
-const BALLOON_EVENTS_COUNT: u32 = 7;
+const PAUSE_EVENT: u32 = 4;
+const BALLOON_EVENTS_COUNT: u32 = 5;
 
 // Page shift in the host.
 const PAGE_SHIFT: u32 = 12;
@@ -299,7 +295,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion>
                 continue;
             }
             let avail_desc_len = avail_desc.len();
-            if avail_desc_len as usize % size_of::<u64>() != 0 {
+            if avail_desc_len as usize % size_of::<u32>() != 0 {
                 error!(
                     "{}: the request size {} is not right",
                     BALLOON_DRIVER_NAME, avail_desc_len
@@ -322,7 +318,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion>
                         break;
                     }
                 };
-                offset += size_of::<u64>() as u64;
+                offset += size_of::<u32>() as u64;
 
                 // Get pfn_len
                 let pfn_len = match idx {
@@ -343,12 +339,10 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion>
                     pfn_len
                 );
 
-                let guest_addr = pfn << VIRTIO_BALLOON_PFN_SHIFT;
+                let guest_addr = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
 
-                if let Some(region) = mem.find_region(GuestAddress(guest_addr.into())) {
-                    let host_addr = mem
-                        .get_host_address(GuestAddress(guest_addr.into()))
-                        .unwrap();
+                if let Some(region) = mem.find_region(GuestAddress(guest_addr)) {
+                    let host_addr = mem.get_host_address(GuestAddress(guest_addr)).unwrap();
                     if advice == libc::MADV_DONTNEED && region.file_offset().is_some() {
                         advice = libc::MADV_REMOVE;
                     }
@@ -428,6 +422,11 @@ where
     AS: 'static + GuestAddressSpace + Send + Sync,
 {
     fn init(&mut self, ops: &mut EventOps) {
+        trace!(
+            target: BALLOON_DRIVER_NAME,
+            "{}: BalloonEpollHandler::init()",
+            BALLOON_DRIVER_NAME,
+        );
         let events = Events::with_data(
             self.inflate.eventfd.as_ref(),
             INFLATE_QUEUE_AVAIL_EVENT,
@@ -472,8 +471,12 @@ where
         let _mem = guard.deref();
         let idx = events.data();
 
-        trace!("{}: process idx {}", BALLOON_DRIVER_NAME, idx);
-
+        trace!(
+            target: BALLOON_DRIVER_NAME,
+            "{}: BalloonEpollHandler::process() idx {}",
+            BALLOON_DRIVER_NAME,
+            idx
+        );
         match idx {
             INFLATE_QUEUE_AVAIL_EVENT | DEFLATE_QUEUE_AVAIL_EVENT => {
                 if !self.process_queue(idx) {
@@ -588,10 +591,24 @@ where
     }
 
     fn set_acked_features(&mut self, page: u32, value: u32) {
+        trace!(
+            target: BALLOON_DRIVER_NAME,
+            "{}: VirtioDevice::set_acked_features({}, 0x{:x})",
+            BALLOON_DRIVER_NAME,
+            page,
+            value
+        );
         self.device_info.set_acked_features(page, value)
     }
 
     fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
+        trace!(
+            target: BALLOON_DRIVER_NAME,
+            "{}: VirtioDevice::read_config(0x{:x}, {:?})",
+            BALLOON_DRIVER_NAME,
+            offset,
+            data
+        );
         let config = &self.config.lock().unwrap();
         let config_space = config.as_slice().to_vec();
         let config_len = config_space.len() as u64;
@@ -625,12 +642,6 @@ where
     fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
         self.device_info.check_queue_sizes(&config.queues)?;
         self.device_change_notifier = config.device_change_notifier.clone();
-
-        let _queue_evts: Vec<RawFd> = config
-            .queues
-            .iter()
-            .map(|q| q.eventfd.as_raw_fd())
-            .collect();
 
         trace!(
             "{}: activate acked_features 0x{:x}",
