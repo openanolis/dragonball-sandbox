@@ -27,3 +27,10 @@
 
 - Add virtio-mem device
 - Add virtio-balloon device
+
+## v0.3.1
+
+### Fixed
+
+- Fixed #284, fix balloon pfn using u32
+- Fixed #285, add Madvise error type
