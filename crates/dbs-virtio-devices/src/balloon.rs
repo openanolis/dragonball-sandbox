@@ -16,6 +16,7 @@
 
 use std::any::Any;
 use std::cmp;
+use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem::size_of;
@@ -629,14 +630,17 @@ where
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         let config = &mut self.config.lock().unwrap();
         let config_slice = config.as_mut_slice();
-        let data_len = data.len() as u64;
-        let config_len = config_slice.len() as u64;
-        if offset + data_len > config_len {
+        let Ok(start) = usize::try_from(offset) else {
             error!("Failed to write config space");
             return;
-        }
-        let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(data);
+        };
+        let Some(dst) = start.checked_add(data.len())
+            .and_then(|end| config_slice.get_mut(start..end)) else
+        {
+            error!("Failed to write config space");
+            return;
+        };
+        dst.copy_from_slice(data);
     }
 
     fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
