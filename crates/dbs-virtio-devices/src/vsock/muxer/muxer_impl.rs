@@ -308,13 +308,13 @@ impl VsockEpollListener for VsockMuxer {
     /// Get the epoll events to be polled upstream.
     ///
     /// Since the polled FD is a nested epoll FD, we're only interested in
-    /// EPOLLIN events (i.e. some event occured on one of the FDs registered
+    /// EPOLLIN events (i.e. some event occurred on one of the FDs registered
     /// under our epoll FD).
     fn get_polled_evset(&self) -> epoll::Events {
         epoll::Events::EPOLLIN
     }
 
-    /// Notify the muxer about a pending event having occured under its nested
+    /// Notify the muxer about a pending event having occurred under its nested
     /// epoll FD.
     fn notify(&mut self, _: epoll::Events) {
         trace!("vsock: muxer received kick");
@@ -373,25 +373,24 @@ impl VsockMuxer {
     }
 
     /// Handle/dispatch an epoll event to its listener.
-    fn handle_event(&mut self, fd: RawFd, evset: epoll::Events) {
+    fn handle_event(&mut self, fd: RawFd, event_set: epoll::Events) {
         trace!(
             "vsock: muxer processing event: fd={}, evset={:?}",
             fd,
-            evset
+            event_set
         );
 
         match self.listener_map.get_mut(&fd) {
             // This event needs to be forwarded to a `VsockConnection` that is
             // listening for it.
-            Some(EpollListener::Connection { key, evset, .. }) => {
+            Some(EpollListener::Connection { key, evset: _, .. }) => {
                 let key_copy = *key;
-                let evset_copy = *evset;
                 // The handling of this event will most probably mutate the
-                // state of the receiving conection. We'll need to check for new
+                // state of the receiving connection. We'll need to check for new
                 // pending RX, event set mutation, and all that, so we're
                 // wrapping the event delivery inside those checks.
                 self.apply_conn_mutation(key_copy, |conn| {
-                    conn.notify(evset_copy);
+                    conn.notify(event_set);
                 });
             }
 
@@ -457,7 +456,10 @@ impl VsockMuxer {
             }
 
             _ => {
-                info!("vsock: unexpected event: fd={:?}, evset={:?}", fd, evset);
+                info!(
+                    "vsock: unexpected event: fd={:?}, evset={:?}",
+                    fd, event_set
+                );
             }
         }
     }
