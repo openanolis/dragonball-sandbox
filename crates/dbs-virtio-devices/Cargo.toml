@@ -16,7 +16,7 @@ caps = "0.5.3"
 dbs-device = { version = "0.2.0", path = "../dbs-device" }
 dbs-interrupt = { version = "0.2.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
 dbs-utils = { version = "0.2.0", path = "../dbs-utils" }
-epoll = "4.0.1"
+epoll = ">=4.3.1, <4.3.2"
 io-uring = "0.5.2"
 fuse-backend-rs = { version = "0.10.0", optional = true }
 kvm-bindings = "0.6.0"
