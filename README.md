@@ -1,5 +1,12 @@
 # dragonball-sandbox
 
+## ⚠️ Important Notice ⚠️
+
+ In order to make contribution to Dragonball more convenient, we will shift all dragonball related dependencies into [Kata Containers](https://github.com/kata-containers/kata-containers) repo. This repo will be *archived*. 
+
+ Thanks for all the contributions.
+
+## Introduction
 [![static](https://github.com/openanolis/dragonball-sandbox/actions/workflows/check.yaml/badge.svg)](https://github.com/openanolis/dragonball-sandbox/actions/workflows/check.yaml)
 [![UT](https://github.com/openanolis/dragonball-sandbox/actions/workflows/test.yaml/badge.svg)](https://github.com/openanolis/dragonball-sandbox/actions/workflows/test.yaml)
 [![codecov](https://codecov.io/gh/openanolis/dragonball-sandbox/branch/main/graph/badge.svg?token=UE8OKM3QP2)](https://codecov.io/gh/openanolis/dragonball-sandbox)
