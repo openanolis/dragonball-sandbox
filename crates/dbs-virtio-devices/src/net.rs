@@ -22,7 +22,7 @@ use dbs_utils::metric::{IncMetric, SharedIncMetric};
 use dbs_utils::net::{net_gen, MacAddr, Tap, MAC_ADDR_LEN};
 use dbs_utils::rate_limiter::{BucketUpdate, RateLimiter, TokenType};
 use libc;
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use serde::Serialize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_queue::{QueueOwnedT, QueueSync, QueueT};
@@ -860,6 +860,18 @@ where
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn remove(&mut self) {
+        let subscriber_id = self.subscriber_id.take();
+        if let Some(subscriber_id) = subscriber_id {
+            match self.device_info.remove_event_handler(subscriber_id) {
+                Ok(_) => debug!("virtio-net: removed subscriber_id {:?}", subscriber_id),
+                Err(err) => warn!("virtio-net: failed to remove event handler: {:?}", err),
+            };
+        } else {
+            self.tap.take();
+        }
     }
 }
 

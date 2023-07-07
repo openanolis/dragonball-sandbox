@@ -1,7 +1,33 @@
 // Copyright (C) 2021 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use lazy_static::lazy_static;
+
 use crate::{AddressSpaceRegion, AddressSpaceRegionType};
+
+// Max retry times for reading /proc
+const PROC_READ_RETRY: u64 = 5;
+
+lazy_static! {
+    /// Upper bound of host memory.
+    pub static ref USABLE_END: u64 = {
+        for _ in 0..PROC_READ_RETRY {
+            if let Ok(buf) = std::fs::read("/proc/meminfo") {
+                let content = String::from_utf8_lossy(&buf);
+                for line in content.lines() {
+                    if line.starts_with("MemTotal:") {
+                        if let Some(end) = line.find(" kB") {
+                            if let Ok(size) = line[9..end].trim().parse::<u64>() {
+                                return (size << 10) - 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        panic!("Exceed max retry times. Cannot get total mem size from /proc/meminfo");
+    };
+}
 
 /// Address space layout configuration.
 ///
@@ -15,6 +41,8 @@ pub struct AddressSpaceLayout {
     pub mem_start: u64,
     /// end of guest memory address
     pub mem_end: u64,
+    /// end of usable memory address
+    pub usable_end: u64,
 }
 
 impl AddressSpaceLayout {
@@ -24,6 +52,7 @@ impl AddressSpaceLayout {
             phys_end,
             mem_start,
             mem_end,
+            usable_end: *USABLE_END,
         }
     }
 

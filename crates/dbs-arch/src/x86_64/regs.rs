@@ -152,7 +152,7 @@ fn configure_segments_and_sregs<M: GuestMemory>(
     // Write segments
     write_gdt_table(gdt_table, gdt_addr, mem)?;
     sregs.gdt.base = gdt_addr;
-    sregs.gdt.limit = (mem::size_of::<u64>() * gdt_table.len()) as u16 - 1;
+    sregs.gdt.limit = std::mem::size_of_val(gdt_table) as u16 - 1;
 
     write_idt_value(0, idt_addr, mem)?;
     sregs.idt.base = idt_addr;

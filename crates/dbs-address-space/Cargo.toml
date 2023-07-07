@@ -1,6 +1,6 @@
 [package]
 name = "dbs-address-space"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Alibaba Dragonball Team"]
 description = "address space manager for virtual machines."
 license = "Apache-2.0"
@@ -14,6 +14,7 @@ readme = "README.md"
 arc-swap = ">=0.4.8"
 libc = "0.2.39"
 nix = "0.23.1"
+lazy_static = "1"
 thiserror = "1"
 vmm-sys-util = "0.11.0"
 vm-memory = { version = "0.9", features = ["backend-mmap", "backend-atomic"] }

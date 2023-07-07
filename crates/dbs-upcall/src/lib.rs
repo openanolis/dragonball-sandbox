@@ -664,6 +664,7 @@ mod tests {
     }
 
     #[allow(clippy::mutex_atomic)]
+    #[allow(clippy::redundant_clone)]
     #[test]
     fn test_upcall_client_send_request() {
         let (mut vsock_backend, upcall_client) = get_upcall_client();
@@ -704,6 +705,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn test_upcall_client_send_request_without_result() {
         let (mut vsock_backend, upcall_client) = get_upcall_client();
         let info = upcall_client.info.clone();
@@ -732,6 +734,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn test_upcall_client_send_request_error() {
         let (_, upcall_client) = get_upcall_client();
         let info = upcall_client.info.clone();
@@ -768,6 +771,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn test_upcall_client_get_state() {
         let (_, upcall_client) = get_upcall_client();
 
@@ -779,6 +783,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn test_upcall_client_is_ready() {
         let (_, upcall_client) = get_upcall_client();
 

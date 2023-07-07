@@ -123,6 +123,20 @@ impl AddressSpaceBase {
         false
     }
 
+    /// Get protection flags of memory region that guest physical address `guest_addr` belongs to.
+    ///
+    /// # Arguments
+    /// * `guest_addr` - the guest physical address to inquire
+    pub fn prot_flags(&self, guest_addr: GuestAddress) -> Result<i32, AddressSpaceError> {
+        for reg in self.regions.iter() {
+            if reg.start_addr() <= guest_addr && reg.start_addr().0 + reg.len() > guest_addr.0 {
+                return Ok(reg.prot_flags());
+            }
+        }
+
+        Err(AddressSpaceError::InvalidRegionType)
+    }
+
     /// Get optional NUMA node id associated with guest physical address `gpa`.
     ///
     /// # Arguments
@@ -218,6 +232,14 @@ impl AddressSpace {
         self.state.load().is_dax_region(guest_addr)
     }
 
+    /// Get protection flags of memory region that guest physical address `guest_addr` belongs to.
+    ///
+    /// # Arguments
+    /// * `guest_addr` - the guest physical address to inquire
+    pub fn prot_flags(&self, guest_addr: GuestAddress) -> Result<i32, AddressSpaceError> {
+        self.state.load().prot_flags(guest_addr)
+    }
+
     /// Get optional NUMA node id associated with guest physical address `gpa`.
     ///
     /// # Arguments
@@ -241,7 +263,473 @@ mod tests {
     const GUEST_DEVICE_START: u64 = GUEST_MEM_END + 1;
 
     #[test]
-    fn test_is_reserved_region() {
+    fn test_address_space_base_from_regions() {
+        let mut file = TempFile::new().unwrap().into_file();
+        let sample_buf = &[1, 2, 3, 4, 5];
+        assert!(file.write_all(sample_buf).is_ok());
+        file.set_len(0x10000).unwrap();
+
+        let reg = Arc::new(
+            AddressSpaceRegion::create_device_region(GuestAddress(GUEST_DEVICE_START), 0x1000)
+                .unwrap(),
+        );
+        let regions = vec![reg];
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpaceBase::from_regions(regions, layout.clone());
+        assert_eq!(address_space.layout(), layout);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid region")]
+    fn test_address_space_base_from_regions_when_region_invalid() {
+        let reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x1000,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg];
+        let layout = AddressSpaceLayout::new(0x2000, 0x200, 0x1800);
+        let _address_space = AddressSpaceBase::from_regions(regions, layout);
+    }
+
+    #[test]
+    #[should_panic(expected = "address space regions intersect with each other")]
+    fn test_address_space_base_from_regions_when_region_intersected() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x200),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let _address_space = AddressSpaceBase::from_regions(regions, layout);
+    }
+
+    #[test]
+    fn test_address_space_base_insert_region() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1];
+        let layout = AddressSpaceLayout::new(0x2000, 0x100, 0x1800);
+        let mut address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        // Normal case.
+        address_space.insert_region(reg2).unwrap();
+        assert!(!address_space.regions[1].intersect_with(&address_space.regions[0]));
+
+        // Error invalid address range case when region invaled.
+        let invalid_reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x0),
+            0x100,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        assert_eq!(
+            format!(
+                "{:?}",
+                address_space.insert_region(invalid_reg).err().unwrap()
+            ),
+            format!("InvalidAddressRange({:?}, {:?})", 0x0, 0x100)
+        );
+
+        // Error Error invalid address range case when region to be inserted will intersect
+        // exsisting regions.
+        let intersected_reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x400),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        assert_eq!(
+            format!(
+                "{:?}",
+                address_space.insert_region(intersected_reg).err().unwrap()
+            ),
+            format!("InvalidAddressRange({:?}, {:?})", 0x400, 0x200)
+        );
+    }
+
+    #[test]
+    fn test_address_space_base_walk_regions() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        // The argument of walk_regions is a function which takes a &Arc<AddressSpaceRegion>
+        // and returns result. This function will be applied to all regions.
+        fn do_not_have_hotplug(region: &Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError> {
+            if region.is_hotplug() {
+                Err(AddressSpaceError::InvalidRegionType) // The Error type is dictated to AddressSpaceError.
+            } else {
+                Ok(())
+            }
+        }
+        assert!(matches!(
+            address_space.walk_regions(do_not_have_hotplug).unwrap(),
+            ()
+        ));
+    }
+
+    #[test]
+    fn test_address_space_base_last_addr() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        assert_eq!(address_space.last_addr(), GuestAddress(0x500 - 1));
+    }
+
+    #[test]
+    fn test_address_space_base_is_dax_region() {
+        let page_size = 4096;
+        let address_space_region = vec![
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DefaultMemory,
+                GuestAddress(page_size * 2),
+                page_size as GuestUsize,
+            )),
+            Arc::new(AddressSpaceRegion::new(
+                AddressSpaceRegionType::DAXMemory,
+                GuestAddress(GUEST_DEVICE_START),
+                page_size as GuestUsize,
+            )),
+        ];
+        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
+        let address_space = AddressSpaceBase::from_regions(address_space_region, layout);
+
+        assert!(!address_space.is_dax_region(GuestAddress(page_size)));
+        assert!(!address_space.is_dax_region(GuestAddress(page_size * 2)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + 1)));
+        assert!(!address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size)));
+        assert!(address_space.is_dax_region(GuestAddress(GUEST_DEVICE_START + page_size - 1)));
+    }
+
+    #[test]
+    fn test_address_space_base_prot_flags() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            Some(0),
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::new(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x300,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        // Normal case, reg1.
+        assert_eq!(address_space.prot_flags(GuestAddress(0x200)).unwrap(), 0);
+        // Normal case, reg2.
+        assert_eq!(
+            address_space.prot_flags(GuestAddress(0x500)).unwrap(),
+            libc::PROT_READ | libc::PROT_WRITE
+        );
+        // Inquire gpa where no region is set.
+        assert!(matches!(
+            address_space.prot_flags(GuestAddress(0x600)),
+            Err(AddressSpaceError::InvalidRegionType)
+        ));
+    }
+
+    #[test]
+    fn test_address_space_base_numa_node_id() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            Some(0),
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x300,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpaceBase::from_regions(regions, layout);
+
+        // Normal case.
+        assert_eq!(address_space.numa_node_id(0x200).unwrap(), 0);
+        // Inquire region with None as its numa node id.
+        assert_eq!(address_space.numa_node_id(0x400), None);
+        // Inquire gpa where no region is set.
+        assert_eq!(address_space.numa_node_id(0x600), None);
+    }
+
+    #[test]
+    fn test_address_space_convert_into_vm_as() {
+        // ! Further and detailed test is needed here.
+        let gmm = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0x0), 0x400)]).unwrap();
+        let _vm = AddressSpace::convert_into_vm_as(gmm);
+    }
+
+    #[test]
+    fn test_address_space_insert_region() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1];
+        let layout = AddressSpaceLayout::new(0x2000, 0x100, 0x1800);
+        let mut address_space = AddressSpace::from_regions(regions, layout);
+
+        // Normal case.
+        assert!(matches!(address_space.insert_region(reg2).unwrap(), ()));
+
+        // Error invalid address range case when region invaled.
+        let invalid_reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x0),
+            0x100,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        assert_eq!(
+            format!(
+                "{:?}",
+                address_space.insert_region(invalid_reg).err().unwrap()
+            ),
+            format!("InvalidAddressRange({:?}, {:?})", 0x0, 0x100)
+        );
+
+        // Error Error invalid address range case when region to be inserted will intersect
+        // exsisting regions.
+        let intersected_reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x400),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        assert_eq!(
+            format!(
+                "{:?}",
+                address_space.insert_region(intersected_reg).err().unwrap()
+            ),
+            format!("InvalidAddressRange({:?}, {:?})", 0x400, 0x200)
+        );
+    }
+
+    #[test]
+    fn test_address_space_walk_regions() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpace::from_regions(regions, layout);
+
+        fn access_all_hotplug_flag(
+            region: &Arc<AddressSpaceRegion>,
+        ) -> Result<(), AddressSpaceError> {
+            region.is_hotplug();
+            Ok(())
+        }
+
+        assert!(matches!(
+            address_space.walk_regions(access_all_hotplug_flag).unwrap(),
+            ()
+        ));
+    }
+
+    #[test]
+    fn test_address_space_layout() {
+        let reg = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x1000,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpace::from_regions(regions, layout.clone());
+
+        assert_eq!(layout, address_space.layout());
+    }
+
+    #[test]
+    fn test_address_space_last_addr() {
+        let reg1 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x100),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let reg2 = Arc::new(AddressSpaceRegion::build(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x200,
+            None,
+            None,
+            0,
+            0,
+            false,
+        ));
+        let regions = vec![reg1, reg2];
+        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
+        let address_space = AddressSpace::from_regions(regions, layout);
+
+        assert_eq!(address_space.last_addr(), GuestAddress(0x500 - 1));
+    }
+
+    #[test]
+    fn test_address_space_is_dax_region() {
         let page_size = 4096;
         let address_space_region = vec![
             Arc::new(AddressSpaceRegion::new(
@@ -272,199 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_address_space_base() {
-        let mut file = TempFile::new().unwrap().into_file();
-        let sample_buf = &[1, 2, 3, 4, 5];
-        assert!(file.write_all(sample_buf).is_ok());
-        file.set_len(0x10000).unwrap();
-
-        let reg = Arc::new(
-            AddressSpaceRegion::create_device_region(GuestAddress(GUEST_DEVICE_START), 0x1000)
-                .unwrap(),
-        );
-        let regions = vec![reg];
-        let layout = AddressSpaceLayout::new(GUEST_PHYS_END, GUEST_MEM_START, GUEST_MEM_END);
-        let address_space = AddressSpaceBase::from_regions(regions, layout.clone());
-        assert_eq!(address_space.layout(), layout);
-    }
-
-    #[test]
-    #[should_panic(expected = "Invalid region")]
-    fn test_create_address_space_base_when_region_invalid() {
-        let reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x1000,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg];
-        let layout = AddressSpaceLayout::new(0x2000, 0x200, 0x1800);
-        let _address_space = AddressSpaceBase::from_regions(regions, layout);
-    }
-
-    #[test]
-    #[should_panic(expected = "address space regions intersect with each other")]
-    fn test_create_address_space_base_when_region_intersected() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x200),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1, reg2];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let _address_space = AddressSpaceBase::from_regions(regions, layout);
-    }
-
-    #[test]
-    fn test_insert_region() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1];
-        let layout = AddressSpaceLayout::new(0x2000, 0x100, 0x1800);
-        let mut address_space = AddressSpaceBase::from_regions(regions, layout);
-
-        // Normal case.
-        address_space.insert_region(reg2).unwrap();
-        assert!(!address_space.regions[1].intersect_with(&address_space.regions[0]));
-
-        // Error invalid address range case when region invaled.
-        let invalid_reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x0),
-            0x100,
-            None,
-            None,
-            0,
-            false,
-        ));
-        assert_eq!(
-            format!(
-                "{:?}",
-                address_space.insert_region(invalid_reg).err().unwrap()
-            ),
-            format!("InvalidAddressRange({:?}, {:?})", 0x0, 0x100)
-        );
-
-        // Error Error invalid address range case when region to be inserted will intersect
-        // exsisting regions.
-        let intersected_reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x400),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        assert_eq!(
-            format!(
-                "{:?}",
-                address_space.insert_region(intersected_reg).err().unwrap()
-            ),
-            format!("InvalidAddressRange({:?}, {:?})", 0x400, 0x200)
-        );
-    }
-
-    #[test]
-    fn test_walk_regions() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1, reg2];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpaceBase::from_regions(regions, layout);
-
-        // The argument of walk_regions is a function which takes a &Arc<AddressSpaceRegion>
-        // and returns result. This function will be applied to all regions.
-        fn do_not_have_hotplug(region: &Arc<AddressSpaceRegion>) -> Result<(), AddressSpaceError> {
-            if region.is_hotplug() {
-                Err(AddressSpaceError::InvalidRegionType) // The Error type is dictated to AddressSpaceError.
-            } else {
-                Ok(())
-            }
-        }
-        assert!(matches!(
-            address_space.walk_regions(do_not_have_hotplug).unwrap(),
-            ()
-        ));
-    }
-
-    #[test]
-    fn test_last_addr() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1, reg2];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpaceBase::from_regions(regions, layout);
-
-        assert_eq!(address_space.last_addr(), GuestAddress(0x500 - 1));
-    }
-
-    #[test]
-    fn test_numa_node_id() {
+    fn test_address_space_prot_flags() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
@@ -472,191 +768,41 @@ mod tests {
             Some(0),
             None,
             0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x300,
-            None,
-            None,
             0,
             false,
         ));
+        let reg2 = Arc::new(AddressSpaceRegion::new(
+            AddressSpaceRegionType::DefaultMemory,
+            GuestAddress(0x300),
+            0x300,
+        ));
         let regions = vec![reg1, reg2];
         let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpaceBase::from_regions(regions, layout);
+        let address_space = AddressSpace::from_regions(regions, layout);
 
-        // Normal case.
-        assert_eq!(address_space.numa_node_id(0x200).unwrap(), 0);
-        // Inquire region with None as its numa node id.
-        assert_eq!(address_space.numa_node_id(0x400), None);
+        // Normal case, reg1.
+        assert_eq!(address_space.prot_flags(GuestAddress(0x200)).unwrap(), 0);
+        // Normal case, reg2.
+        assert_eq!(
+            address_space.prot_flags(GuestAddress(0x500)).unwrap(),
+            libc::PROT_READ | libc::PROT_WRITE
+        );
         // Inquire gpa where no region is set.
-        assert_eq!(address_space.numa_node_id(0x600), None);
-    }
-
-    #[test]
-    fn test_convert_into_vm_as() {
-        // ! Further and detailed test is needed here.
-        let gmm = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0x0), 0x400)]).unwrap();
-        let _vm = AddressSpace::convert_into_vm_as(gmm);
-    }
-
-    #[test]
-    fn test_insert_region_on_address_space() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1];
-        let layout = AddressSpaceLayout::new(0x2000, 0x100, 0x1800);
-        let mut address_space = AddressSpace::from_regions(regions, layout);
-
-        // Normal case.
-        assert!(matches!(address_space.insert_region(reg2).unwrap(), ()));
-
-        // Error invalid address range case when region invaled.
-        let invalid_reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x0),
-            0x100,
-            None,
-            None,
-            0,
-            false,
-        ));
-        assert_eq!(
-            format!(
-                "{:?}",
-                address_space.insert_region(invalid_reg).err().unwrap()
-            ),
-            format!("InvalidAddressRange({:?}, {:?})", 0x0, 0x100)
-        );
-
-        // Error Error invalid address range case when region to be inserted will intersect
-        // exsisting regions.
-        let intersected_reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x400),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        assert_eq!(
-            format!(
-                "{:?}",
-                address_space.insert_region(intersected_reg).err().unwrap()
-            ),
-            format!("InvalidAddressRange({:?}, {:?})", 0x400, 0x200)
-        );
-    }
-
-    #[test]
-    fn test_walk_regions_on_address_space() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1, reg2];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpace::from_regions(regions, layout);
-
-        fn access_all_hotplug_flag(
-            region: &Arc<AddressSpaceRegion>,
-        ) -> Result<(), AddressSpaceError> {
-            region.is_hotplug();
-            Ok(())
-        }
-
         assert!(matches!(
-            address_space.walk_regions(access_all_hotplug_flag).unwrap(),
-            ()
+            address_space.prot_flags(GuestAddress(0x600)),
+            Err(AddressSpaceError::InvalidRegionType)
         ));
     }
 
     #[test]
-    fn test_layout_on_address_space() {
-        let reg = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x1000,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpace::from_regions(regions, layout.clone());
-
-        assert_eq!(layout, address_space.layout());
-    }
-
-    #[test]
-    fn test_last_addr_on_address_space() {
-        let reg1 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x100),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let reg2 = Arc::new(AddressSpaceRegion::build(
-            AddressSpaceRegionType::DefaultMemory,
-            GuestAddress(0x300),
-            0x200,
-            None,
-            None,
-            0,
-            false,
-        ));
-        let regions = vec![reg1, reg2];
-        let layout = AddressSpaceLayout::new(0x2000, 0x0, 0x1800);
-        let address_space = AddressSpace::from_regions(regions, layout);
-
-        assert_eq!(address_space.last_addr(), GuestAddress(0x500 - 1));
-    }
-
-    #[test]
-    fn test_numa_node_id_address_space() {
+    fn test_address_space_numa_node_id() {
         let reg1 = Arc::new(AddressSpaceRegion::build(
             AddressSpaceRegionType::DefaultMemory,
             GuestAddress(0x100),
             0x200,
             Some(0),
             None,
+            0,
             0,
             false,
         ));
@@ -666,6 +812,7 @@ mod tests {
             0x300,
             None,
             None,
+            0,
             0,
             false,
         ));
