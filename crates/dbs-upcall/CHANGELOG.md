@@ -11,3 +11,9 @@
 ### Updated
 
 - update dbs-virtio-devices to v0.2.0
+
+## v0.3.0
+
+### Updated
+
+- update dbs-virtio-devices to v0.3.0

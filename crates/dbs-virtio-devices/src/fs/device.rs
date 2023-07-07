@@ -26,7 +26,7 @@ use kvm_ioctls::VmFd;
 use log::{debug, error, info, trace, warn};
 use nix::sys::memfd;
 use nydus_api::ConfigV2;
-use nydus_blobfs::{BlobFs, Config as BlobfsConfig};
+use nydus_rafs::blobfs::{BlobFs, Config as BlobfsConfig};
 use nydus_rafs::{fs::Rafs, RafsIoRead};
 use rlimit::Resource;
 use virtio_bindings::bindings::virtio_blk::VIRTIO_F_VERSION_1;

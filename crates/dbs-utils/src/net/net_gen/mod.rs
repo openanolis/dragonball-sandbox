@@ -6,9 +6,9 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![allow(unaligned_references)]
 #![allow(missing_docs)]
 #![allow(deref_nullptr)]
+#![allow(ambiguous_glob_reexports)]
 
 // generated with bindgen /usr/include/linux/if.h --no-unstable-rust
 // --constified-enum '*' --with-derive-default -- -D __UAPI_DEF_IF_IFNAMSIZ -D

@@ -20,3 +20,17 @@
 - Update kvm-bindings to v0.6.0
 - Update virtio-queue to v0.6.0
 - Update Nydus API to adjust to the latest Nydus version
+
+## v0.3.0
+
+### Added
+
+- Add virtio-mem device
+- Add virtio-balloon device
+
+## v0.3.1
+
+### Fixed
+
+- Fixed #284, fix balloon pfn using u32
+- Fixed #285, add Madvise error type

@@ -27,3 +27,10 @@
 ### Updated
 
 - update vmm-sys-utils to v0.11.0
+
+## v0.3.0
+
+### Added
+
+- add prot_flags to AddressSpaceRegion
+- add USABLE_END to get host memory size

@@ -5,11 +5,15 @@
 
 use vm_fdt::Error as VmFdtError;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryError};
+
 /// Magic addresses externally used to lay out aarch64 VMs.
 pub mod layout;
 
 /// FDT is used to inform the guest kernel of device tree information.
 pub mod fdt;
+
+/// Helper structs for constructing  fdt.
+pub mod fdt_utils;
 
 /// Default (smallest) memory page size for the supported architectures.
 pub const PAGE_SIZE: usize = 4096;
@@ -61,5 +65,39 @@ pub fn initrd_load_addr<M: GuestMemory>(guest_mem: &M, initrd_size: u64) -> supe
             }
         }
         None => Err(Error::InitrdAddress),
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use dbs_arch::{DeviceInfoForFDT, Error as ArchError};
+
+    const LEN: u64 = 4096;
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct MMIODeviceInfo {
+        addr: u64,
+        irq: u32,
+    }
+
+    impl MMIODeviceInfo {
+        pub fn new(addr: u64, irq: u32) -> Self {
+            MMIODeviceInfo { addr, irq }
+        }
+    }
+
+    impl DeviceInfoForFDT for MMIODeviceInfo {
+        fn addr(&self) -> u64 {
+            self.addr
+        }
+        fn irq(&self) -> std::result::Result<u32, ArchError> {
+            Ok(self.irq)
+        }
+        fn length(&self) -> u64 {
+            LEN
+        }
+        fn get_device_id(&self) -> Option<u32> {
+            None
+        }
     }
 }

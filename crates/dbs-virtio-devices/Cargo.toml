@@ -1,6 +1,6 @@
 [package]
 name = "dbs-virtio-devices"
-version = "0.2.0"
+version = "0.3.1"
 authors = ["Alibaba Dragonball Team"]
 license = "Apache-2.0 AND BSD-3-Clause"
 edition = "2018"
@@ -16,17 +16,17 @@ caps = "0.5.3"
 dbs-device = { version = "0.2.0", path = "../dbs-device" }
 dbs-interrupt = { version = "0.2.0", path = "../dbs-interrupt", features = ["kvm-legacy-irq", "kvm-msi-irq"] }
 dbs-utils = { version = "0.2.0", path = "../dbs-utils" }
-epoll = "4.0.1"
+epoll = ">=4.3.1, <4.3.2"
 io-uring = "0.5.2"
 fuse-backend-rs = { version = "0.10.0", optional = true }
 kvm-bindings = "0.6.0"
 kvm-ioctls = "0.12.0"
 libc = "0.2.119"
 log = "0.4.14"
-nix = "0.23.1"
-nydus-api = "0.2.0"
-nydus-blobfs = "0.2.0"
-nydus-rafs = "0.2.0"
+nix = "0.24.3"
+nydus-api = "0.3.0"
+nydus-rafs = "0.3.1"
+nydus-storage = "0.6.3"
 rlimit = "0.7.0"
 serde = "1.0.27"
 serde_json = "1.0.9"
@@ -45,5 +45,7 @@ virtio-mmio = []
 virtio-vsock = ["virtio-mmio"]
 virtio-net = ["virtio-mmio"]
 virtio-blk = ["virtio-mmio"]
-virtio-fs = ["virtio-mmio", "fuse-backend-rs/virtiofs", "nydus-rafs/virtio-fs", "nydus-blobfs/virtiofs"]
-virtio-fs-pro = ["virtio-fs", "nydus-blobfs/backend-registry", "nydus-blobfs/backend-oss", "nydus-rafs/backend-registry", "nydus-rafs/backend-oss"]
+virtio-fs = ["virtio-mmio", "fuse-backend-rs/virtiofs", "nydus-rafs/virtio-fs"]
+virtio-fs-pro = ["virtio-fs", "nydus-storage/backend-registry", "nydus-storage/backend-oss"]
+virtio-mem = ["virtio-mmio"]
+virtio-balloon = ["virtio-mmio"]
