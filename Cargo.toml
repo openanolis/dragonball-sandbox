@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "crates/dbs-acpi",
     "crates/dbs-address-space",
     "crates/dbs-allocator",
     "crates/dbs-arch",
