@@ -4,7 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
-#![allow(missing_docs)]
 
 use std::os::unix::io::RawFd;
 
