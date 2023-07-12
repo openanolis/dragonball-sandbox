@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 dbs-device = { version = "0.2.0", path = "../dbs-device" }
 dbs-utils = { version = "0.2.0", path = "../dbs-utils" }
+libc = "0.2.39"
 log = "0.4.14"
 serde = { version = "1.0.27", features = ["derive", "rc"] }
 vm-superio = "0.5.0"
