@@ -38,8 +38,8 @@ use vm_memory::{
 
 use crate::device::{VirtioDevice, VirtioDeviceConfig, VirtioDeviceInfo};
 use crate::{
-    ActivateError, ActivateResult, DbsGuestAddressSpace, Error, Result, VirtioSharedMemoryList,
-    TYPE_MEM,
+    ActivateError, ActivateResult, ConfigResult, DbsGuestAddressSpace, Error, Result,
+    VirtioSharedMemoryList, TYPE_MEM,
 };
 
 /// Use 4 MiB alignment because current kernel use it as the subblock_size.
@@ -1072,7 +1072,7 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) -> ConfigResult {
         trace!(
             target: MEM_DRIVER_NAME,
             "{}: {}: VirtioDevice::read_config(0x{:x}, {:?})",
@@ -1100,13 +1100,15 @@ where
             // This write can't fail, offset and end are checked against config_len.
             let _ = data.write(&config_space[offset as usize..end]).unwrap();
         }
+        Ok(())
     }
 
-    fn write_config(&mut self, _offset: u64, _data: &[u8]) {
+    fn write_config(&mut self, _offset: u64, _data: &[u8]) -> ConfigResult {
         debug!(
             target: MEM_DRIVER_NAME,
             "{}: {}: device configuration is read-only", MEM_DRIVER_NAME, self.id
         );
+        Ok(())
     }
 
     fn activate(&mut self, config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
@@ -1740,15 +1742,18 @@ pub(crate) mod tests {
         let mut data: [u8; 8] = [1; 8];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut dev, 0, &mut data,
-        );
+        )
+        .unwrap();
         let config: [u8; 8] = [0; 8];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
-        );
+        )
+        .unwrap();
         let mut data2: [u8; 8] = [1; 8];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut dev, 0, &mut data2,
-        );
+        )
+        .unwrap();
         assert_eq!(data, data2);
     }
 

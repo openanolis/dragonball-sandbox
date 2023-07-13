@@ -306,7 +306,9 @@ where
         // Use mutex for state to protect device.write_config()
         let mut state = self.state();
         if self.check_driver_status(DEVICE_DRIVER, DEVICE_FAILED) {
-            state.get_inner_device_mut().read_config(offset, data);
+            if let Err(e) = state.get_inner_device_mut().read_config(offset, data) {
+                warn!("device read config err: {}", e);
+            }
         } else {
             info!("can not read from device config data area before driver is ready");
         }
@@ -316,7 +318,9 @@ where
         // Use mutex for state to protect device.write_config()
         let mut state = self.state();
         if self.check_driver_status(DEVICE_DRIVER, DEVICE_FAILED) {
-            state.get_inner_device_mut().write_config(offset, data);
+            if let Err(e) = state.get_inner_device_mut().write_config(offset, data) {
+                warn!("device write config err: {}", e);
+            }
         } else {
             info!("can not write to device config data area before driver is ready");
         }
@@ -501,8 +505,9 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::{
-        ActivateResult, Error, VirtioDeviceConfig, VirtioDeviceInfo, VirtioSharedMemory,
-        VirtioSharedMemoryList, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_FEATURES_OK,
+        ActivateResult, ConfigResult, Error, VirtioDeviceConfig, VirtioDeviceInfo,
+        VirtioSharedMemory, VirtioSharedMemoryList, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
+        DEVICE_FEATURES_OK,
     };
 
     pub struct MmioDevice {
@@ -546,12 +551,12 @@ pub(crate) mod tests {
             self.state.lock().unwrap().set_acked_features(page, value);
         }
 
-        fn read_config(&mut self, offset: u64, data: &mut [u8]) {
-            self.state.lock().unwrap().read_config(offset, data);
+        fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
+            self.state.lock().unwrap().read_config(offset, data)
         }
 
-        fn write_config(&mut self, offset: u64, data: &[u8]) {
-            self.state.lock().unwrap().write_config(offset, data);
+        fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
+            self.state.lock().unwrap().write_config(offset, data)
         }
 
         fn activate(&mut self, config: VirtioDeviceConfig<Arc<GuestMemoryMmap>>) -> ActivateResult {

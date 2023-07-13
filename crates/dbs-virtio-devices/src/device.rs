@@ -31,7 +31,7 @@ use vm_memory::{
 };
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-use crate::{ActivateError, ActivateResult, Error, Result};
+use crate::{ActivateError, ActivateResult, ConfigError, ConfigResult, Error, Result};
 
 /// Virtio queue configuration information.
 ///
@@ -362,10 +362,10 @@ pub trait VirtioDevice<AS: GuestAddressSpace, Q: QueueT, R: GuestMemoryRegion>: 
     fn set_acked_features(&mut self, page: u32, value: u32);
 
     /// Reads this device configuration space at `offset`.
-    fn read_config(&mut self, offset: u64, data: &mut [u8]);
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult;
 
     /// Writes to this device configuration space at `offset`.
-    fn write_config(&mut self, offset: u64, data: &[u8]);
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult;
 
     /// Activates this device for real usage.
     fn activate(&mut self, config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult;
@@ -485,40 +485,54 @@ impl VirtioDeviceInfo {
     /// Reads device specific configuration data of virtio backend device.
     ///
     /// The `offset` is based of 0x100 from the MMIO configuration address space.
-    pub fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+    pub fn read_config(&self, offset: u64, mut data: &mut [u8]) -> ConfigResult {
         let config_len = self.config_space.len() as u64;
         if offset >= config_len {
             error!(
                 "{}: config space read request out of range, offset {}",
                 self.driver_name, offset
             );
-            return;
+            return Err(ConfigError::InvalidOffset(offset));
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
             data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
+        Ok(())
     }
 
     /// Writes device specific configuration data of virtio backend device.
     ///
     /// The `offset` is based of 0x100 from the MMIO configuration address space.
-    pub fn write_config(&mut self, offset: u64, data: &[u8]) {
+    pub fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         let data_len = data.len() as u64;
         let config_len = self.config_space.len() as u64;
-        if offset >= config_len
-            || offset.checked_add(data_len).is_none()
-            || offset + data_len > config_len
-        {
+        if offset >= config_len {
             error!(
                 "{}: config space write request out of range, offset {}",
                 self.driver_name, offset
             );
-            return;
+            return Err(ConfigError::InvalidOffset(offset));
         }
+        if offset.checked_add(data_len).is_none() {
+            error!(
+                "{}: config space write request out of range, offset {}, data length {}",
+                self.driver_name, offset, data_len
+            );
+            return Err(ConfigError::PlusOverflow(offset, data_len));
+        }
+        if offset + data_len > config_len {
+            error!(
+                "{}: config space write request out of range, offset {}, data length {}",
+                self.driver_name, offset, data_len
+            );
+            return Err(ConfigError::InvalidOffsetPlusDataLen(offset + data_len));
+        }
+
         let dst = &mut self.config_space[offset as usize..(offset + data_len) as usize];
         dst.copy_from_slice(data);
+        Ok(())
     }
 
     /// Validate size of queues and queue eventfds.
@@ -553,9 +567,6 @@ impl VirtioDeviceInfo {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
-    use crate::{VIRTIO_INTR_CONFIG, VIRTIO_INTR_VRING};
-
     use dbs_interrupt::{
         InterruptManager, InterruptSourceType, InterruptStatusRegister32, LegacyNotifier,
     };
@@ -563,6 +574,9 @@ pub(crate) mod tests {
     use kvm_ioctls::Kvm;
     use virtio_queue::QueueSync;
     use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, MmapRegion};
+
+    use super::*;
+    use crate::{VIRTIO_INTR_CONFIG, VIRTIO_INTR_VRING};
 
     pub fn create_virtio_device_config() -> VirtioDeviceConfig<Arc<GuestMemoryMmap>> {
         let (vmfd, irq_manager) = crate::tests::create_vm_and_irq_manager();
@@ -713,10 +727,10 @@ pub(crate) mod tests {
             self.device_info.set_acked_features(page, value)
         }
 
-        fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+        fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
             self.device_info.read_config(offset, data)
         }
-        fn write_config(&mut self, offset: u64, data: &[u8]) {
+        fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
             self.device_info.write_config(offset, data)
         }
         fn activate(
@@ -789,24 +803,33 @@ pub(crate) mod tests {
 
         // test config space invalid read
         let mut data = vec![0u8; 16];
-        device.read_config(16, data.as_mut_slice());
+        assert_eq!(
+            device.read_config(16, data.as_mut_slice()).unwrap_err(),
+            ConfigError::InvalidOffset(16)
+        );
         assert_eq!(data, vec![0; 16]);
         // test read config
-        device.read_config(4, &mut data[..14]);
+        device.read_config(4, &mut data[..14]).unwrap();
         assert_eq!(data, vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]);
-        device.read_config(0, data.as_mut_slice());
+        device.read_config(0, data.as_mut_slice()).unwrap();
         assert_eq!(data, vec![1; 16]);
 
         // test config space invalid write
         let write_data = vec![0xffu8; 16];
         let mut read_data = vec![0x0; 16];
-        device.write_config(4, &write_data[..13]);
-        device.write_config(16, &write_data[..4]);
-        device.read_config(0, read_data.as_mut_slice());
+        assert_eq!(
+            device.write_config(4, &write_data[..13]).unwrap_err(),
+            ConfigError::InvalidOffsetPlusDataLen(17)
+        );
+        assert_eq!(
+            device.write_config(16, &write_data[..4]).unwrap_err(),
+            ConfigError::InvalidOffset(16)
+        );
+        device.read_config(0, read_data.as_mut_slice()).unwrap();
         assert_eq!(read_data, vec![0x1; 16]);
 
         // test config space write
-        device.write_config(4, &write_data[6..10]);
+        device.write_config(4, &write_data[6..10]).unwrap();
         assert_eq!(
             device.device_info.config_space,
             vec![1, 1, 1, 1, 0xff, 0xff, 0xff, 0xff, 1, 1, 1, 1, 1, 1, 1, 1]

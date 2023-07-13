@@ -25,7 +25,7 @@ use super::epoll_handler::VsockEpollHandler;
 use super::muxer::{Error as MuxerError, VsockGenericMuxer, VsockMuxer};
 use super::{Result, VsockError};
 use crate::device::{VirtioDeviceConfig, VirtioDeviceInfo};
-use crate::{ActivateResult, DbsGuestAddressSpace, VirtioDevice};
+use crate::{ActivateResult, ConfigResult, DbsGuestAddressSpace, VirtioDevice};
 
 const VSOCK_DRIVER_NAME: &str = "virtio-vsock";
 const VSOCK_CONFIG_SPACE_SIZE: usize = 8;
@@ -138,13 +138,13 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
         trace!(target: "virtio-vsock", "{}: VirtioDevice::read_config(0x{:x}, {:?})",
             self.id(), offset, data);
         self.device_info.read_config(offset, data)
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         trace!(target: "virtio-vsock", "{}: VirtioDevice::write_config(0x{:x}, {:?})",
         self.id(), offset, data);
         self.device_info.write_config(offset, data)
@@ -305,13 +305,15 @@ mod tests {
             &mut ctx.device,
             0,
             &mut data[..4],
-        );
+        )
+        .unwrap();
         test_bytes(&data[..], &(ctx.cid & 0xffff_ffff).to_le_bytes());
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut ctx.device,
             4,
             &mut data[4..],
-        );
+        )
+        .unwrap();
         test_bytes(&data[4..], &((ctx.cid >> 32) & 0xffff_ffff).to_le_bytes());
 
         // Test reading 64-bit.
@@ -320,7 +322,8 @@ mod tests {
             &mut ctx.device,
             0,
             &mut data,
-        );
+        )
+        .unwrap();
         test_bytes(&data, &ctx.cid.to_le_bytes());
 
         // Check out-of-bounds reading.
@@ -329,7 +332,8 @@ mod tests {
             &mut ctx.device,
             2,
             &mut data,
-        );
+        )
+        .unwrap();
         assert_eq!(data, [0u8, 0, 0, 0, 0, 0, 6, 7]);
 
         // Just covering lines here, since the vsock device has no writable config.
@@ -338,7 +342,8 @@ mod tests {
             &mut ctx.device,
             0,
             &data[..4],
-        );
+        )
+        .unwrap();
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let queues = vec![
