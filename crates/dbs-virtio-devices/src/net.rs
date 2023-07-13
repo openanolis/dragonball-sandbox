@@ -74,6 +74,8 @@ pub enum NetError {
 /// Metrics specific to the net device.
 #[derive(Default, Serialize)]
 pub struct NetDeviceMetrics {
+    /// Number of times when handling events on a network device.
+    pub event_count: SharedIncMetric,
     /// Number of times when activate failed on a network device.
     pub activate_fails: SharedIncMetric,
     /// Number of times when interacting with the space config of a network device failed.
@@ -165,7 +167,7 @@ pub(crate) struct NetEpollHandler<
     id: String,
     patch_rate_limiter_fd: EventFd,
     receiver: Option<mpsc::Receiver<(BucketUpdate, BucketUpdate, BucketUpdate, BucketUpdate)>>,
-    pub metrics: Arc<NetDeviceMetrics>,
+    metrics: Arc<NetDeviceMetrics>,
 }
 
 impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> NetEpollHandler<AS, Q, R> {
@@ -470,6 +472,7 @@ impl<AS: DbsGuestAddressSpace, Q: QueueT + Send, R: GuestMemoryRegion> MutEventS
     fn process(&mut self, events: Events, _ops: &mut EventOps) {
         let guard = self.config.lock_guest_memory();
         let mem = guard.deref();
+        self.metrics.event_count.inc();
         match events.data() {
             RX_QUEUE_EVENT => {
                 self.metrics.rx_queue_event_count.inc();
@@ -730,6 +733,10 @@ impl<AS: GuestAddressSpace> Net<AS> {
             rx_rate_limiter,
             tx_rate_limiter,
         )
+    }
+
+    pub fn metrics(&self) -> Arc<NetDeviceMetrics> {
+        self.metrics.clone()
     }
 }
 
