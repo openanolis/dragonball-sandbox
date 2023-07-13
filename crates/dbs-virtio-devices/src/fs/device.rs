@@ -37,7 +37,7 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    ActivateError, ActivateResult, Error, Result, VirtioDevice, VirtioDeviceConfig,
+    ActivateError, ActivateResult, ConfigResult, Error, Result, VirtioDevice, VirtioDeviceConfig,
     VirtioDeviceInfo, VirtioRegionHandler, VirtioSharedMemory, VirtioSharedMemoryList,
     TYPE_VIRTIO_FS,
 };
@@ -785,7 +785,7 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
         trace!(
             target: VIRTIO_FS_NAME,
             "{}: VirtioDevice::read_config(0x{:x}, {:?})",
@@ -796,7 +796,7 @@ where
         self.device_info.read_config(offset, data)
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         trace!(
             target: VIRTIO_FS_NAME,
             "{}: VirtioDevice::write_config(0x{:x}, {:?})",
@@ -1173,11 +1173,13 @@ pub mod tests {
             &mut fs,
             0,
             &mut config,
-        );
+        )
+        .unwrap();
         let config: [u8; 16] = [0; 16];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut fs, 0, &config,
-        );
+        )
+        .unwrap();
     }
 
     #[test]

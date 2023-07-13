@@ -39,7 +39,9 @@ use vm_memory::{
 };
 
 use crate::device::{VirtioDevice, VirtioDeviceConfig, VirtioDeviceInfo, VirtioQueueConfig};
-use crate::{ActivateResult, DbsGuestAddressSpace, Error, Result, TYPE_BALLOON};
+use crate::{
+    ActivateResult, ConfigError, ConfigResult, DbsGuestAddressSpace, Error, Result, TYPE_BALLOON,
+};
 
 const BALLOON_DRIVER_NAME: &str = "virtio-balloon";
 
@@ -602,7 +604,7 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) -> ConfigResult {
         trace!(
             target: BALLOON_DRIVER_NAME,
             "{}: VirtioDevice::read_config(0x{:x}, {:?})",
@@ -618,29 +620,31 @@ where
                 "{}: config space read request out of range, offset {}",
                 BALLOON_DRIVER_NAME, offset
             );
-            return;
+            return Err(ConfigError::InvalidOffset(offset));
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
             data.write_all(&config_space[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
+        Ok(())
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         let config = &mut self.config.lock().unwrap();
         let config_slice = config.as_mut_slice();
         let Ok(start) = usize::try_from(offset) else {
             error!("Failed to write config space");
-            return;
+            return Err(ConfigError::InvalidOffset(offset));
         };
         let Some(dst) = start.checked_add(data.len())
             .and_then(|end| config_slice.get_mut(start..end)) else
         {
             error!("Failed to write config space");
-            return;
+            return Err(ConfigError::InvalidOffsetPlusDataLen(offset + data.len() as u64));
         };
         dst.copy_from_slice(data);
+        Ok(())
     }
 
     fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
@@ -794,11 +798,13 @@ pub(crate) mod tests {
         let config: [u8; 8] = [0; 8];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
-        );
+        )
+        .unwrap();
         let mut data: [u8; 8] = [1; 8];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
             &mut dev, 0, &mut data,
-        );
+        )
+        .unwrap();
         assert_eq!(config, data);
     }
 

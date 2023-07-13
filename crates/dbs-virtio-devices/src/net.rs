@@ -31,7 +31,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::device::{VirtioDeviceConfig, VirtioDeviceInfo};
 use crate::{
-    ActivateError, ActivateResult, DbsGuestAddressSpace, Error, Result, VirtioDevice,
+    ActivateError, ActivateResult, ConfigResult, DbsGuestAddressSpace, Error, Result, VirtioDevice,
     VirtioQueueConfig, TYPE_NET,
 };
 
@@ -794,16 +794,22 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
         trace!(target: "virtio-net", "{}: VirtioDevice::read_config(0x{:x}, {:?})",
                self.id, offset, data);
-        self.device_info.read_config(offset, data)
+        self.device_info.read_config(offset, data).map_err(|e| {
+            self.metrics.cfg_fails.inc();
+            e
+        })
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         trace!(target: "virtio-net", "{}: VirtioDevice::write_config(0x{:x}, {:?})",
                self.id, offset, data);
-        self.device_info.write_config(offset, data)
+        self.device_info.write_config(offset, data).map_err(|e| {
+            self.metrics.cfg_fails.inc();
+            e
+        })
     }
 
     fn activate(&mut self, mut config: VirtioDeviceConfig<AS, Q, R>) -> ActivateResult {
@@ -897,6 +903,7 @@ mod tests {
 
     use super::*;
     use crate::tests::{VirtQueue, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use crate::ConfigError;
 
     static NEXT_IP: AtomicUsize = AtomicUsize::new(1);
 
@@ -986,15 +993,24 @@ mod tests {
             VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::get_avail_features(&dev, 2),
             0
         );
+        // device config length is 0 because guest_mac is None
         let mut config: [u8; 1] = [0];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
-            &mut dev,
-            0,
-            &mut config,
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::read_config(
+                &mut dev,
+                0,
+                &mut config,
+            )
+            .unwrap_err(),
+            ConfigError::InvalidOffset(0)
         );
         let config: [u8; 16] = [0; 16];
-        VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
-            &mut dev, 0, &config,
+        assert_eq!(
+            VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
+                &mut dev, 0, &config,
+            )
+            .unwrap_err(),
+            ConfigError::InvalidOffset(0)
         );
     }
 

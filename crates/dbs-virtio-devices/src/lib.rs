@@ -120,8 +120,21 @@ pub enum ActivateError {
     IOError(#[from] IOError),
 }
 
+/// Error code for VirtioDevice::read_config()/write_config().
+#[derive(Debug, thiserror::Error, Eq, PartialEq)]
+pub enum ConfigError {
+    #[error("Invalid offset: {0}.")]
+    InvalidOffset(u64),
+    #[error("Offset({0}) plus data length ({0}) overflow.")]
+    PlusOverflow(u64, u64),
+    #[error("Invalid offset plus data length: {0}.")]
+    InvalidOffsetPlusDataLen(u64),
+}
+
 /// Specialized std::result::Result for VirtioDevice::activate().
 pub type ActivateResult = std::result::Result<(), ActivateError>;
+/// Specialized std::result::Result for VirtioDevice::read_config()/write_config().
+pub type ConfigResult = std::result::Result<(), ConfigError>;
 
 /// Error for virtio devices to handle requests from guests.
 #[derive(Debug, thiserror::Error)]

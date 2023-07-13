@@ -25,7 +25,7 @@ use vm_memory::GuestMemoryRegion;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::{
-    ActivateError, ActivateResult, DbsGuestAddressSpace, Error, Result, VirtioDevice,
+    ActivateError, ActivateResult, ConfigResult, DbsGuestAddressSpace, Error, Result, VirtioDevice,
     VirtioDeviceConfig, VirtioDeviceInfo, TYPE_BLOCK,
 };
 
@@ -220,11 +220,11 @@ where
         self.device_info.set_acked_features(page, value)
     }
 
-    fn read_config(&mut self, offset: u64, data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, data: &mut [u8]) -> ConfigResult {
         self.device_info.read_config(offset, data)
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
+    fn write_config(&mut self, offset: u64, data: &[u8]) -> ConfigResult {
         self.device_info.write_config(offset, data)
     }
 
@@ -898,11 +898,13 @@ mod tests {
             &mut dev,
             0,
             &mut config,
-        );
+        )
+        .unwrap();
         let config: [u8; 16] = [0; 16];
         VirtioDevice::<Arc<GuestMemoryMmap<()>>, QueueSync, GuestRegionMmap>::write_config(
             &mut dev, 0, &config,
-        );
+        )
+        .unwrap();
     }
 
     #[test]
