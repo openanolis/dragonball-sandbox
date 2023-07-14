@@ -204,7 +204,7 @@ impl KvmIrqRouting {
         irq_routings.resize_with(elem_cnt, Default::default);
 
         // Prepare the irq_routing header.
-        let mut irq_routing = &mut irq_routings[0];
+        let irq_routing = &mut irq_routings[0];
         irq_routing.nr = routes.len() as u32;
         irq_routing.flags = 0;
 
