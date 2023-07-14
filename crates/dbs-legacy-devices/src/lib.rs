@@ -13,6 +13,8 @@ pub use self::serial::*;
 #[cfg(target_arch = "x86_64")]
 mod cmos;
 #[cfg(target_arch = "x86_64")]
+pub use self::cmos::*;
+#[cfg(target_arch = "x86_64")]
 mod i8042;
 #[cfg(target_arch = "x86_64")]
 pub use self::i8042::*;
