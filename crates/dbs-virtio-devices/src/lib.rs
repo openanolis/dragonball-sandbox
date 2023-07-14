@@ -209,6 +209,7 @@ pub enum Error {
 /// Specialized std::result::Result for Virtio device operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[allow(unused_macros)]
 macro_rules! warn_or_panic {
     ($($arg:tt)*) => {
         if cfg!(test) {
@@ -218,6 +219,7 @@ macro_rules! warn_or_panic {
         }
     }
 }
+#[allow(unused_imports)]
 pub(crate) use warn_or_panic;
 
 #[cfg(test)]
