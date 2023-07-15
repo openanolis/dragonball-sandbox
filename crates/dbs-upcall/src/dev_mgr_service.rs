@@ -135,7 +135,7 @@ impl DevMgrRequest {
     pub fn build(&self) -> Box<[u8; DEV_MGR_MSG_SIZE]> {
         let buffer = Box::new([0; DEV_MGR_MSG_SIZE]);
         let size_hdr = mem::size_of::<DevMgrMsgHeader>();
-        let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+        let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
 
         msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
         msg_hdr.msg_flags = 0;
@@ -396,7 +396,7 @@ mod tests {
         // test cpu response
         {
             let buffer = [0; DEV_MGR_MSG_SIZE];
-            let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+            let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
 
             msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
 
@@ -407,7 +407,7 @@ mod tests {
             let result = unsafe { &mut *(buffer[size_hdr..].as_ptr() as *mut i32) };
             *result = 0;
 
-            let mut vcpu_result = unsafe {
+            let vcpu_result = unsafe {
                 &mut *(buffer[(size_hdr + mem::size_of::<u32>())..].as_ptr() as *mut CpuDevResponse)
             };
 
@@ -435,7 +435,7 @@ mod tests {
         // test add mmio response
         {
             let buffer = [0; DEV_MGR_MSG_SIZE];
-            let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+            let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
 
             msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
 
@@ -457,7 +457,7 @@ mod tests {
         // test result error
         {
             let buffer = [0; DEV_MGR_MSG_SIZE];
-            let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+            let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
 
             msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
 
@@ -479,7 +479,7 @@ mod tests {
         // test invalid unknown msg flag
         {
             let buffer = [0; DEV_MGR_MSG_SIZE];
-            let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+            let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
 
             msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
 
@@ -551,7 +551,7 @@ mod tests {
         let dev_mgr_service = DevMgrService {};
 
         let buffer = [0; DEV_MGR_MSG_SIZE];
-        let mut msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
+        let msg_hdr = unsafe { &mut *(buffer.as_ptr() as *mut DevMgrMsgHeader) };
         msg_hdr.magic_version = DEV_MGR_MAGIC_VERSION;
         msg_hdr.msg_type = DevMgrMsgType::AddMmio as u32;
         msg_hdr.msg_size = 0;

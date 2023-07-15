@@ -191,7 +191,7 @@ mod test {
         // Check that if index == 0 the entry is processed
         let vm_spec =
             VmSpec::new(0, 1, 1, 1, 1, VpmuFeatureLevel::Disabled).expect("Error creating vm_spec");
-        let mut entry = &mut CpuIdEntry {
+        let entry = &mut CpuIdEntry {
             function: cpu_leaf::leaf_0x7::LEAF_NUM,
             index: 0,
             flags: 0,
