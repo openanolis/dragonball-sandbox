@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_tcp_backend_vsock_stream() {
-        let tcp_sock_addr = String::from("127.0.0.2:9003");
+        let tcp_sock_addr = String::from("127.0.0.2:9005");
         let _vsock_backend = VsockTcpBackend::new(tcp_sock_addr.clone()).unwrap();
         let vsock_stream = TcpStream::connect(&tcp_sock_addr).unwrap();
 
